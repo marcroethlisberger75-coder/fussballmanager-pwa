@@ -1,0 +1,19 @@
+{
+  "name": "Fussball Manager 26/27",
+  "short_name": "Fussball Manager",
+  "description": "Amiga-Bundesliga-Manager-Stil: von der Oberliga bis zur Bundesliga",
+  "id": "/",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "background_color": "#0b1f14",
+  "theme_color": "#0b1f14",
+  "orientation": "any",
+  "lang": "de-DE",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
