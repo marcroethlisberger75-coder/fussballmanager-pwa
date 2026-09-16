@@ -2170,6 +2170,17 @@ function generiereU19Spieler(teamName, baseRating, season) {
 
 const U19_KADERGROESSE = 18;
 
+// Maximal erlaubte Beförderungen U19 → erste Mannschaft pro Saison: Basis 1, +1 bei Akademie-Level ≥3,
+// +1 bei einem U19-Trainer mit Stärke ≥60 — macht maximal 3 pro Saison möglich. Verhindert, dass der
+// komplette U19-Kader auf einen Schlag hochgezogen wird, belohnt aber echte Investition in Akademie
+// und Mitarbeiterstab mit spürbar mehr Flexibilität.
+function berechneMaxJugendbefoerderungen(akademieLevel, jugendtrainerRating) {
+  let max = 1;
+  if ((akademieLevel || 0) >= 3) max += 1;
+  if ((jugendtrainerRating || 0) >= 60) max += 1;
+  return max;
+}
+
 // Läuft automatisch bei jedem eigenen Spieltag mit — simuliert für ALLE DREI Stufen die jeweils
 // nächste Begegnung, rein stärkebasiert (siehe simulateMatch). Das eigene Team wird dabei nicht mit
 // einer festen, gespeicherten Zahl geführt, sondern JEDE Woche frisch aus dem aktuellen jugendKader
@@ -4092,8 +4103,8 @@ function berechnePressekonferenzEffekte(antworten) {
 // naechsterSpieltag) und lässt nur Fragen zu, deren Bedingung gerade wirklich zutrifft — sonst könnte
 // z.B. nach Verletzungen gefragt werden, obwohl noch gar keine passiert sind. Fragen ohne besondere
 // Bedingung (bedingung: () => true) sind immer im Topf, als verlässliche Grundmenge.
-function waehlePressekonferenzFragen(rng, kontext) {
-  const fragenPool = PRESSEKONFERENZ_FRAGEN.filter(f => !f.bedingung || f.bedingung(kontext));
+function waehlePressekonferenzFragen(rng, kontext, bereitsGestelltIds = []) {
+  const fragenPool = PRESSEKONFERENZ_FRAGEN.filter(f => (!f.bedingung || f.bedingung(kontext)) && !bereitsGestelltIds.includes(f.id));
   const journalistenPool = [...JOURNALISTEN_POOL];
   const gewaehlt = [];
   for (let i = 0; i < 2 && fragenPool.length; i++) {
@@ -10060,6 +10071,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Der Kader besteht durchgehend aus echten, dauerhaften Spielern zwischen 17 und 18 Jahren — 18-Jährige wachsen jede Saison automatisch heraus (werden entweder befördert oder verlassen den Verein), neue 17-Jährige rücken nach.",
       "Spiele laufen automatisch im Hintergrund mit (ein Spieltag pro eigenem Spieltag) — kein zusätzliches Klicken nötig. Die eigene Stärke wird dabei jede Woche frisch aus dem aktuellen U19-Kader berechnet.",
       "Frisch gesichtete Eigengewächse aus der Jugendakademie (Sichtung im Jugend-Tab) landen jetzt im U19-Kader statt direkt in der ersten Mannschaft — von dort aus lässt sich jeder Spieler jederzeit (nicht nur am Saisonende) über \"Hochziehen\" in die erste Mannschaft befördern.",
+      "Maximal 1-3 Beförderungen pro Saison: Basis 1, +1 ab Akademie-Level 3, +1 bei einem U19-Trainer mit Stärke 60 oder mehr — der Zähler wird bei jedem Saisonübergang wieder auf 0 zurückgesetzt.",
       "Abwerbungen und internationale Scouting-Kandidaten (schon etwas ältere, etablierte Talente) bleiben weiterhin direkte Verpflichtungen für die erste Mannschaft.",
       "U19-Spieler entwickeln sich jede Woche mit deutlich höherer Grundchance als im Erwachsenenkader (17-18 ist die prägendste Entwicklungsphase) — die neue Mitarbeiterrolle \"U19-Trainer\" beschleunigt das zusätzlich, unabhängig vom Akademieleiter (der eher für die Qualität der Neuzugänge sorgt statt für die Entwicklung bereits vorhandener Spieler).",
       "Am Saisonende erscheint eine eigene Vereinsinfos-Meldung, ob das U19-Team auf-, abgestiegen oder in seiner Stufe geblieben ist, inkl. Tabellenplatz.",
@@ -10160,6 +10172,7 @@ const SPIELREGELN_KATEGORIEN = [
     punkte: [
       "Erscheint gelegentlich nach einem Spieltag, höchstens 4 Mal pro Saison: 2 Fragen, je 4 Antwortmöglichkeiten.",
       "Die Fragen passen zum tatsächlichen Spielgeschehen (z.B. Verletzungsfragen nur bei echten Verletzungen).",
+      "Jede Frage kommt pro Saison höchstens einmal vor — bereits gestellte Fragen fallen für den Rest der Saison aus dem möglichen Pool, unabhängig davon, wie sie beantwortet wurden.",
       "Antworten wirken sich auf Fan-Unterstützung, Kaderform, Trainerzufriedenheit und Markenwert aus — auch auf mehrere Bereiche gleichzeitig."
     ]
   },
@@ -11138,7 +11151,7 @@ function ZuschauerChart({ historie, kapazitaet }) {
   );
 }
 
-function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen }) {
+function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen }) {
   const [betrag, setBetrag] = useState(0);
   const level = akademie?.level || 0;
   const umbau = akademie?.umbau || null;
@@ -11339,12 +11352,20 @@ function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, o
           <div className="text-[10px] text-emerald-600 mb-3">
             Läuft automatisch im Hintergrund mit, ein Spieltag pro eigenem Spieltag. Auf-/Abstieg zwischen den drei Stufen am Saisonende.
           </div>
-          <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U19-Kader ({(jugendKader || []).length})</div>
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-[11px] uppercase tracking-wider text-sky-400/80">U19-Kader ({(jugendKader || []).length})</div>
+            <div className="text-[10px] text-emerald-500">Beförderungen diese Saison: {jugendbefoerderungenDieseSaison}/{maxJugendbefoerderungen}</div>
+          </div>
           <div className="space-y-1 max-h-64 overflow-y-auto">
             {(jugendKader || []).slice().sort((a, b) => b.rating - a.rating).map(p => (
               <div key={p.id} className="flex items-center justify-between text-xs border border-emerald-900 rounded px-2 py-1.5">
                 <span className="text-emerald-100">{p.name} <span className="text-emerald-600">· {p.posName} · {p.alter}J · Stärke {p.rating}</span></span>
-                <button onClick={() => onJugendspielerHochziehen(p.id)} className="text-[10px] border border-amber-400/50 text-amber-300 rounded px-2 py-1 shrink-0">
+                <button
+                  disabled={jugendbefoerderungenDieseSaison >= maxJugendbefoerderungen}
+                  onClick={() => onJugendspielerHochziehen(p.id)}
+                  className="text-[10px] border border-amber-400/50 text-amber-300 rounded px-2 py-1 shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+                  title={jugendbefoerderungenDieseSaison >= maxJugendbefoerderungen ? "Kontingent diese Saison ausgeschöpft — höheres Akademie-Level oder ein starker U19-Trainer erhöhen es" : ""}
+                >
                   Hochziehen
                 </button>
               </div>
@@ -12799,7 +12820,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnenGebucht = [], karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, marketingBudgetProMonat = 0, naechsteMarketingZahlung = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnenGebucht = [], karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, marketingBudgetProMonat = 0, naechsteMarketingZahlung = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0 } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -14219,9 +14240,14 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             };
           })()
         };
-        neuePressekonferenz = { fragen: waehlePressekonferenzFragen(rng, pkKontext), aktuellerIndex: 0, antworten: [] };
+        neuePressekonferenz = { fragen: waehlePressekonferenzFragen(rng, pkKontext, pressefragenGestelltDieseSaison), aktuellerIndex: 0, antworten: [] };
       }
     }
+    // Jede neu gestellte Frage-ID merken, damit sie diese Saison nicht nochmals vorkommt (siehe
+    // waehlePressekonferenzFragen) — unabhängig davon, wie sie beantwortet wurde.
+    const neuePressefragenGestellt = neuePressekonferenz
+      ? [...(pressefragenGestelltDieseSaison || []), ...neuePressekonferenz.fragen.map(f => f.id)]
+      : pressefragenGestelltDieseSaison;
 
     // DFB-Pokal: fester Rundenplan nach Bundesliga-Spieltagen — die Ansetzung erscheint sofort im Spielplan,
     // ausgetragen wird sie dann als eigener, dedizierter Pokal-Spieltag (siehe oben). Finale fällt auf BL-Spieltag 34.
@@ -14914,6 +14940,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzterPokalBericht: null,
       letzteElfDesTages: neueElfDesTages || letzteElfDesTages,
       pressekonferenz: neuePressekonferenz || pressekonferenz,
+      pressefragenGestelltDieseSaison: neuePressefragenGestellt,
       letzteVertragsablaeufe: vertragsablaeufeNachErstemSpieltag,
       pressekonferenzenDieseSaison: pressekonferenzenDieseSaison + (neuePressekonferenz ? 1 : 0),
       letztesEreignis: neuesLetztesEreignis,
@@ -15554,6 +15581,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzteAusbildungsentschaedigung: ausbildungsentschaedigungen.length ? { zahlungen: ausbildungsentschaedigungen, gesamt: ausbildungsentschaedigungGesamt } : null,
       vermieterAusbauAngekuendigt: vermieterErgebnisNachAufstieg?.ankuendigung || null,
       pressekonferenzenDieseSaison: 0,
+      pressefragenGestelltDieseSaison: [],
+      jugendbefoerderungenDieseSaison: 0,
       letzterJahresbericht: jahresbericht,
       karriereAufstiege: karriereAufstiege + (managerAufgestiegen ? 1 : 0),
       karriereAbstiege: karriereAbstiege + (managerAbgestiegen ? 1 : 0),
@@ -16528,6 +16557,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     setCareerState(cs => {
       const spieler = (cs.jugendKader || []).find(p => p.id === spielerId);
       if (!spieler) return cs;
+      const maxErlaubt = berechneMaxJugendbefoerderungen(cs.akademie?.level, cs.stab?.jugendtrainer?.rating);
+      if ((cs.jugendbefoerderungenDieseSaison || 0) >= maxErlaubt) return cs; // Kontingent diese Saison bereits ausgeschöpft
       const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
       const { u19, ...basisSpieler } = spieler;
       div.squads[profile.team] = [...div.squads[profile.team], { ...basisSpieler, vertragBisSaison: cs.season + 2, gehalt: berechneSpielerlohn(basisSpieler, managerDivId), beimVereinSeitSaison: cs.season }];
@@ -16535,6 +16566,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         ...cs,
         divisions: { ...cs.divisions, [managerDivId]: div },
         jugendKader: (cs.jugendKader || []).filter(p => p.id !== spielerId),
+        jugendbefoerderungenDieseSaison: (cs.jugendbefoerderungenDieseSaison || 0) + 1,
         // Für die Pressekonferenz-Kreuzverbindung (siehe pkKontext.spielerAusU19Befoerdert) — wird beim
         // nächsten Spieltag wieder zurückgesetzt, damit die Frage nicht wochenlang aktuell bleibt.
         letzteJugendbeforderung: { name: basisSpieler.name, posName: basisSpieler.posName, alter: basisSpieler.alter, rating: basisSpieler.rating }
@@ -17876,6 +17908,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               jugendDivId={jugendDivId}
               jugendKader={jugendKader}
               onJugendspielerHochziehen={onJugendspielerHochziehen}
+              jugendbefoerderungenDieseSaison={jugendbefoerderungenDieseSaison}
+              maxJugendbefoerderungen={berechneMaxJugendbefoerderungen(akademie?.level, stab?.jugendtrainer?.rating)}
             />
           )}
           {tab === "transfermarkt" && (
