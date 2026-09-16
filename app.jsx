@@ -2096,6 +2096,173 @@ function verjuengeSquad(squad, baseRating, teamName, season, rng, divisionId) {
   return neuesSquad;
 }
 
+/* =========================================================================
+   U19-JUGENDLIGA — echte, eigenständige dreistufige Liga für den eigenen
+   Nachwuchs (17-18 Jahre), mit echtem Auf-/Abstieg und einem waschechten,
+   dauerhaften eigenen Kader. Nur der eigene Kader ist "echt" (echte
+   Spielerobjekte) — die Gegner-Teams (auch KI-Vereine mit eigenem
+   Auf-/Abstieg) sind rein stärkebasiert, ohne echte Kader, ähnlich wie das
+   Restfeld beim Europapokal. Spiele laufen automatisch im Hintergrund mit,
+   ohne dass der Manager sie einzeln bestätigen muss.
+   ========================================================================= */
+
+const JUGENDLIGA_DEFS = [
+  { id: "U19T1", name: "U19-Bundesliga", anzahlTeams: 16, aufsteiger: 0, absteiger: 3, baseRating: 62 },
+  { id: "U19T2", name: "U19-Regionalliga", anzahlTeams: 16, aufsteiger: 3, absteiger: 3, baseRating: 52 },
+  { id: "U19T3", name: "U19-Landesliga", anzahlTeams: 16, aufsteiger: 3, absteiger: 0, baseRating: 42 }
+];
+
+// Für die Gegner-Teams: derselbe grosse Namenspool wie die Erwachsenenligen (ein Verein hat ja
+// dieselbe U19 wie seine erste Mannschaft) — vermeidet einen komplett neuen Namensvorrat.
+function alleVereinsNamenPool() {
+  const namen = new Set();
+  LIGA_DEFS.forEach(liga => liga.teams.forEach(t => namen.add(t)));
+  return [...namen];
+}
+
+// Erzeugt die komplette, frische U19-Liga zu Karrierestart — der eigene Verein startet immer in der
+// tiefsten Stufe (U19T3), die anderen Plätze werden mit echten Vereinsnamen aus dem grossen Pool
+// gefüllt (dieselben Namen können in mehreren Stufen vorkommen, das ist unproblematisch, da es rein
+// abstrakte Gegner-Einträge ohne echten Bezug zur ersten Mannschaft dieses Namens sind).
+function initialeJugendliga(managerTeam, rng) {
+  const pool = alleVereinsNamenPool().sort(() => rng() - 0.5);
+  let poolIndex = 0;
+  const naechsterName = (ausschluss) => {
+    while (pool[poolIndex % pool.length] === ausschluss) poolIndex++;
+    return pool[poolIndex++ % pool.length];
+  };
+  const liga = {};
+  JUGENDLIGA_DEFS.forEach(def => {
+    const teams = [];
+    for (let i = 0; i < def.anzahlTeams; i++) {
+      if (def.id === "U19T3" && i === 0) { teams.push(managerTeam); continue; }
+      teams.push(naechsterName(managerTeam));
+    }
+    const table = {};
+    teams.forEach(t => { table[t] = { sp: 0, s: 0, u: 0, n: 0, tore: 0, gegentore: 0, pkt: 0 }; });
+    const staerken = {};
+    teams.forEach(t => { staerken[t] = t === managerTeam ? null : Math.round(def.baseRating + (rng() * 16 - 8)); });
+    liga[def.id] = { teams, table, staerken, fixtures: generateFixtures(teams), matchday: 0 };
+  });
+  return liga;
+}
+
+// U19-Spieler: strikt 17 oder 18 Jahre (Voraussetzung des Managers) — 18-Jährige entstehen nur durch
+// natürliches Altern aus dem Kader heraus (siehe alterJugendKader), niemals frisch generiert.
+function generiereU19Spieler(teamName, baseRating, season) {
+  const rating = Math.max(22, Math.min(80, Math.round(baseRating + (Math.random() * 14 - 7))));
+  const pos = POSITIONEN[Math.floor(Math.random() * POSITIONEN.length)];
+  const vorname = VORNAMEN[Math.floor(Math.random() * VORNAMEN.length)];
+  const nachname = NACHNAMEN[Math.floor(Math.random() * NACHNAMEN.length)];
+  const neueId = `${teamName}-u19-${season}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  return {
+    id: neueId, name: `${vorname} ${nachname}`, pos: pos.code, posName: pos.name,
+    alter: 17, nr: 20 + Math.floor(Math.random() * 10), rating,
+    nationalitaet: NATIONALITAETEN_POOL[Math.floor(Math.random() * NATIONALITAETEN_POOL.length)],
+    persoenlichkeit: zufallsPersoenlichkeit(),
+    zufriedenheit: 70, junior: true, u19: true,
+    attribute: berechneSpielerAttribute({ id: neueId, pos: pos.code, rating }),
+    attributeSaisonStart: berechneSpielerAttribute({ id: neueId, pos: pos.code, rating }),
+    tore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0, form: 60, verletzung: null
+  };
+}
+
+const U19_KADERGROESSE = 18;
+
+// Läuft automatisch bei jedem eigenen Spieltag mit — simuliert für ALLE DREI Stufen die jeweils
+// nächste Begegnung, rein stärkebasiert (siehe simulateMatch). Das eigene Team wird dabei nicht mit
+// einer festen, gespeicherten Zahl geführt, sondern JEDE Woche frisch aus dem aktuellen jugendKader
+// berechnet, damit sich Entwicklung/Zu-/Abgänge sofort niederschlagen.
+function simuliereJugendligaSpieltag(jugendliga, jugendDivId, jugendKader, managerTeam) {
+  const eigeneStaerke = jugendKader.length ? jugendKader.reduce((s, p) => s + p.rating, 0) / jugendKader.length : 40;
+  const neueLiga = {};
+  Object.entries(jugendliga).forEach(([divId, div]) => {
+    if (div.matchday >= div.fixtures.length) { neueLiga[divId] = div; return; }
+    const staerkeVon = (team) => (divId === jugendDivId && team === managerTeam) ? eigeneStaerke : div.staerken[team];
+    const runde = div.fixtures[div.matchday];
+    let tabelle = div.table;
+    runde.forEach(([heim, gast]) => {
+      const ergebnis = simulateMatch(staerkeVon(heim), staerkeVon(gast));
+      tabelle = aktualisiereGruppentabelle(tabelle, heim, gast, ergebnis.heim, ergebnis.gast);
+    });
+    neueLiga[divId] = { ...div, table: tabelle, matchday: div.matchday + 1 };
+  });
+  return neueLiga;
+}
+
+
+
+function initialerU19Kader(teamName, baseRating) {
+  const kader = [];
+  for (let i = 0; i < U19_KADERGROESSE; i++) kader.push(generiereU19Spieler(teamName, baseRating));
+  return kader;
+}
+
+// Läuft bei jedem Saisonübergang: 18-Jährige wachsen aus dem Kader heraus (sie waren ein Jahr lang
+// beförderbar — wer nicht hochgezogen wurde, verlässt den Verein endgültig, realistisch für einen
+// U19-Jahrgang), alle Verbleibenden werden ein Jahr älter, und der Kader wird mit frischen 17-Jährigen
+// wieder auf Zielgrösse aufgefüllt.
+function alterJugendKader(kader, teamName, baseRating, season) {
+  const verbleibend = kader.filter(p => p.alter < 18).map(p => ({ ...p, alter: p.alter + 1 }));
+  const fehlende = U19_KADERGROESSE - verbleibend.length;
+  for (let i = 0; i < fehlende; i++) verbleibend.push(generiereU19Spieler(teamName, baseRating, season));
+  return verbleibend;
+}
+
+// Saisonende der U19-Liga: echter Auf-/Abstieg zwischen den drei Stufen (siehe JUGENDLIGA_DEFS für die
+// Anzahl Plätze), danach neue Spielpläne für alle drei Stufen. Das eigene Team wandert automatisch mit,
+// falls es auf- oder absteigt — jugendDivIdNeu zeigt an, wo es jetzt spielt.
+function verarbeiteJugendligaSaisonende(jugendliga, jugendDivId, managerTeam) {
+  const ordnung = ["U19T1", "U19T2", "U19T3"];
+  const ergebnisse = {};
+  ordnung.forEach(divId => {
+    const def = JUGENDLIGA_DEFS.find(d => d.id === divId);
+    const div = jugendliga[divId];
+    const mitNamen = Object.entries(div.table)
+      .map(([name, z]) => ({ name, ...z, diff: z.tore - z.gegentore }))
+      .sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore);
+    ergebnisse[divId] = {
+      aufsteiger: def.aufsteiger > 0 ? mitNamen.slice(0, def.aufsteiger).map(t => t.name) : [],
+      absteiger: def.absteiger > 0 ? mitNamen.slice(-def.absteiger).map(t => t.name) : [],
+      staerken: div.staerken
+    };
+  });
+
+  const neueTeams = { U19T1: [...jugendliga.U19T1.teams], U19T2: [...jugendliga.U19T2.teams], U19T3: [...jugendliga.U19T3.teams] };
+  const neueStaerken = { U19T1: { ...jugendliga.U19T1.staerken }, U19T2: { ...jugendliga.U19T2.staerken }, U19T3: { ...jugendliga.U19T3.staerken } };
+  // U19T1 <- Aufsteiger aus U19T2 (U19T1 hat keine eigenen Absteiger nach oben, nur Platz für die Aufsteiger)
+  neueTeams.U19T1 = neueTeams.U19T1.filter(t => !ergebnisse.U19T1.absteiger.includes(t)).concat(ergebnisse.U19T2.aufsteiger);
+  neueTeams.U19T2 = neueTeams.U19T2.filter(t => !ergebnisse.U19T2.absteiger.includes(t) && !ergebnisse.U19T2.aufsteiger.includes(t))
+    .concat(ergebnisse.U19T1.absteiger, ergebnisse.U19T3.aufsteiger);
+  neueTeams.U19T3 = neueTeams.U19T3.filter(t => !ergebnisse.U19T3.aufsteiger.includes(t)).concat(ergebnisse.U19T2.absteiger);
+
+  let jugendDivIdNeu = jugendDivId;
+  if (ergebnisse[jugendDivId]?.aufsteiger.includes(managerTeam)) {
+    jugendDivIdNeu = jugendDivId === "U19T3" ? "U19T2" : jugendDivId === "U19T2" ? "U19T1" : "U19T1";
+  } else if (ergebnisse[jugendDivId]?.absteiger.includes(managerTeam)) {
+    jugendDivIdNeu = jugendDivId === "U19T1" ? "U19T2" : jugendDivId === "U19T2" ? "U19T3" : "U19T3";
+  }
+
+  const neueLiga = {};
+  ordnung.forEach(divId => {
+    const teams = neueTeams[divId];
+    const table = {};
+    teams.forEach(t => { table[t] = { sp: 0, s: 0, u: 0, n: 0, tore: 0, gegentore: 0, pkt: 0 }; });
+    const def = JUGENDLIGA_DEFS.find(d => d.id === divId);
+    const staerken = {};
+    teams.forEach(t => {
+      if (t === managerTeam) { staerken[t] = null; return; }
+      const vorherigeStaerke = neueStaerken.U19T1[t] ?? neueStaerken.U19T2[t] ?? neueStaerken.U19T3[t];
+      staerken[t] = vorherigeStaerke ?? Math.round(def.baseRating + (Math.random() * 16 - 8));
+    });
+    neueLiga[divId] = { teams, table, staerken, fixtures: generateFixtures(teams), matchday: 0 };
+  });
+
+  return { jugendliga: neueLiga, jugendDivId: jugendDivIdNeu, aufgestiegen: ergebnisse[jugendDivId]?.aufsteiger.includes(managerTeam) || false, abgestiegen: ergebnisse[jugendDivId]?.absteiger.includes(managerTeam) || false };
+}
+
+
+// Verteilt 2-3 Aufrückzeitpunkte zufällig, aber gleichmässig über die Saison
 // (ein Zeitpunkt pro Saisondrittel/-hälfte, damit sie nicht alle auf einmal kommen).
 function planeJuniorTermine(gesamtSpieltage, akademieLevel = 0) {
   // Realistisch kalibriert: laut Studien schaffen nur rund 3% eines NLZ-Jahrgangs überhaupt den
@@ -5086,10 +5253,40 @@ function generiereQualifikationsGegner(wettbewerb) {
   return { name: gewaehlt.name, staerke };
 }
 
-function simuliereQualifikationsspiel(kader, gegnerStaerke, heim, formation) {
-  const { staerke: eigeneStaerke } = waehleStartelf(kader, formation);
+// Vollständige Länderspiel-Simulation mit echten Einzelspieler-Ereignissen — genau wie ein Vereinsspiel:
+// Torschützen, Vorlagen, Karten, Einwechslungen und Spieler des Spiels. Gilt gleichermassen für
+// Qualifikationsspiele (siehe unten) UND Endrundenspiele (siehe onTurnierspielAustragen).
+function simuliereLaenderspielKomplett(kader, gegnerStaerke, heim, formation) {
+  const { elf: startelf, bank, staerke: eigeneStaerke } = waehleStartelf(kader, formation);
   const ergebnis = heim ? simulateMatch(eigeneStaerke, gegnerStaerke) : simulateMatch(gegnerStaerke, eigeneStaerke);
-  return heim ? { tHeim: ergebnis.heim, tGast: ergebnis.gast } : { tHeim: ergebnis.heim, tGast: ergebnis.gast };
+  const tHeim = heim ? ergebnis.heim : ergebnis.gast;
+  const tGast = heim ? ergebnis.gast : ergebnis.heim;
+  const eigeneTore = heim ? tHeim : tGast;
+  const gegnerTore = heim ? tGast : tHeim;
+  const ereignisse = simuliereEreignisse(startelf, eigeneTore);
+  const einwechslungen = waehleEinwechslungen(bank);
+  const motm = bestimmeSpielerDesSpieltages({ tore: ereignisse.torSpieler, vorlagen: ereignisse.vorlagenSpieler }, startelf, gegnerTore);
+  return { tHeim, tGast, ereignisse, einwechslungen, motm, startelf };
+}
+
+function simuliereQualifikationsspiel(kader, gegnerStaerke, heim, formation) {
+  return simuliereLaenderspielKomplett(kader, gegnerStaerke, heim, formation);
+}
+
+// K.o.-Runde: wie simuliereLaenderspielKomplett, aber bei Unentschieden entscheidet ein
+// Elfmeterschiessen (siehe simuliereNationalmannschaftsSpiel für die bisherige, jetzt hier integrierte
+// Elfmeter-Formel) — inkl. echter Einzelspieler-Ereignisse für die reguläre Spielzeit.
+function simuliereLaenderspielKoRunde(kader, gegner, formation) {
+  const basis = simuliereLaenderspielKomplett(kader, gegner.staerke, true, formation);
+  let gewonnen = basis.tHeim > basis.tGast;
+  let elfmeter = null;
+  if (basis.tHeim === basis.tGast) {
+    const eigeneStaerke = basis.startelf.reduce((s, p) => s + p.rating, 0) / basis.startelf.length;
+    const eigeneChance = 0.5 + (eigeneStaerke - gegner.staerke) / 200;
+    gewonnen = Math.random() < Math.max(0.25, Math.min(0.75, eigeneChance));
+    elfmeter = gewonnen ? "gewonnen" : "verloren";
+  }
+  return { ...basis, gewonnen, elfmeter };
 }
 
 function vergebeLaenderspielCaps(divisions, kader, formation) {
@@ -5815,13 +6012,16 @@ function analysiereKaderLuecke(squad) {
 
 // Simuliert ein einzelnes Testspiel — der Trainer übernimmt das selbst, kein Manager-Bonus,
 // keine Auswirkung auf Statistiken/Entwicklung. Liefert Ergebnis + Trainer-Einschätzung.
-function simuliereTestspiel(eigenesSquad, gegnerSquad) {
+function simuliereTestspiel(eigenesSquad, gegnerSquad, eigeneFormation = null) {
   const sHeim = teamStrength(eigenesSquad);
   const sGast = teamStrength(gegnerSquad);
   const { heim: tHeim, gast: tGast, heimRot } = simulateMatch(sHeim, sGast);
   // Auch im Testspiel zählen Tore/Vorlagen/Karten fürs eigene Team — bislang wurde hier nur das
-  // Team-Ergebnis simuliert, keine Einzelspielerdaten (analog zur früheren Europapokal-Lücke)
-  const ereignisse = simuliereEreignisse(eigenesSquad, tHeim, null, heimRot);
+  // Team-Ergebnis simuliert, keine Einzelspielerdaten (analog zur früheren Europapokal-Lücke). Nur
+  // Startelf + realistische Einwechslungen kommen infrage (siehe simulateDivisionMatchday), nicht der
+  // ganze Kader — sonst könnte ein gar nicht eingesetzter Spieler eine Karte bekommen.
+  const spielerkreis = eigeneFormation ? (() => { const { elf, bank } = waehleStartelf(eigenesSquad, eigeneFormation); return [...elf, ...waehleEinwechslungen(bank)]; })() : eigenesSquad;
+  const ereignisse = simuliereEreignisse(spielerkreis, tHeim, null, heimRot);
   const neuesSquad = wendeEreignisseUndKartenAn(eigenesSquad, ereignisse);
   return { tHeim, tGast, schwachstelle: analysiereKaderLuecke(eigenesSquad), neuesSquad, ereignisse };
 }
@@ -6093,7 +6293,7 @@ function ermittleSaisonStatistiken(division) {
   };
 }
 
-function simulateDivisionMatchday(division, coachBonuses = {}, managerTeam = null, standardInfoMap = {}) {
+function simulateDivisionMatchday(division, coachBonuses = {}, managerTeam = null, standardInfoMap = {}, managerFormation = null) {
   if (division.matchday >= division.fixtures.length) return { division, managerBericht: null };
   const paarungen = division.fixtures[division.matchday];
   const table = JSON.parse(JSON.stringify(division.table));
@@ -6119,8 +6319,19 @@ function simulateDivisionMatchday(division, coachBonuses = {}, managerTeam = nul
     applyResult(table, heim, gast, tHeim, tGast);
     neueResultate.push({ heim, gast, tHeim, tGast, spieltag: division.matchday + 1 });
 
-    const heimEreignisse = simuliereEreignisse(neueSquads[heim], tHeim, standardInfoMap[heim] || null, heimRot);
-    const gastEreignisse = simuliereEreignisse(neueSquads[gast], tGast, standardInfoMap[gast] || null, gastRot);
+    // Wichtig: simuliereEreignisse wählt Torschützen/Karten aus dem übergebenen Spielerkreis — bei
+    // beiden Teams bisher der GANZE Kader, nicht nur die tatsächlich eingesetzten Spieler. Beim
+    // Manager-Team (wo eine echte Aufstellung existiert) wird das jetzt auf Startelf + realistische
+    // Einwechslungen eingeschränkt, damit kein Spieler eine Karte/ein Tor bekommt, der an diesem
+    // Spieltag gar nicht aufgelaufen ist. Bei KI-Teams bleibt es bei der bisherigen, vereinfachten
+    // Ganzkader-Auswahl (dort existiert keine echte Aufstellung, nur eine Stärke-Zahl).
+    const spielerkreis = (team) => {
+      if (team !== managerTeam || !managerFormation) return neueSquads[team];
+      const { elf, bank } = waehleStartelf(neueSquads[team], managerFormation);
+      return [...elf, ...waehleEinwechslungen(bank)];
+    };
+    const heimEreignisse = simuliereEreignisse(spielerkreis(heim), tHeim, standardInfoMap[heim] || null, heimRot);
+    const gastEreignisse = simuliereEreignisse(spielerkreis(gast), tGast, standardInfoMap[gast] || null, gastRot);
     neueSquads[heim] = wendeEreignisseUndKartenAn(neueSquads[heim], heimEreignisse, true);
     neueSquads[gast] = wendeEreignisseUndKartenAn(neueSquads[gast], gastEreignisse, true);
 
@@ -6288,11 +6499,11 @@ function processSeasonTransition(divisions, season, managerTeam, relegationUeber
 // er nicht selbst der Manager ist (kann bei einer rein theoretischen KI-Formation nicht der Fall sein,
 // aber die Funktion bleibt so unabhängig von der Reihenfolge korrekt).
 function simuliereRelegationsspielEcht(heimSquad, gastSquad, heimFormation, gastFormation) {
-  const { staerke: sHeim } = waehleStartelf(heimSquad, heimFormation);
-  const { staerke: sGast } = waehleStartelf(gastSquad, gastFormation);
+  const { elf: heimElf, bank: heimBank, staerke: sHeim } = waehleStartelf(heimSquad, heimFormation);
+  const { elf: gastElf, bank: gastBank, staerke: sGast } = waehleStartelf(gastSquad, gastFormation);
   const { heim: tHeim, gast: tGast } = simulateMatch(sHeim, sGast);
-  const heimEreignisse = simuliereEreignisse(heimSquad, tHeim);
-  const gastEreignisse = simuliereEreignisse(gastSquad, tGast);
+  const heimEreignisse = simuliereEreignisse([...heimElf, ...waehleEinwechslungen(heimBank)], tHeim);
+  const gastEreignisse = simuliereEreignisse([...gastElf, ...waehleEinwechslungen(gastBank)], tGast);
   return { tHeim, tGast, heimEreignisse, gastEreignisse };
 }
 
@@ -9783,6 +9994,16 @@ const SPIELREGELN_KATEGORIEN = [
     ]
   },
   {
+    icon: Sprout, farbe: "#6ee7b7", titel: "U19-Jugendliga",
+    punkte: [
+      "Eigenes U19-Team in einer echten dreistufigen Liga (U19-Bundesliga, U19-Regionalliga, U19-Landesliga) mit echtem Auf- und Abstieg für ALLE Teams — der eigene Verein startet zu Karrierebeginn immer in der tiefsten Stufe.",
+      "Der Kader besteht durchgehend aus echten, dauerhaften Spielern zwischen 17 und 18 Jahren — 18-Jährige wachsen jede Saison automatisch heraus (werden entweder befördert oder verlassen den Verein), neue 17-Jährige rücken nach.",
+      "Spiele laufen automatisch im Hintergrund mit (ein Spieltag pro eigenem Spieltag) — kein zusätzliches Klicken nötig. Die eigene Stärke wird dabei jede Woche frisch aus dem aktuellen U19-Kader berechnet.",
+      "Frisch gesichtete Eigengewächse aus der Jugendakademie (Sichtung im Jugend-Tab) landen jetzt im U19-Kader statt direkt in der ersten Mannschaft — von dort aus lässt sich jeder Spieler jederzeit (nicht nur am Saisonende) über \"Hochziehen\" in die erste Mannschaft befördern.",
+      "Abwerbungen und internationale Scouting-Kandidaten (schon etwas ältere, etablierte Talente) bleiben weiterhin direkte Verpflichtungen für die erste Mannschaft."
+    ]
+  },
+  {
     icon: Building2, farbe: "#6ee7b7", titel: "Stadion",
     punkte: [
       "Drei Bereiche (Stehplätze, Sitzplätze, Logen), jeweils mit eigener Kapazität und eigenem Ticketpreis.",
@@ -9834,6 +10055,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Höchstens 4 Spieler desselben Vereins gleichzeitig darin, auch bei einem sehr dominanten Sieg.",
       "Am Saisonende gibt es zusätzlich eine ligaweite Auswertung: Torschützenliste, Elf des Jahres, Spieler des Jahres.",
       "Die Torschützenliste/der Torschützenkönig zählen nur echte Liga-Tore — Tore aus Testspielen, Pokal und Europapokal fliessen weiterhin in die persönliche und vereinsinterne Statistik des Spielers ein, aber nicht in die Liga-Wertung.",
+      "Tore, Vorlagen und Karten gehen beim eigenen Team ausschliesslich an tatsächlich eingesetzte Spieler (Startelf + realistische Einwechslungen) — nicht an den ganzen Kader. Das gilt für Liga, Pokal, Europapokal, Testspiele, Relegation und Länderspiele gleichermassen.",
       "Im Spielplan-Tab gibt es einen \"Zusammenfassung\"-Umschalter: Liste aller bisherigen Liga-Spiele dieser Saison mit Resultat, Torschützen, Gelben/Roten Karten, verwendeter Formation, Zuschauerzahl sowie Einnahmen und Ausgaben des jeweiligen Spieltags."
     ]
   },
@@ -9861,9 +10083,12 @@ const SPIELREGELN_KATEGORIEN = [
       "Im neuen Nationalmannschaft-Tab wird der Kader (bis zu 23 Spieler) aus ALLEN deutschen Spielern der Liga gewählt, auch von gegnerischen Vereinen.",
       "Die taktische Formation für alle Länderspiele (Qualifikation und Turnier) ist frei wählbar — die Startelf wird daraus automatisch nach Positionsstärke gebildet, genau wie beim eigenen Verein.",
       "Ein tatsächlich bestrittenes Länderspiel trägt dasselbe Verletzungsrisiko wie ein Vereinsspiel — eine so entstandene Verletzung betrifft den Spieler danach ganz normal auch bei seinem Verein, egal ob es dein eigener Spieler ist oder der eines anderen Klubs.",
-      "Alle zwei Jahre ein Turnier (WM/EM abwechselnd): Qualifikation in einer echten 5er-Gruppe (Deutschland + 4 feste, ausschliesslich europäische Gegner — sowohl bei EM- als auch WM-Qualifikation, da Deutschland als UEFA-Mitglied für beide Turniere nur gegen europäische Nationen qualifiziert), mit Hin- und Rückspiel gegen jeden Gegner (4 Heim-, 4 Auswärtsspiele). Die vier Gegner spielen auch untereinander, echte Tabelle mit Sp/S/U/N/Tore/Diff/Pkt.",
-      "Die ersten beiden Plätze der Gruppe qualifizieren sich fürs Turnier. Pro Länderspielpause werden automatisch 2 Runden aus dem festen Rundenplan gespielt — dadurch immer ein Spiel pro Fenster, keine Pause ohne Partie.",
+      "Alle zwei Jahre ein Turnier (WM/EM abwechselnd, an den echten Kalender angelehnt — z.B. 2028 EM, 2030 WM, 2032 EM, 2034 WM): Qualifikation in einer echten 5er-Gruppe (Deutschland + 4 feste, ausschliesslich europäische Gegner — sowohl bei EM- als auch WM-Qualifikation, da Deutschland als UEFA-Mitglied für beide Turniere nur gegen europäische Nationen qualifiziert), mit Hin- und Rückspiel gegen jeden Gegner (4 Heim-, 4 Auswärtsspiele). Die vier Gegner spielen auch untereinander, echte Tabelle mit Sp/S/U/N/Tore/Diff/Pkt.",
+      "Die ersten beiden Plätze der Gruppe qualifizieren sich fürs Turnier. Die Anzahl Runden pro Länderspielpause passt sich automatisch an die verbleibende Zeit bis zum Turnierjahr an, damit die letzte Runde möglichst genau im letzten Fenster davor gespielt wird — dadurch keine Pause ohne Partie, auch nicht gegen Ende der Qualifikation.",
       "Aussereuropäische Gegner (Brasilien, USA, Japan, ...) gibt es erst beim eigentlichen Turnier selbst (K.o.-Runden vom Achtelfinale bis zum Finale mit Elfmeterschiessen bei Unentschieden) — dort dann je nach Turnier (EM nur Europa, WM weltweit).",
+      "Bei erfolgreicher Qualifikation wird das Turnier jetzt VOR dem Saisonabschluss gespielt — ein Spiel pro Klick, genau wie ein normaler Spieltag, mit vorher bekanntem Gegner pro Runde. Der Saisonabschluss wartet, bis das Turnier entweder gewonnen oder das Team ausgeschieden ist.",
+      "Jedes Länderspiel (Qualifikation UND Endrundenspiele) läuft mit echten Einzelspieler-Ereignissen, genau wie ein Vereinsspiel: Torschützen, Vorlagen, Gelbe/Rote Karten, Einwechslungen und Spieler des Spiels — sichtbar im Nationalmannschaft-Tab, in den Vereinsinfos und in der \"Zusammenfassung\" im Spielplan-Tab. Tore/Karten fliessen auch in die persönliche Karrierestatistik ein, aber nicht in die Liga-Torschützenliste.",
+      "Jedes Länderspiel — Qualifikation UND Endrunde — läuft jetzt mit echten Einzelspieler-Ereignissen wie ein Ligaspiel: Torschützen, Vorlagen, Gelbe/Rote Karten, Einwechslungen und Spieler des Spiels, sichtbar im Nationalmannschaft-Tab und im Live-Turnierbildschirm.",
       "Ein Titelgewinn zählt als persönliche Trophäe in der eigenen Karriere-Historie."
     ]
   },
@@ -10138,10 +10363,14 @@ function VereinsinfosView({ careerState }) {
         )}
 
         {careerState.letztesQualifikationsspiel && (
-          <div className="flex items-center gap-2 border border-sky-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#e9f2f7" }}>
+          <div className="flex items-start gap-2 border border-sky-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#e9f2f7" }}>
             <span className="shrink-0">🇩🇪</span>
             <span className="text-stone-800">
               <span className="font-semibold text-sky-800">Qualifikation:</span> {careerState.letztesQualifikationsspiel.heim} {careerState.letztesQualifikationsspiel.tHeim}:{careerState.letztesQualifikationsspiel.tGast} {careerState.letztesQualifikationsspiel.gast}
+              {careerState.letztesQualifikationsspiel.tore?.length > 0 && <><br /><span className="text-stone-600">⚽ {careerState.letztesQualifikationsspiel.tore.map(t => t.name).join(", ")}</span></>}
+              {careerState.letztesQualifikationsspiel.gelb?.length > 0 && <><br /><span className="text-amber-700">🟨 {careerState.letztesQualifikationsspiel.gelb.map(g => g.name).join(", ")}</span></>}
+              {careerState.letztesQualifikationsspiel.rot && <><br /><span className="text-red-700">🟥 {careerState.letztesQualifikationsspiel.rot.name}</span></>}
+              {careerState.letztesQualifikationsspiel.motm && <><br /><span className="text-sky-700">⭐ Spieler des Spiels: {careerState.letztesQualifikationsspiel.motm.name}</span></>}
             </span>
           </div>
         )}
@@ -10193,6 +10422,40 @@ function VereinsinfosView({ careerState }) {
   );
 }
 
+// Eine Länderspielkarte im selben Stil wie die Vereinsspiel-Zusammenfassung (siehe spielHistorie) —
+// Resultat, Torschützen, Karten, Einwechslungen und Spieler des Spiels, damit sich ein Länderspiel
+// genauso lebendig anfühlt wie ein Ligaspiel.
+function LaenderspielKarte({ s, label, ergebnisFarbe, ergebnisIcon, elfmeter }) {
+  return (
+    <div className="border border-emerald-900 rounded p-2.5" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="flex items-center justify-between text-xs mb-1">
+        <span className="text-emerald-500">{label}</span>
+        {ergebnisIcon && <span className={`font-semibold ${ergebnisFarbe}`}>{ergebnisIcon}</span>}
+      </div>
+      <div className="text-sm text-emerald-100 font-semibold mb-1">
+        {s.heim} {s.tHeim}:{s.tGast} {s.gast}{elfmeter ? ` (i.E. ${elfmeter})` : ""}
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-emerald-400">
+        {s.tore?.length > 0 && (
+          <div className="col-span-2"><span className="text-emerald-600">Tore:</span> {s.tore.map(t => t.name).join(", ")}</div>
+        )}
+        {s.gelb?.length > 0 && (
+          <div><span className="text-amber-500">🟨</span> {s.gelb.map(g => g.name).join(", ")}</div>
+        )}
+        {s.rot && (
+          <div><span className="text-red-500">🟥</span> {s.rot.name}</div>
+        )}
+        {s.einwechslungen?.length > 0 && (
+          <div className="col-span-2"><span className="text-emerald-600">Eingewechselt:</span> {s.einwechslungen.map(e => e.name).join(", ")}</div>
+        )}
+        {s.motm && (
+          <div className="col-span-2"><span className="text-amber-400">⭐ Spieler des Spiels:</span> {s.motm.name}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSetzen, onNationalformationSetzen, managerDivId, season, trophaeen }) {
   const [suchbegriff, setSuchbegriff] = useState("");
   const [positionsFilter, setPositionsFilter] = useState("ALLE");
@@ -10221,7 +10484,7 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
     <div>
       <div className="border border-sky-800/50 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f2a" }}>
         <div className="text-xs uppercase tracking-wider text-sky-400/80 mb-1.5 flex items-center gap-1.5">🇩🇪 Bundestrainer</div>
-        <div className="text-xs text-emerald-300">Im Amt seit Saison {bundestrainerAmt.seit}/{(bundestrainerAmt.seit + 1) % 100} · Nächstes Turnier: Saison {bundestrainerAmt.naechstesTurnierJahr}/{(bundestrainerAmt.naechstesTurnierJahr + 1) % 100} ({bundestrainerAmt.naechstesTurnierJahr % 4 === 0 ? "WM" : "EM"})</div>
+        <div className="text-xs text-emerald-300">Im Amt seit Saison {bundestrainerAmt.seit}/{(bundestrainerAmt.seit + 1) % 100} · Nächstes Turnier: Saison {bundestrainerAmt.naechstesTurnierJahr}/{(bundestrainerAmt.naechstesTurnierJahr + 1) % 100} ({bundestrainerAmt.naechstesTurnierJahr % 4 === 2 ? "WM" : "EM"})</div>
       </div>
 
       <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
@@ -10265,22 +10528,15 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
 
       <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
         <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Spielplan Nationalmannschaft</div>
-        <div className="space-y-1">
+        <div className="space-y-2">
           {qualiVerlauf.map((s, i) => (
-            <div key={`q${i}`} className="flex items-center justify-between text-xs border border-emerald-900 rounded px-3 py-1.5">
-              <span className="text-emerald-500">{formatDatum(s.datum)} · Quali</span>
-              <span className="text-emerald-100">{s.heim} {s.tHeim}:{s.tGast} {s.gast}</span>
-            </div>
+            <LaenderspielKarte key={`q${i}`} s={s} label={`${formatDatum(s.datum)} · Quali`} />
           ))}
           {bundestrainerAmt.letztesTurnier?.spiele?.length > 0 && (
             <>
               <div className="text-[10px] uppercase tracking-wide text-sky-400/80 pt-2">{bundestrainerAmt.letztesTurnier.wettbewerb} {bundestrainerAmt.letztesTurnier.jahr}{bundestrainerAmt.letztesTurnier.sieger ? " — Titelgewinn! 🏆" : ` — ausgeschieden im ${bundestrainerAmt.letztesTurnier.erreichteRunde}`}</div>
               {bundestrainerAmt.letztesTurnier.spiele.map((s, i) => (
-                <div key={`t${i}`} className="flex items-center justify-between text-xs border border-sky-900 rounded px-3 py-1.5">
-                  <span className="text-sky-500">{s.runde}</span>
-                  <span className="text-emerald-100">Deutschland {s.tHeim}:{s.tGast} {s.gegner}{s.elfmeter ? ` (i.E. ${s.elfmeter})` : ""}</span>
-                  <span className={`font-semibold ${s.gewonnen ? "text-emerald-400" : "text-red-400"}`}>{s.gewonnen ? "✓" : "✗"}</span>
-                </div>
+                <LaenderspielKarte key={`t${i}`} s={{ ...s, heim: "Deutschland", gast: s.gegner }} label={s.runde} ergebnisFarbe={s.gewonnen ? "text-emerald-400" : "text-red-400"} ergebnisIcon={s.gewonnen ? "✓" : "✗"} elfmeter={s.elfmeter} />
               ))}
             </>
           )}
@@ -10805,7 +11061,7 @@ function ZuschauerChart({ historie, kapazitaet }) {
   );
 }
 
-function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert }) {
+function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen }) {
   const [betrag, setBetrag] = useState(0);
   const level = akademie?.level || 0;
   const umbau = akademie?.umbau || null;
@@ -10972,6 +11228,53 @@ function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, o
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Absolventen insgesamt</div>
         </div>
       </div>
+
+      {jugendliga && (
+        <div className="border border-sky-800/50 rounded p-4 mt-4" style={{ backgroundColor: "#0b1f2a" }}>
+          <div className="text-xs uppercase tracking-wider text-sky-400/80 mb-2">
+            U19-Team — {JUGENDLIGA_DEFS.find(d => d.id === jugendDivId)?.name}
+          </div>
+          <table className="w-full text-[11px] mb-3">
+            <thead>
+              <tr className="text-emerald-600 border-b border-emerald-900">
+                <th className="text-left font-normal pb-1">#</th>
+                <th className="text-left font-normal pb-1">Team</th>
+                <th className="text-center font-normal pb-1">Sp</th>
+                <th className="text-center font-normal pb-1">Diff</th>
+                <th className="text-center font-normal pb-1">Pkt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(jugendliga[jugendDivId].table)
+                .map(([name, z]) => ({ name, ...z, diff: z.tore - z.gegentore }))
+                .sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore)
+                .map((t, i) => (
+                  <tr key={t.name} className={t.name === teamName ? "text-amber-300 font-semibold" : "text-emerald-200"}>
+                    <td className="py-0.5">{i + 1}.</td>
+                    <td className="py-0.5">{t.name}</td>
+                    <td className="text-center">{t.sp}</td>
+                    <td className="text-center">{t.diff > 0 ? "+" : ""}{t.diff}</td>
+                    <td className="text-center font-semibold">{t.pkt}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          <div className="text-[10px] text-emerald-600 mb-3">
+            Läuft automatisch im Hintergrund mit, ein Spieltag pro eigenem Spieltag. Auf-/Abstieg zwischen den drei Stufen am Saisonende.
+          </div>
+          <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U19-Kader ({(jugendKader || []).length})</div>
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {(jugendKader || []).slice().sort((a, b) => b.rating - a.rating).map(p => (
+              <div key={p.id} className="flex items-center justify-between text-xs border border-emerald-900 rounded px-2 py-1.5">
+                <span className="text-emerald-100">{p.name} <span className="text-emerald-600">· {p.posName} · {p.alter}J · Stärke {p.rating}</span></span>
+                <button onClick={() => onJugendspielerHochziehen(p.id)} className="text-[10px] border border-amber-400/50 text-amber-300 rounded px-2 py-1 shrink-0">
+                  Hochziehen
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -12419,7 +12722,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnenGebucht = [], karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, marketingBudgetProMonat = 0, naechsteMarketingZahlung = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnenGebucht = [], karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, marketingBudgetProMonat = 0, naechsteMarketingZahlung = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3" } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -12702,15 +13005,17 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads, [profile.team]: neuesSquad } };
         let neueDivisions = { ...cs.divisions, [managerDivId]: div };
 
-        // Nationalmannschaft: gehört jetzt zu einer echten 5er-Gruppe (Deutschland + 4 feste Gegner,
-        // siehe generiereQualiGruppe/generiereGruppenSpielplan) statt eines einzelnen zufälligen
-        // Gegners pro Fenster. Pro Länderspielpause werden IMMER 2 Runden aus dem festen Rundenplan
-        // gespielt (reale Doppel-Spieltage) — das behebt auch den Fehler, dass früher nicht jedes
-        // Fenster zwingend ein Spiel brachte. Die vier Gegner spielen dabei auch untereinander
-        // (abstrakt, ohne echten Kader), damit eine echte Tabelle entsteht.
+        // Nationalmannschaft: gehört zu einer echten 5er-Gruppe (Deutschland + 4 feste Gegner, siehe
+        // generiereQualiGruppe/generiereGruppenSpielplan). Die Anzahl Runden pro Länderspielpause passt
+        // sich jetzt DYNAMISCH an die verbleibende Zeit bis zum Turnierjahr an (statt fest 2 Runden) —
+        // vorher konnte die Qualifikation (10 feste Runden) schon vor dem Turnierjahr fertig sein,
+        // wodurch spätere Länderspielpausen fälschlich ganz ohne Spiel blieben. Jetzt wird die Taktung
+        // so gewählt, dass die letzte verbleibende Runde möglichst genau im letzten Fenster vor dem
+        // Turnier gespielt wird.
         let bundestrainerAmtNachQuali = cs.bundestrainerAmt;
         let letztesQualispiel = null;
         let laenderspielVerletzte = [];
+        let neueSpielHistorieEintraege = [];
         if (cs.bundestrainerAmt && cs.season < cs.bundestrainerAmt.naechstesTurnierJahr) {
           let quali = cs.bundestrainerAmt.qualifikation;
           if (!quali || !quali.gruppe) {
@@ -12727,7 +13032,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           let tabelle = quali.tabelle;
           let verlauf = quali.verlauf;
           let naechsteRunde = quali.naechsteRunde;
-          const anzahlRunden = Math.min(2, quali.spielplan.length - naechsteRunde);
+          const rundenVerbleibend = quali.spielplan.length - naechsteRunde;
+          const fensterIndexAktuell = LAENDERSPIEL_FENSTER.findIndex(f => f.start === startendesLaenderspielFenster.start);
+          const fensterVerbleibendDieseSaison = LAENDERSPIEL_FENSTER.length - fensterIndexAktuell;
+          const restlicheSaisons = Math.max(0, cs.bundestrainerAmt.naechstesTurnierJahr - cs.season - 1);
+          const fensterVerbleibendGesamt = Math.max(1, fensterVerbleibendDieseSaison + restlicheSaisons * LAENDERSPIEL_FENSTER.length);
+          const anzahlRunden = rundenVerbleibend > 0 ? Math.min(rundenVerbleibend, Math.max(1, Math.ceil(rundenVerbleibend / fensterVerbleibendGesamt))) : 0;
           for (let i = 0; i < anzahlRunden; i++) {
             const runde = quali.spielplan[naechsteRunde];
             naechsteRunde++;
@@ -12736,13 +13046,44 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               if (istDeutschesSpiel && kaderFuerQuali.length >= 11) {
                 const heim = paarung.heim === "Deutschland";
                 const gegnerName = heim ? paarung.gast : paarung.heim;
-                const { tHeim, tGast } = simuliereQualifikationsspiel(kaderFuerQuali, staerkeMap[gegnerName], heim, formationFuerNational);
+                const { tHeim, tGast, ereignisse, einwechslungen, motm } = simuliereQualifikationsspiel(kaderFuerQuali, staerkeMap[gegnerName], heim, formationFuerNational);
                 tabelle = aktualisiereGruppentabelle(tabelle, paarung.heim, paarung.gast, tHeim, tGast);
                 const capsErgebnis = vergebeLaenderspielCaps(neueDivisions, kaderFuerQuali, formationFuerNational);
                 neueDivisions = capsErgebnis.divisions;
                 laenderspielVerletzte = [...laenderspielVerletzte, ...capsErgebnis.neueVerletzten];
-                verlauf = [...verlauf, { heim: paarung.heim, gast: paarung.gast, tHeim, tGast, datum }];
-                letztesQualispiel = { heim: paarung.heim, gast: paarung.gast, tHeim, tGast };
+                // Torschützen/Vorlagen/Karten fliessen jetzt auch in die persönliche Karrierestatistik
+                // ein (istLigaSpiel=false, damit es NICHT in die Liga-Torschützenliste einfliesst) —
+                // über alle Divisionen hinweg, da der Nationalkader von verschiedenen Vereinen kommt.
+                Object.keys(neueDivisions).forEach(divId => {
+                  const divVorEreignis = neueDivisions[divId];
+                  let squadsGeaendert = false;
+                  const neueSquads = { ...divVorEreignis.squads };
+                  Object.entries(divVorEreignis.squads).forEach(([team, squad]) => {
+                    if (squad.some(p => ereignisse.torSpieler.some(t => t.id === p.id) || ereignisse.vorlagenSpieler.some(t => t.id === p.id) || ereignisse.gelbeSpieler.some(t => t.id === p.id) || ereignisse.rotSpieler?.id === p.id)) {
+                      neueSquads[team] = wendeEreignisseAn(squad, ereignisse, false);
+                      squadsGeaendert = true;
+                    }
+                  });
+                  if (squadsGeaendert) neueDivisions[divId] = { ...divVorEreignis, squads: neueSquads };
+                });
+                const spielDetails = {
+                  heim: paarung.heim, gast: paarung.gast, tHeim, tGast, datum,
+                  tore: ereignisse.torSpieler, vorlagen: ereignisse.vorlagenSpieler,
+                  gelb: ereignisse.gelbeSpieler, rot: ereignisse.rotSpieler,
+                  einwechslungen, motm
+                };
+                verlauf = [...verlauf, spielDetails];
+                letztesQualispiel = spielDetails;
+                // Auch in der "Zusammenfassung" im Spielplan-Tab sichtbar, genau wie Liga/Pokal/
+                // Europapokal/Testspiel — dieselbe LaenderspielKarte/spielHistorie-Darstellung.
+                neueSpielHistorieEintraege.push({
+                  wettbewerb: "Nationalmannschaft (Quali)", spieltag: null,
+                  heim: paarung.heim, gast: paarung.gast, tHeim, tGast, istHeim: heim,
+                  torSpieler: ereignisse.torSpieler, gelbeSpieler: ereignisse.gelbeSpieler, rotSpieler: ereignisse.rotSpieler,
+                  formation: formationFuerNational.name,
+                  zuschauer: null, einnahmen: null, ausgaben: null,
+                  datum
+                });
               } else if (!istDeutschesSpiel) {
                 const { heim: tHeim, gast: tGast } = simuliereGruppenSpielAbstrakt(staerkeMap[paarung.heim], staerkeMap[paarung.gast]);
                 tabelle = aktualisiereGruppentabelle(tabelle, paarung.heim, paarung.gast, tHeim, tGast);
@@ -12761,7 +13102,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteEinberufene: einberufen.length ? { fenster: startendesLaenderspielFenster.name, spieler: einberufen } : null,
           bundestrainerAmt: bundestrainerAmtNachQuali,
           letztesQualifikationsspiel: letztesQualispiel,
-          letzteVerletzungen: laenderspielVerletzte.length ? laenderspielVerletzte : null
+          letzteVerletzungen: laenderspielVerletzte.length ? laenderspielVerletzte : null,
+          spielHistorie: [...(cs.spielHistorie || []), ...neueSpielHistorieEintraege]
         };
       });
       return;
@@ -12774,7 +13116,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     if (offenesTestspiel) {
       const eigenesSquad = division.squads[profile.team];
       const gegnerSquad = division.squads[offenesTestspiel.gegner];
-      const { tHeim, tGast, schwachstelle, neuesSquad, ereignisse } = simuliereTestspiel(eigenesSquad, gegnerSquad);
+      const { tHeim, tGast, schwachstelle, neuesSquad, ereignisse } = simuliereTestspiel(eigenesSquad, gegnerSquad, formation);
       const neuesDatum = addTage(datum, 7);
       const istVorsaisonSpiel = !!offenesVorsaisonSpiel;
 
@@ -12903,7 +13245,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         };
         let letzteEuroEreignisse = { torSpieler: [], vorlagenSpieler: [], gelbeSpieler: [], rotSpieler: null };
         const erfasseEuroSpielerEreignisse = (tore, rot = null) => {
-          const ereignisse = simuliereEreignisse(squadNachEuroSpiel, tore, standardInfoEuro, rot);
+          const { elf, bank } = waehleStartelf(squadNachEuroSpiel, formation);
+          const spielerkreis = [...elf, ...waehleEinwechslungen(bank)];
+          const ereignisse = simuliereEreignisse(spielerkreis, tore, standardInfoEuro, rot);
           squadNachEuroSpiel = wendeEreignisseUndKartenAn(squadNachEuroSpiel, ereignisse);
           letzteEuroEreignisse = ereignisse;
         };
@@ -13227,8 +13571,16 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         vorgesehenerTrifftChance: 0.55 + (standardtrainerRatingPokal ? Math.max(0, (standardtrainerRatingPokal - 40) / 240) : 0)
       };
       ergebnisse.forEach(erg => {
+        // Auch hier: nur beim Manager-Team (echte Aufstellung vorhanden) auf Startelf + realistische
+        // Einwechslungen einschränken, sonst könnte ein gar nicht eingesetzter Spieler eine Karte oder
+        // ein Tor bekommen (siehe simulateDivisionMatchday für dieselbe Korrektur in der Liga).
+        const pokalSpielerkreis = (divId, team) => {
+          if (team !== profile.team) return neueDivisionsPokal[divId].squads[team];
+          const { elf, bank } = waehleStartelf(neueDivisionsPokal[divId].squads[team], formation);
+          return [...elf, ...waehleEinwechslungen(bank)];
+        };
         const divHeim = findeTeamDivision(neueDivisionsPokal, erg.heim);
-        const heimEreignisse = simuliereEreignisse(neueDivisionsPokal[divHeim].squads[erg.heim], erg.tHeim, erg.heim === profile.team ? standardInfoPokal : null, erg.heimRot);
+        const heimEreignisse = simuliereEreignisse(pokalSpielerkreis(divHeim, erg.heim), erg.tHeim, erg.heim === profile.team ? standardInfoPokal : null, erg.heimRot);
         if (erg.heim === profile.team) {
           managerTorIds = heimEreignisse.torSpieler.map(p => p.id);
           managerVorlagenIds = heimEreignisse.vorlagenSpieler.map(p => p.id);
@@ -13242,7 +13594,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           }
         };
         const divGast = findeTeamDivision(neueDivisionsPokal, erg.gast);
-        const gastEreignisse = simuliereEreignisse(neueDivisionsPokal[divGast].squads[erg.gast], erg.tGast, erg.gast === profile.team ? standardInfoPokal : null, erg.gastRot);
+        const gastEreignisse = simuliereEreignisse(pokalSpielerkreis(divGast, erg.gast), erg.tGast, erg.gast === profile.team ? standardInfoPokal : null, erg.gastRot);
         if (erg.gast === profile.team) {
           managerTorIds = gastEreignisse.torSpieler.map(p => p.id);
           managerVorlagenIds = gastEreignisse.vorlagenSpieler.map(p => p.id);
@@ -13624,7 +13976,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     let managerBericht = null;
     let neueElfDesTages = null;
     Object.keys(neueDivisions).forEach(id => {
-      const ergebnis = simulateDivisionMatchday(neueDivisions[id], coachBonuses, id === managerDivId ? profile.team : null, id === managerDivId ? standardInfoMap : {});
+      const ergebnis = simulateDivisionMatchday(neueDivisions[id], coachBonuses, id === managerDivId ? profile.team : null, id === managerDivId ? standardInfoMap : {}, id === managerDivId ? formation : null);
       neueDivisions[id] = ergebnis.division;
       if (id === managerDivId) {
         managerBericht = ergebnis.managerBericht;
@@ -13679,9 +14031,34 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       }
     }
 
+    // Turnier (WM/EM): steht im Turnierjahr an, sofern der Bundestrainer sich qualifiziert hat — läuft
+    // jetzt als echtes, spielbares K.o.-Turnier (siehe turnierspiel-State) VOR dem Saisonabschluss,
+    // statt bisher als Einzelberechnung erst beim Klick auf "Neue Saison starten". Der Gegner pro Runde
+    // wird HIER einmalig festgelegt und gespeichert (waehleGegnerNation ist nicht deterministisch),
+    // damit Anzeige und tatsächliche Simulation denselben Gegner verwenden.
+    let neueTurnierAnsetzung = null;
+    if (alleFertig && bundestrainerAmt && (season + 1) >= bundestrainerAmt.naechstesTurnierJahr) {
+      const wettbewerbNeu = (season + 1) % 4 === 2 ? "WM" : "EM";
+      const qualiFuerTurnier = bundestrainerAmt.qualifikation || { tabelle: {} };
+      const gruppentabelleFuerTurnier = Object.entries(qualiFuerTurnier.tabelle || {})
+        .map(([name, z]) => ({ name, ...z, diff: z.tore - z.gegentore }))
+        .sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore);
+      const platzDeutschlandFuerTurnier = gruppentabelleFuerTurnier.findIndex(t => t.name === "Deutschland") + 1;
+      const kaderFuerTurnier = ermittleAktuellenNationalkader(neueDivisions, bundestrainerAmt.kaderIds);
+      const qualifiziertFuerTurnier = kaderFuerTurnier.length >= 11 && platzDeutschlandFuerTurnier > 0 && platzDeutschlandFuerTurnier <= 2;
+      if (qualifiziertFuerTurnier) {
+        neueTurnierAnsetzung = {
+          wettbewerb: wettbewerbNeu, rundenIndex: 0, ergebnisse: [], fertig: false, sieger: false,
+          aktuellerGegner: generiereNationalmannschaftsGegner(0, wettbewerbNeu),
+          abschlusstabelle: gruppentabelleFuerTurnier, platzDeutschland: platzDeutschlandFuerTurnier
+        };
+      }
+    }
+
     // Derby-Effekt auf den Fanclub: ein Sieg im Rivalenduell begeistert die Fans spürbar mehr als ein
     // gewöhnlicher Dreier, eine Derby-Niederlage trifft entsprechend härter
     let derbyBericht = null;
+
     let derbyUnterstuetzungsDelta = 0;
     if (managerBericht && istDerby(managerBericht.heim, managerBericht.gast)) {
       const eigeneTore = managerBericht.istHeim ? managerBericht.tHeim : managerBericht.tGast;
@@ -14216,6 +14593,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // erreichtes Ziel wieder zunichtemachen.
     const neuerEingespieltheitStreakMax = Math.max(eingespieltheitStreakMaxDieseSaison || 0, neuerEingespieltheitStreak);
 
+    // U19-Jugendliga läuft automatisch im Hintergrund mit, jede Woche eine Runde in allen drei Stufen.
+    const neueJugendliga = jugendliga ? simuliereJugendligaSpieltag(jugendliga, jugendDivId, jugendKader, profile.team) : jugendliga;
+
     const { neuesSquad: squadNachVerletzungen, neueVerletzten } = verarbeiteVerletzungen(
       entwickeltesSquad, spielendeIdsHeute, stab.arzt, 7,
       p => schwerpunktFuerSpieler(p.id, spielerSchwerpunkt, trainingsschwerpunkt).verletzungsFaktor * belastungDaten.verletzungsFaktor * trainingszentrumRisikoFaktor * ernaehrungsRisikoFaktor * materialRisikoFaktor * philosophiePaketDaten.verletzungsFaktor,
@@ -14414,6 +14794,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzteEntwicklung: veraenderungen.length ? veraenderungen : null,
       eingespieltheitStreak: neuerEingespieltheitStreak,
       eingespieltheitStreakMaxDieseSaison: neuerEingespieltheitStreakMax,
+      jugendliga: neueJugendliga,
       letzteStartelfIds: neueLetzteStartelfIds,
       letzterSpielbericht,
       spielHistorie: neuerHistorienEintrag ? [...(spielHistorie || []), neuerHistorienEintrag] : (spielHistorie || []),
@@ -14469,12 +14850,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzterStadionUmbau: umbauFertig.length ? umbauFertig : null,
       letzteHeimspielKategorien: neueHeimspielKategorien,
       markenwertStartSaison: markenwertStartSaisonEffektiv,
-      relegationsspiel: neueRelegationAnsetzung
+      relegationsspiel: neueRelegationAnsetzung,
+      turnierspiel: neueTurnierAnsetzung
     }));
-    // Solange eine eigene Relegation noch aussteht (siehe relegationsspiel), wird der Saisonübergang
-    // zurückgehalten — er läuft erst über onRelegationErgebnisUebernehmen, nachdem Hin- und Rückspiel
-    // tatsächlich gespielt wurden.
-    if (alleFertig && !neueRelegationAnsetzung) {
+    // Solange eine eigene Relegation ODER ein eigenes Turnier (WM/EM als Bundestrainer) noch aussteht,
+    // wird der Saisonübergang zurückgehalten — er läuft erst über onRelegationErgebnisUebernehmen bzw.
+    // onTurnierErgebnisUebernehmen, nachdem tatsächlich gespielt wurde.
+    if (alleFertig && !neueRelegationAnsetzung && !neueTurnierAnsetzung) {
       try {
         const result = processSeasonTransition(neueDivisions, season, profile.team);
         setSeasonEndInfo({ ...result, coachSnapshot: coachNachLohn, vertragLaeuftAusSnapshot: coachNachLohn && coachNachLohn.vertragBisSaison <= season, managerVertragSnapshot: managerVertragNachLohn || managerVertrag, managerVertragLaeuftAusSnapshot: (managerVertragNachLohn || managerVertrag) && (managerVertragNachLohn || managerVertrag).vertragBisSaison <= season, finanzenSnapshot: neueSaisonFinanzenMitZinsen, vereinsversammlung, trainerZielAuswertung });
@@ -14568,6 +14950,83 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       setSeasonEndInfo({ ...result, coachSnapshot: coach, vertragLaeuftAusSnapshot: coach && coach.vertragBisSaison <= season, managerVertragSnapshot: managerVertrag, managerVertragLaeuftAusSnapshot: managerVertrag && managerVertrag.vertragBisSaison <= season, finanzenSnapshot: saisonFinanzen });
     } catch (err) {
       console.error("Saisonübergang nach Relegation fehlgeschlagen, nutze Notfall-Fallback:", err);
+      const result = fallbackSeasonTransition(divisions, season, profile.team);
+      setSeasonEndInfo({ ...result, coachSnapshot: coach, vertragLaeuftAusSnapshot: coach && coach.vertragBisSaison <= season, managerVertragSnapshot: managerVertrag, managerVertragLaeuftAusSnapshot: managerVertrag && managerVertrag.vertragBisSaison <= season, finanzenSnapshot: saisonFinanzen });
+    }
+  };
+
+  // Turnier (WM/EM): ein Spiel pro Klick, genau wie ein normaler Spieltag — Gegner steht schon fest
+  // (siehe turnierspiel.aktuellerGegner, beim Ansetzen einmalig festgelegt). Nach einem Sieg wird der
+  // Gegner der NÄCHSTEN Runde erst jetzt bestimmt (nicht schon vorher), damit spätere Runden ihre
+  // eigene frische Zufallsziehung bekommen.
+  const onTurnierspielAustragen = () => {
+    setCareerState(cs => {
+      const ts = cs.turnierspiel;
+      if (!ts || ts.fertig) return cs;
+      const kaderFuerSpiel = ermittleAktuellenNationalkader(cs.divisions, cs.bundestrainerAmt.kaderIds);
+      const formationFuerSpiel = FORMATIONEN.find(f => f.id === cs.bundestrainerAmt.formation) || FORMATIONEN.find(f => f.id === "4-4-2");
+      const spiel = simuliereLaenderspielKoRunde(kaderFuerSpiel, ts.aktuellerGegner, formationFuerSpiel);
+      const neuesErgebnis = {
+        runde: TURNIER_RUNDEN[ts.rundenIndex], gegner: ts.aktuellerGegner.name,
+        tHeim: spiel.tHeim, tGast: spiel.tGast, gewonnen: spiel.gewonnen, elfmeter: spiel.elfmeter,
+        tore: spiel.ereignisse.torSpieler, vorlagen: spiel.ereignisse.vorlagenSpieler,
+        gelb: spiel.ereignisse.gelbeSpieler, rot: spiel.ereignisse.rotSpieler,
+        einwechslungen: spiel.einwechslungen, motm: spiel.motm
+      };
+      const neueErgebnisse = [...ts.ergebnisse, neuesErgebnis];
+      const capsErgebnis = vergebeLaenderspielCaps(cs.divisions, kaderFuerSpiel, formationFuerSpiel);
+      const neueVerletzungen = capsErgebnis.neueVerletzten.length ? capsErgebnis.neueVerletzten : null;
+      // Torschützen/Vorlagen/Karten fliessen auch beim Turnier in die persönliche Karrierestatistik ein
+      // (istLigaSpiel=false, damit es NICHT in die Liga-Torschützenliste einfliesst).
+      let divisionenMitStats = capsErgebnis.divisions;
+      Object.keys(divisionenMitStats).forEach(divId => {
+        const divVorEreignis = divisionenMitStats[divId];
+        let squadsGeaendert = false;
+        const neueSquads = { ...divVorEreignis.squads };
+        Object.entries(divVorEreignis.squads).forEach(([team, squad]) => {
+          if (squad.some(p => spiel.ereignisse.torSpieler.some(t => t.id === p.id) || spiel.ereignisse.vorlagenSpieler.some(t => t.id === p.id) || spiel.ereignisse.gelbeSpieler.some(t => t.id === p.id) || spiel.ereignisse.rotSpieler?.id === p.id)) {
+            neueSquads[team] = wendeEreignisseAn(squad, spiel.ereignisse, false);
+            squadsGeaendert = true;
+          }
+        });
+        if (squadsGeaendert) divisionenMitStats[divId] = { ...divVorEreignis, squads: neueSquads };
+      });
+      // Auch in der "Zusammenfassung" im Spielplan-Tab sichtbar, genau wie Liga/Pokal/Europapokal/
+      // Testspiel und die Quali-Länderspiele.
+      const turnierSpielHistorieEintrag = {
+        wettbewerb: `Nationalmannschaft (${ts.wettbewerb})`, spieltag: null,
+        heim: "Deutschland", gast: ts.aktuellerGegner.name, tHeim: spiel.tHeim, tGast: spiel.tGast, istHeim: true,
+        torSpieler: spiel.ereignisse.torSpieler, gelbeSpieler: spiel.ereignisse.gelbeSpieler, rotSpieler: spiel.ereignisse.rotSpieler,
+        formation: formationFuerSpiel.name,
+        zuschauer: null, einnahmen: null, ausgaben: null,
+        datum: cs.datum
+      };
+
+      if (!spiel.gewonnen) {
+        return { ...cs, divisions: divisionenMitStats, turnierspiel: { ...ts, ergebnisse: neueErgebnisse, fertig: true, sieger: false }, letzteVerletzungen: neueVerletzungen, spielHistorie: [...(cs.spielHistorie || []), turnierSpielHistorieEintrag] };
+      }
+      const naechsteRundeIndex = ts.rundenIndex + 1;
+      if (naechsteRundeIndex >= TURNIER_RUNDEN.length) {
+        return { ...cs, divisions: divisionenMitStats, turnierspiel: { ...ts, ergebnisse: neueErgebnisse, fertig: true, sieger: true }, letzteVerletzungen: neueVerletzungen, spielHistorie: [...(cs.spielHistorie || []), turnierSpielHistorieEintrag] };
+      }
+      return {
+        ...cs, divisions: divisionenMitStats,
+        turnierspiel: { ...ts, ergebnisse: neueErgebnisse, rundenIndex: naechsteRundeIndex, aktuellerGegner: generiereNationalmannschaftsGegner(naechsteRundeIndex, ts.wettbewerb) },
+        letzteVerletzungen: neueVerletzungen,
+        spielHistorie: [...(cs.spielHistorie || []), turnierSpielHistorieEintrag]
+      };
+    });
+  };
+
+  // Nach abgeschlossenem Turnier: derselbe zurückgehaltene Saisonübergang wie bei der Relegation, nur
+  // ohne Team-Override — das Turnierergebnis selbst wird direkt aus careerState.turnierspiel gelesen
+  // (siehe neueSaisonStarten), es beeinflusst keine Auf-/Abstiegs-Tabellen wie bei der Relegation.
+  const onTurnierErgebnisUebernehmen = () => {
+    try {
+      const result = processSeasonTransition(divisions, season, profile.team);
+      setSeasonEndInfo({ ...result, coachSnapshot: coach, vertragLaeuftAusSnapshot: coach && coach.vertragBisSaison <= season, managerVertragSnapshot: managerVertrag, managerVertragLaeuftAusSnapshot: managerVertrag && managerVertrag.vertragBisSaison <= season, finanzenSnapshot: saisonFinanzen });
+    } catch (err) {
+      console.error("Saisonübergang nach Turnier fehlgeschlagen, nutze Notfall-Fallback:", err);
       const result = fallbackSeasonTransition(divisions, season, profile.team);
       setSeasonEndInfo({ ...result, coachSnapshot: coach, vertragLaeuftAusSnapshot: coach && coach.vertragBisSaison <= season, managerVertragSnapshot: managerVertrag, managerVertragLaeuftAusSnapshot: managerVertrag && managerVertrag.vertragBisSaison <= season, finanzenSnapshot: saisonFinanzen });
     }
@@ -14669,7 +15128,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     let letztesTurnierErgebnis = null;
     if (bundestrainerAmt && seasonEndInfo.season >= bundestrainerAmt.naechstesTurnierJahr) {
       const kader = ermittleAktuellenNationalkader(seasonEndInfo.divisions, bundestrainerAmt.kaderIds);
-      const wettbewerb = seasonEndInfo.season % 4 === 0 ? "WM" : "EM";
+      const wettbewerb = seasonEndInfo.season % 4 === 2 ? "WM" : "EM";
       // Qualifikation richtet sich jetzt nach der ECHTEN Tabellenposition der 5er-Gruppe (siehe
       // naechsterSpieltag/generiereGruppenSpielplan) — Platz 1 oder 2 reicht fürs Turnier, genau wie im
       // echten Fussball bei einer Fünfergruppe mit zwei Direktqualifikanten.
@@ -14679,8 +15138,23 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         .sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore);
       const platzDeutschland = gruppentabelleSortiert.findIndex(t => t.name === "Deutschland") + 1;
       const qualifiziert = kader.length >= 11 && platzDeutschland > 0 && platzDeutschland <= 2;
-      const formationFuerNational = FORMATIONEN.find(f => f.id === bundestrainerAmt.formation) || FORMATIONEN.find(f => f.id === "4-4-2");
-      const turnierErgebnis = qualifiziert ? simuliereNationalmannschaftsTurnier(kader, wettbewerb, formationFuerNational) : null;
+      // War qualifiziert und wurde bereits interaktiv gespielt (siehe onTurnierspielAustragen), wird
+      // das ECHTE Ergebnis übernommen statt das Turnier hier nochmals neu zu würfeln. Der Fallback
+      // (erneute Simulation) bleibt als Sicherheitsnetz, falls turnierspiel aus irgendeinem Grund fehlt.
+      const bereitsGespielt = careerState.turnierspiel && careerState.turnierspiel.fertig;
+      let turnierErgebnis;
+      if (qualifiziert && bereitsGespielt) {
+        turnierErgebnis = {
+          erreichteRunde: careerState.turnierspiel.sieger ? "Sieger" : careerState.turnierspiel.ergebnisse[careerState.turnierspiel.ergebnisse.length - 1].runde,
+          sieger: careerState.turnierspiel.sieger,
+          spiele: careerState.turnierspiel.ergebnisse
+        };
+      } else if (qualifiziert) {
+        const formationFuerNational = FORMATIONEN.find(f => f.id === bundestrainerAmt.formation) || FORMATIONEN.find(f => f.id === "4-4-2");
+        turnierErgebnis = simuliereNationalmannschaftsTurnier(kader, wettbewerb, formationFuerNational);
+      } else {
+        turnierErgebnis = null;
+      }
       letztesTurnierErgebnis = {
         jahr: seasonEndInfo.season, wettbewerb,
         erreichteRunde: qualifiziert ? turnierErgebnis.erreichteRunde : "Nicht qualifiziert",
@@ -15065,6 +15539,22 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       spielerberaterVerpflichtungenDieseSaison: 0,
       meineAusgeliehenenSpieler: [],
       managerReputation: neueManagerReputation,
+      turnierspiel: null,
+      ...(() => {
+        // Absicherung für Spielstände von vor diesem Feature: fehlt jugendliga, wird es genau wie zum
+        // Karrierestart frisch initialisiert (eigenes Team startet in der tiefsten Stufe), statt
+        // abzustürzen.
+        const jugendligaBasis = jugendliga || initialeJugendliga(profile.team, rngFor(`jugendliga|${profile.team}|nachtraeglich`));
+        const jugendDivIdBasis = jugendliga ? jugendDivId : "U19T3";
+        const jugendKaderBasis = jugendliga && jugendKader.length ? jugendKader : initialerU19Kader(profile.team, JUGENDLIGA_DEFS.find(d => d.id === jugendDivIdBasis).baseRating);
+        const jugendErgebnis = verarbeiteJugendligaSaisonende(jugendligaBasis, jugendDivIdBasis, profile.team);
+        const jugendBaseRating = JUGENDLIGA_DEFS.find(d => d.id === jugendErgebnis.jugendDivId).baseRating;
+        return {
+          jugendliga: jugendErgebnis.jugendliga,
+          jugendDivId: jugendErgebnis.jugendDivId,
+          jugendKader: alterJugendKader(jugendKaderBasis, profile.team, jugendBaseRating, seasonEndInfo.season)
+        };
+      })(),
       letzteHeimspielKategorien: null,
       eingehendeAngebote: [],
       spielerberaterAngebote: [],
@@ -15893,15 +16383,30 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const kandidat = cs.jugend.sichtung.kandidaten.find(k => k.spieler.id === spielerId);
       if (!kandidat) return cs;
       if ((kandidat.typ === "abwerbung" || kandidat.typ === "international") && kandidat.summe > cs.budget) return cs; // Gebühr nicht leistbar
+
+      // Frisch gesichtete Eigengewächse ("neu") landen jetzt im U19-Kader statt direkt in der ersten
+      // Mannschaft — der Manager kann sie von dort jederzeit selbst hochziehen (siehe
+      // onJugendspielerHochziehen). Abwerbung/internationales Scouting betrifft bereits etwas ältere,
+      // etablierte Spieler (bis 21) und bleibt daher weiterhin eine direkte Verpflichtung.
+      if (kandidat.typ === "neu") {
+        return {
+          ...cs,
+          jugendKader: [...(cs.jugendKader || []), { ...kandidat.spieler, alter: 17, u19: true, akademieProdukt: true, ausgebildetVon: profile.team }],
+          akademie: { ...(cs.akademie || { level: 0, umbau: null, absolventenGesamt: 0 }), absolventenGesamt: (cs.akademie?.absolventenGesamt || 0) + 1 },
+          jugend: { ...cs.jugend, sichtung: null },
+          letzterJunior: kandidat.spieler
+        };
+      }
+
       const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
       if (kandidat.typ === "abwerbung") {
         const posObj = POSITIONEN.find(p => p.code === kandidat.spieler.pos) || POSITIONEN[0];
         const ersatz = generateErsatzSpieler(kandidat.herkunftsverein, div.baseRating, posObj, cs.season, managerDivId);
         div.squads[kandidat.herkunftsverein] = div.squads[kandidat.herkunftsverein].filter(p => p.id !== kandidat.spieler.id).concat(ersatz);
       }
-      // Beide "eigene Jugend"-Kanäle (heimisch gesichtet + international gescoutet) zählen als
-      // Akademie-Absolventen — nur die Abwerbung eines bereits etablierten Vereinsspielers nicht.
-      const istAkademieProdukt = kandidat.typ === "neu" || kandidat.typ === "international";
+      // "international" zählt weiterhin als Akademie-Absolvent — nur die Abwerbung eines bereits
+      // etablierten Vereinsspielers nicht.
+      const istAkademieProdukt = kandidat.typ === "international";
       div.squads[profile.team] = [...div.squads[profile.team], { ...kandidat.spieler, vertragBisSaison: cs.season + 2, gehalt: berechneSpielerlohn(kandidat.spieler, managerDivId), akademieProdukt: istAkademieProdukt, beimVereinSeitSaison: cs.season, ausgebildetVon: istAkademieProdukt ? profile.team : kandidat.spieler.ausgebildetVon }];
       const gebuehrFaellig = kandidat.typ === "abwerbung" || kandidat.typ === "international";
       return {
@@ -15914,6 +16419,23 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         akademie: istAkademieProdukt ? { ...(cs.akademie || { level: 0, umbau: null, absolventenGesamt: 0 }), absolventenGesamt: (cs.akademie?.absolventenGesamt || 0) + 1 } : cs.akademie,
         jugend: { ...cs.jugend, sichtung: null },
         letzterJunior: kandidat.spieler
+      };
+    });
+  };
+
+  // U19 → erste Mannschaft: jederzeit verfügbar, nicht nur am Saisonende. Der Spieler behält sein
+  // Eigengewächs-Merkmal (siehe akademieProdukt) und bekommt einen regulären Erstmannschafts-Vertrag.
+  const onJugendspielerHochziehen = (spielerId) => {
+    setCareerState(cs => {
+      const spieler = (cs.jugendKader || []).find(p => p.id === spielerId);
+      if (!spieler) return cs;
+      const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
+      const { u19, ...basisSpieler } = spieler;
+      div.squads[profile.team] = [...div.squads[profile.team], { ...basisSpieler, vertragBisSaison: cs.season + 2, gehalt: berechneSpielerlohn(basisSpieler, managerDivId), beimVereinSeitSaison: cs.season }];
+      return {
+        ...cs,
+        divisions: { ...cs.divisions, [managerDivId]: div },
+        jugendKader: (cs.jugendKader || []).filter(p => p.id !== spielerId)
       };
     });
   };
@@ -16474,6 +16996,51 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             {relegationsspiel.elfmeter && <><br /><span className="text-amber-400">Elfmeterschiessen entscheidet</span></>}
           </div>
           <button onClick={onRelegationErgebnisUebernehmen} className="w-full bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold text-sm rounded py-3">
+            Weiter zur Saisonauswertung
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (turnierspiel && !turnierspiel.fertig) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="max-w-md w-full border border-amber-400/40 rounded-lg p-6 space-y-4" style={{ backgroundColor: "#0f2818" }}>
+          <div className="text-xs uppercase tracking-wider text-amber-400/80 text-center">{turnierspiel.wettbewerb} — Endrunde</div>
+          <div className="text-center text-sky-300 text-sm">{TURNIER_RUNDEN[turnierspiel.rundenIndex]}</div>
+          <div className="text-center text-white font-bold text-lg">Deutschland — {turnierspiel.aktuellerGegner.name}</div>
+          <div className="text-center text-emerald-500 text-xs">Formation: {formation.name}</div>
+          {turnierspiel.ergebnisse.length > 0 && (
+            <div className="border-t border-emerald-800 pt-3 space-y-2 text-left">
+              {turnierspiel.ergebnisse.map((s, i) => (
+                <LaenderspielKarte key={i} s={{ ...s, heim: "Deutschland", gast: s.gegner }} label={s.runde} ergebnisFarbe="text-emerald-400" ergebnisIcon="✓" elfmeter={s.elfmeter} />
+              ))}
+            </div>
+          )}
+          <button onClick={onTurnierspielAustragen} className="w-full bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold text-sm rounded py-3">
+            {TURNIER_RUNDEN[turnierspiel.rundenIndex]} austragen
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (turnierspiel && turnierspiel.fertig) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className={`max-w-md w-full border rounded-lg p-6 space-y-4 ${turnierspiel.sieger ? "border-amber-400/50" : "border-red-500/50"}`} style={{ backgroundColor: "#0f2818" }}>
+          <div className="text-xs uppercase tracking-wider text-amber-400/80 text-center">{turnierspiel.wettbewerb} — Turnier beendet</div>
+          <div className="text-center text-2xl">{turnierspiel.sieger ? "🏆" : "😔"}</div>
+          <div className="text-center text-white font-bold">
+            {turnierspiel.sieger ? `Deutschland ist ${turnierspiel.wettbewerb}-Sieger!` : `Ausgeschieden im ${turnierspiel.ergebnisse[turnierspiel.ergebnisse.length - 1].runde}.`}
+          </div>
+          <div className="space-y-2 text-left">
+            {turnierspiel.ergebnisse.map((s, i) => (
+              <LaenderspielKarte key={i} s={{ ...s, heim: "Deutschland", gast: s.gegner }} label={s.runde} ergebnisFarbe={i === turnierspiel.ergebnisse.length - 1 && !turnierspiel.sieger ? "text-red-400" : "text-emerald-400"} ergebnisIcon={i === turnierspiel.ergebnisse.length - 1 && !turnierspiel.sieger ? "✗" : "✓"} elfmeter={s.elfmeter} />
+            ))}
+          </div>
+          <button onClick={onTurnierErgebnisUebernehmen} className="w-full bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold text-sm rounded py-3">
             Weiter zur Saisonauswertung
           </button>
         </div>
@@ -17203,6 +17770,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               baseRating={division.baseRating}
               datum={datum}
               markenwert={markenwert}
+              jugendliga={jugendliga}
+              jugendDivId={jugendDivId}
+              jugendKader={jugendKader}
+              onJugendspielerHochziehen={onJugendspielerHochziehen}
             />
           )}
           {tab === "transfermarkt" && (
@@ -17610,6 +18181,11 @@ function App() {
       stab: { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, ernaehrung: null },
       kapitaenId: bestimmeKapitaen(divisions[managerDivId].squads[profile.team]),
       ...bestimmeStandardSchuetzen(divisions[managerDivId].squads[profile.team]),
+      // U19-Jugendliga: eigenes Team startet immer in der tiefsten Stufe (U19T3), mit einem echten,
+      // dauerhaften eigenen Kader (17-18 Jahre) — siehe initialeJugendliga/initialerU19Kader.
+      jugendliga: initialeJugendliga(profile.team, rngFor(`jugendliga|${profile.team}`)),
+      jugendKader: initialerU19Kader(profile.team, JUGENDLIGA_DEFS.find(d => d.id === "U19T3").baseRating),
+      jugendDivId: "U19T3",
       ziele: null,
       trainerZiele: null,
       anzahlSaisonsImAmt: 1,
