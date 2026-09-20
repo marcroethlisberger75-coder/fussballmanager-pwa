@@ -5845,7 +5845,12 @@ function wendeEreignisseUndKartenAn(squad, ereignisse, istLigaSpiel = false) {
   return verarbeiteKartenSperren(wendeEreignisseAn(squad, ereignisse, istLigaSpiel), ereignisse);
 }
 
-function bestimmeSpielerDesSpieltages(bericht, startelf, gegentore = null) {
+// Ein Gegenspieler kann jetzt ebenfalls Spieler des Tages werden — aber NUR über eigene Tore/Vorlagen,
+// bewusst OHNE den Grundwert-Bonus nach Spielstärke und ohne den Tagesform-Zufallsanteil, die einzig
+// der eigenen Startelf zustehen. So bekommt ein Gegenspieler nur bei einer wirklich herausragenden
+// Einzelleistung (z.B. Hattrick trotz Niederlage) eine Chance — nicht schon, weil er insgesamt der
+// bessere Spieler ist. Gilt einheitlich für Liga, Pokal, Europapokal und Testspiel.
+function bestimmeSpielerDesSpieltages(bericht, startelf, gegentore = null, gegnerBericht = null) {
   const punkte = {};
   const addiere = (p, wert) => {
     if (!p) return;
@@ -5863,6 +5868,10 @@ function bestimmeSpielerDesSpieltages(bericht, startelf, gegentore = null) {
     // eigene Team kein Gegentor kassiert hat.
     if (gegentore === 0 && (p.pos === "TW" || p.pos === "IV" || p.pos === "AV")) addiere(p, 2.5);
   });
+  if (gegnerBericht) {
+    gegnerBericht.tore.forEach(p => addiere(p, 4));
+    gegnerBericht.vorlagen.forEach(p => addiere(p, 2));
+  }
   const sortiert = Object.values(punkte).sort((a, b) => b.punkte - a.punkte);
   return sortiert[0]?.player || (startelf && startelf[0]) || null;
 }
@@ -6094,7 +6103,11 @@ function simuliereTestspiel(eigenesSquad, gegnerSquad, eigeneFormation = null) {
   const spielerkreis = eigeneFormation ? (() => { const { elf, bank } = waehleStartelf(eigenesSquad, eigeneFormation); return [...elf, ...waehleEinwechslungen(bank)]; })() : eigenesSquad;
   const ereignisse = simuliereEreignisse(spielerkreis, tHeim, null, heimRot);
   const neuesSquad = wendeEreignisseUndKartenAn(eigenesSquad, ereignisse);
-  return { tHeim, tGast, schwachstelle: analysiereKaderLuecke(eigenesSquad), neuesSquad, ereignisse };
+  // Der Testspiel-Gegner hat einen echten Kader (anders als der abstrakte Europapokal-Gegner) — auch
+  // seine Tore/Vorlagen werden simuliert, damit ein Gegenspieler "Spieler des Tages" werden kann
+  // (siehe bestimmeSpielerDesSpieltages).
+  const gegnerEreignisse = simuliereEreignisse(gegnerSquad, tGast);
+  return { tHeim, tGast, schwachstelle: analysiereKaderLuecke(eigenesSquad), neuesSquad, ereignisse, gegnerEreignisse };
 }
 
 function initialerPokal(alleDivisionen) {
@@ -6444,12 +6457,18 @@ function simulateDivisionMatchday(division, coachBonuses = {}, managerTeam = nul
     if (managerTeam && (heim === managerTeam || gast === managerTeam)) {
       const istHeim = heim === managerTeam;
       const eigene = istHeim ? heimEreignisse : gastEreignisse;
+      const gegnerEreignisse = istHeim ? gastEreignisse : heimEreignisse;
       managerBericht = {
         heim, gast, tHeim, tGast, istHeim,
         tore: eigene.torSpieler,
         vorlagen: eigene.vorlagenSpieler,
         gelb: eigene.gelbeSpieler,
-        rot: eigene.rotSpieler
+        rot: eigene.rotSpieler,
+        // Für "Spieler des Tages": ein Gegenspieler kann jetzt ebenfalls gewinnen, aber nur über eigene
+        // Tore/Vorlagen (siehe bestimmeSpielerDesSpieltages) — dafür Name/Team mitgeben, damit die
+        // Anzeige ihn korrekt zuordnen kann.
+        gegnerTeam: istHeim ? gast : heim,
+        gegnerBericht: { tore: gegnerEreignisse.torSpieler, vorlagen: gegnerEreignisse.vorlagenSpieler }
       };
     }
   });
@@ -9928,6 +9947,14 @@ const SPIELREGELN_KATEGORIEN = [
     ]
   },
   {
+    icon: Award, farbe: "#fcd34d", titel: "Spieler des Spieltages",
+    punkte: [
+      "Bei Liga, Pokal und Testspiel kann auch ein gegnerischer Spieler zum Spieler des Spieltages gewählt werden — aber ausschliesslich über eigene Tore/Vorlagen (z.B. ein Hattrick trotz Niederlage), nie einfach weil er insgesamt der bessere Spieler ist.",
+      "Die eigene Startelf sammelt zusätzlich Punkte nach Spielstärke, einem kleinen Tagesform-Zufallsanteil sowie einem Zu-Null-Bonus für Torwart/Abwehr — diese Zusatzpunkte stehen einem Gegenspieler nicht zu.",
+      "Beim Europapokal bleibt der Gegner rein abstrakt (kein echter Kader) — dort kann daher weiterhin nur ein eigener Spieler gewählt werden."
+    ]
+  },
+  {
     icon: Flag, farbe: "#fcd34d", titel: "Erste Schritte",
     punkte: [
       "Kader ansehen: Wer spielt auf welcher Position, wer ist verletzt oder gesperrt?",
@@ -13224,7 +13251,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     if (offenesTestspiel) {
       const eigenesSquad = division.squads[profile.team];
       const gegnerSquad = division.squads[offenesTestspiel.gegner];
-      const { tHeim, tGast, schwachstelle, neuesSquad, ereignisse } = simuliereTestspiel(eigenesSquad, gegnerSquad, formation);
+      const { tHeim, tGast, schwachstelle, neuesSquad, ereignisse, gegnerEreignisse } = simuliereTestspiel(eigenesSquad, gegnerSquad, formation);
+      const { elf: testStartelf } = waehleStartelf(eigenesSquad, formation);
+      const spielerDesSpieltagesTest = bestimmeSpielerDesSpieltages({ tore: ereignisse.torSpieler, vorlagen: ereignisse.vorlagenSpieler }, testStartelf, tGast, { tore: gegnerEreignisse.torSpieler, vorlagen: gegnerEreignisse.vorlagenSpieler });
       const neuesDatum = addTage(datum, 7);
       const istVorsaisonSpiel = !!offenesVorsaisonSpiel;
 
@@ -13261,7 +13290,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           ...cs,
           datum: neuesDatum,
           budget: cs.budget + testTicketEinnahmen + testFanartikelEinnahmen + testImbissEinnahmen + testVereinsheimEinnahmen - sicherheitskostenGezahltTest - schiedsrichterkostenGezahltTest - nachbestellKostenTest + berechnePassiveWocheneinnahmen(eigenesStadionTest),
-          divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads, [profile.team]: neuesSquad } } },
+          divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads, [profile.team]: spielerDesSpieltagesTest && testStartelf.some(p => p.id === spielerDesSpieltagesTest.id) ? erhoeheMotmZaehler(neuesSquad, spielerDesSpieltagesTest.id) : neuesSquad, ...(spielerDesSpieltagesTest && !testStartelf.some(p => p.id === spielerDesSpieltagesTest.id) ? { [offenesTestspiel.gegner]: erhoeheMotmZaehler(gegnerSquad, spielerDesSpieltagesTest.id) } : {}) } } },
           fanshop: neuerFanshopTest,
           imbiss: neuerImbissTest,
           vereinsheim: neuesVereinsheimTest,
@@ -13269,7 +13298,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             vorsaison: istVorsaisonSpiel ? aktualisiereListe(cs.testspiele.vorsaison) : cs.testspiele.vorsaison,
             winter: istVorsaisonSpiel ? cs.testspiele.winter : aktualisiereListe(cs.testspiele.winter)
           },
-          letzterTestspielBericht: { gegner: offenesTestspiel.gegner, tHeim, tGast, schwachstelle, zuschauer: testZuschauer, einnahmen: testTicketEinnahmen + testFanartikelEinnahmen + testImbissEinnahmen + testVereinsheimEinnahmen, tore: ereignisse.torSpieler, vorlagen: ereignisse.vorlagenSpieler, gelb: ereignisse.gelbeSpieler, rot: ereignisse.rotSpieler },
+          letzterTestspielBericht: { gegner: offenesTestspiel.gegner, tHeim, tGast, schwachstelle, zuschauer: testZuschauer, einnahmen: testTicketEinnahmen + testFanartikelEinnahmen + testImbissEinnahmen + testVereinsheimEinnahmen, tore: ereignisse.torSpieler, vorlagen: ereignisse.vorlagenSpieler, gelb: ereignisse.gelbeSpieler, rot: ereignisse.rotSpieler, motm: spielerDesSpieltagesTest },
           spielHistorie: [...(cs.spielHistorie || []), {
             wettbewerb: "Testspiel", spieltag: null,
             heim: profile.team, gast: offenesTestspiel.gegner, tHeim, tGast, istHeim: true,
@@ -13680,6 +13709,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       let managerTorIds = [];
       let managerVorlagenIds = [];
       let managerPokalEreignisse = { torSpieler: [], vorlagenSpieler: [], gelbeSpieler: [], rotSpieler: null };
+      let managerPokalGegnerEreignisse = { torSpieler: [], vorlagenSpieler: [] };
+      let managerPokalGegnerTeam = null;
+      let managerPokalGegnerDivId = null;
       const standardtrainerRatingPokal = stab.standard?.rating || 0;
       const standardInfoPokal = {
         elfmeterSchuetzeId, freistossSchuetzeId,
@@ -13716,6 +13748,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           managerVorlagenIds = gastEreignisse.vorlagenSpieler.map(p => p.id);
           managerPokalEreignisse = gastEreignisse;
         }
+        // Gegner-Ereignisse für "Spieler des Tages" merken (siehe bestimmeSpielerDesSpieltages) — egal
+        // ob der Manager Heim oder Gast war.
+        if (erg.heim === profile.team) { managerPokalGegnerEreignisse = gastEreignisse; managerPokalGegnerTeam = erg.gast; managerPokalGegnerDivId = divGast; }
+        if (erg.gast === profile.team) { managerPokalGegnerEreignisse = heimEreignisse; managerPokalGegnerTeam = erg.heim; managerPokalGegnerDivId = divHeim; }
         neueDivisionsPokal = {
           ...neueDivisionsPokal,
           [divGast]: {
@@ -13888,15 +13924,26 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // Einwechslungen und Spieler des Spieltages — bislang nur bei Liga-Spielen berechnet, jetzt auch
       // beim Pokal. Nutzt dieselbe aktuelle Startelf/Bank-Aufteilung wie die Liga.
       const einwechslungenPokal = managerErgebnis ? waehleEinwechslungen(aktuelleStartelf.bank) : [];
-      const spielerDesSpieltagesPokal = managerErgebnis ? bestimmeSpielerDesSpieltages({ tore: managerPokalEreignisse.torSpieler, vorlagen: managerPokalEreignisse.vorlagenSpieler }, aktuelleStartelf.elf, managerErgebnis.heim === profile.team ? managerErgebnis.tGast : managerErgebnis.tHeim) : null;
+      const spielerDesSpieltagesPokal = managerErgebnis ? bestimmeSpielerDesSpieltages({ tore: managerPokalEreignisse.torSpieler, vorlagen: managerPokalEreignisse.vorlagenSpieler }, aktuelleStartelf.elf, managerErgebnis.heim === profile.team ? managerErgebnis.tGast : managerErgebnis.tHeim, { tore: managerPokalGegnerEreignisse.torSpieler, vorlagen: managerPokalGegnerEreignisse.vorlagenSpieler }) : null;
       if (spielerDesSpieltagesPokal) {
-        neueDivisionsPokal = {
-          ...neueDivisionsPokal,
-          [managerDivId]: {
-            ...neueDivisionsPokal[managerDivId],
-            squads: { ...neueDivisionsPokal[managerDivId].squads, [profile.team]: erhoeheMotmZaehler(neueDivisionsPokal[managerDivId].squads[profile.team], spielerDesSpieltagesPokal.id) }
-          }
-        };
+        const motmPokalIstGegner = !aktuelleStartelf.elf.some(p => p.id === spielerDesSpieltagesPokal.id);
+        if (motmPokalIstGegner && managerPokalGegnerTeam && managerPokalGegnerDivId) {
+          neueDivisionsPokal = {
+            ...neueDivisionsPokal,
+            [managerPokalGegnerDivId]: {
+              ...neueDivisionsPokal[managerPokalGegnerDivId],
+              squads: { ...neueDivisionsPokal[managerPokalGegnerDivId].squads, [managerPokalGegnerTeam]: erhoeheMotmZaehler(neueDivisionsPokal[managerPokalGegnerDivId].squads[managerPokalGegnerTeam], spielerDesSpieltagesPokal.id) }
+            }
+          };
+        } else if (!motmPokalIstGegner) {
+          neueDivisionsPokal = {
+            ...neueDivisionsPokal,
+            [managerDivId]: {
+              ...neueDivisionsPokal[managerDivId],
+              squads: { ...neueDivisionsPokal[managerDivId].squads, [profile.team]: erhoeheMotmZaehler(neueDivisionsPokal[managerDivId].squads[profile.team], spielerDesSpieltagesPokal.id) }
+            }
+          };
+        }
       }
 
       setCareerState(cs => {
@@ -14117,7 +14164,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         }
       }
     });
-    const spielerDesSpieltages = managerBericht ? bestimmeSpielerDesSpieltages(managerBericht, aktuelleStartelf.elf, managerBericht.istHeim ? managerBericht.tGast : managerBericht.tHeim) : null;
+    const spielerDesSpieltages = managerBericht ? bestimmeSpielerDesSpieltages(managerBericht, aktuelleStartelf.elf, managerBericht.istHeim ? managerBericht.tGast : managerBericht.tHeim, managerBericht.gegnerBericht) : null;
     const letzterSpielbericht = managerBericht ? { ...managerBericht, motm: spielerDesSpieltages, einwechslungen } : null;
     // Neuer Zusammenfassungs-Eintrag für die Spielplan-Historie: anders als letzterSpielbericht (der
     // beim nächsten Spieltag überschrieben wird) bleibt dieser dauerhaft erhalten — Basis für den neuen
@@ -14823,10 +14870,17 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       if (zufallsereignis.stabRolleFrei) stabNachEreignis = { ...stabNachEreignis, [zufallsereignis.stabRolleFrei]: null };
       neuesLetztesEreignis = { id: zufallsereignis.id, kategorie: zufallsereignis.kategorie, typ: zufallsereignis.typ, icon: zufallsereignis.icon, titel: zufallsereignis.titel, text: zufallsereignis.text, datum: neuesDatum };
     }
-    const squadNachEreignisMitMotm = spielerDesSpieltages ? erhoeheMotmZaehler(squadNachEreignis, spielerDesSpieltages.id) : squadNachEreignis;
+    // Ist "Spieler des Tages" jetzt ein Gegenspieler (siehe bestimmeSpielerDesSpieltages), gehört der
+    // Zähler-Anstieg zu dessen eigenem Team, nicht zum eigenen Kader — beide liegen bei einem Liga-
+    // spiel praktisch immer in derselben Division, lassen sich also hier direkt mit auflösen.
+    const motmIstGegner = spielerDesSpieltages && !squadNachEreignis.some(p => p.id === spielerDesSpieltages.id);
+    const squadNachEreignisMitMotm = spielerDesSpieltages && !motmIstGegner ? erhoeheMotmZaehler(squadNachEreignis, spielerDesSpieltages.id) : squadNachEreignis;
+    const gegnerSquadsMitMotm = motmIstGegner && managerBericht?.gegnerTeam
+      ? { [managerBericht.gegnerTeam]: erhoeheMotmZaehler(neueDivisions[managerDivId].squads[managerBericht.gegnerTeam], spielerDesSpieltages.id) }
+      : {};
     neueDivisions[managerDivId] = {
       ...neueDivisions[managerDivId],
-      squads: { ...neueDivisions[managerDivId].squads, [profile.team]: squadNachEreignisMitMotm },
+      squads: { ...neueDivisions[managerDivId].squads, ...gegnerSquadsMitMotm, [profile.team]: squadNachEreignisMitMotm },
       stadien: { ...neueDivisions[managerDivId].stadien, [profile.team]: stadionNachEreignis }
     };
 
@@ -17831,7 +17885,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                         <span className="text-emerald-200">{bericht.einwechslungen.map(p => p.name).join(", ")}</span>
                       </div>
                     )}
-                    {(typ === "liga" || typ === "pokal" || typ === "europapokal") && bericht?.motm && (
+                    {(typ === "liga" || typ === "pokal" || typ === "europapokal" || typ === "testspiel") && bericht?.motm && (
                       <div className="text-xs border-t border-emerald-900 pt-2 mt-1">
                         <span className="text-amber-400">⭐ Spieler des Spieltages: </span>
                         <span className="text-amber-300 font-semibold">{bericht.motm.name}</span>
