@@ -7296,7 +7296,10 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
 function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, stab, vertragGesperrt, trophaeen, teamName, onJugendfoerderungUmschalten, onLeihoptionKaufen, meineAusgeliehenenSpieler, alleDivisionen }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   // Kollisionsfrei PRO TEAM — kein Porträt kommt innerhalb dieses Kaders zweimal vor.
-  const squadPortraits = useMemo(() => spielerPortraitsFuerTeam(squad.map(p => p.id)), [squad]);
+  const squadPortraits = useMemo(
+    () => spielerPortraitsFuerTeam([...squad.map(p => p.id), ...(meineAusgeliehenenSpieler || []).map(e => e.spielerId)]),
+    [squad, meineAusgeliehenenSpieler]
+  );
   // vertragGesperrt speichert jetzt ein Datum ("gesperrt bis") statt eines einfachen true/false —
   // eine zeitlich begrenzte Abkühlphase (ca. 3 Wochen) statt einer kompletten Saisonsperre.
   const istAktuellGesperrt = spielerId => vertragGesperrt?.[spielerId] && vertragGesperrt[spielerId] > datum;
