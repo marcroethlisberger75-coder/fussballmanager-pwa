@@ -6403,21 +6403,27 @@ function simulateDivisionMatchday(division, coachBonuses = {}, managerTeam = nul
     applyResult(table, heim, gast, tHeim, tGast);
     neueResultate.push({ heim, gast, tHeim, tGast, spieltag: division.matchday + 1 });
 
-    // Wichtig: simuliereEreignisse wählt Torschützen/Karten aus dem übergebenen Spielerkreis — bei
-    // beiden Teams bisher der GANZE Kader, nicht nur die tatsächlich eingesetzten Spieler. Beim
-    // Manager-Team (wo eine echte Aufstellung existiert) wird das jetzt auf Startelf + realistische
-    // Einwechslungen eingeschränkt, damit kein Spieler eine Karte/ein Tor bekommt, der an diesem
-    // Spieltag gar nicht aufgelaufen ist. Bei KI-Teams bleibt es bei der bisherigen, vereinfachten
-    // Ganzkader-Auswahl (dort existiert keine echte Aufstellung, nur eine Stärke-Zahl).
-    const spielerkreis = (team) => {
-      if (team !== managerTeam || !managerFormation) return neueSquads[team];
-      const { elf, bank } = waehleStartelf(neueSquads[team], managerFormation);
-      return [...elf, ...waehleEinwechslungen(bank)];
+    // Wichtig: simuliereEreignisse wählt Torschützen/Karten aus dem übergebenen Spielerkreis. Für BEIDE
+    // Seiten wird jetzt eine echte Startelf berechnet (KI-Teams pauschal im 4-4-2, mangels eigener
+    // Formationswahl) statt wie bisher den ganzen Kader zur Verfügung zu stellen — sonst hätte
+    // theoretisch auch ein gar nicht aufgelaufener Ersatzspieler ein Tor bekommen können. Wichtiger
+    // noch: nur so wird für JEDEN Spieler eines KI-Vereins überhaupt einmal ein Spieleinsatz gezählt
+    // (spiele-Feld) — vorher wurde das bei keinem KI-Verein je hochgezählt, wodurch z.B. ausgeliehene
+    // eigene Spieler bei ihrem Leihverein für immer auf 0 Einsätzen stehen blieben, egal wie stark sie
+    // dort eigentlich gewesen wären.
+    const aiFormation = FORMATIONEN.find(f => f.id === "4-4-2");
+    const spielerkreisUndEinsatz = (team) => {
+      const formationFuerTeam = team === managerTeam && managerFormation ? managerFormation : aiFormation;
+      const { elf, bank } = waehleStartelf(neueSquads[team], formationFuerTeam);
+      const einwechslungen = waehleEinwechslungen(bank);
+      return { kreis: [...elf, ...einwechslungen], eingesetzteIds: new Set([...elf, ...einwechslungen].map(p => p.id)) };
     };
-    const heimEreignisse = simuliereEreignisse(spielerkreis(heim), tHeim, standardInfoMap[heim] || null, heimRot);
-    const gastEreignisse = simuliereEreignisse(spielerkreis(gast), tGast, standardInfoMap[gast] || null, gastRot);
-    neueSquads[heim] = wendeEreignisseUndKartenAn(neueSquads[heim], heimEreignisse, true);
-    neueSquads[gast] = wendeEreignisseUndKartenAn(neueSquads[gast], gastEreignisse, true);
+    const heimEinsatz = spielerkreisUndEinsatz(heim);
+    const gastEinsatz = spielerkreisUndEinsatz(gast);
+    const heimEreignisse = simuliereEreignisse(heimEinsatz.kreis, tHeim, standardInfoMap[heim] || null, heimRot);
+    const gastEreignisse = simuliereEreignisse(gastEinsatz.kreis, tGast, standardInfoMap[gast] || null, gastRot);
+    neueSquads[heim] = wendeEreignisseUndKartenAn(neueSquads[heim], heimEreignisse, true).map(p => heimEinsatz.eingesetzteIds.has(p.id) ? { ...p, spiele: (p.spiele || 0) + 1 } : p);
+    neueSquads[gast] = wendeEreignisseUndKartenAn(neueSquads[gast], gastEreignisse, true).map(p => gastEinsatz.eingesetzteIds.has(p.id) ? { ...p, spiele: (p.spiele || 0) + 1 } : p);
 
     // Tageswertung für die "Elf des Tages" sammeln — für beide Teams dieser Paarung.
     [
@@ -10042,6 +10048,7 @@ const SPIELREGELN_KATEGORIEN = [
     punkte: [
       "Im Transfermarkt-Tab lässt sich ein gelisteter Spieler eines anderen Vereins statt kaufen auch für eine Saison ausleihen (ca. 15% des Marktwerts als Leihgebühr) — er ist im Kader-Tab klar mit \"🔄 Leihe von [Verein]\" gekennzeichnet.",
       "Umgekehrt lässt sich im Verkaufen-Modus ein eigener Spieler an einen anderen Verein (eigene, höhere oder tiefere Liga) verleihen — dafür gibt es eine kleine Entschädigung. Der Ziel-Verein wird gezielt danach gewählt, wo an der Position des Spielers Bedarf besteht (einer der dort schwächsten Vereine), damit er dort realistisch auch tatsächlich zum Einsatz kommt und sich weiterentwickelt.",
+      "Auch bei allen anderen (KI-)Vereinen wird jetzt jede Woche eine echte Startelf berechnet (statt nur einer abstrakten Stärkezahl) — nur so zählen Spieleinsätze überhaupt, was gerade für verliehene oder verkaufte eigene Spieler bei ihrem neuen Verein wichtig ist.",
       "Jede Leihe läuft genau eine Saison und kehrt beim Saisonübergang automatisch zum Stammverein zurück — sein ursprünglicher Vertrag lebt dabei wieder auf.",
       "Im Transfermarkt-Tab unter \"Meine Leihspieler\" siehst du jederzeit den aktuellen Stand deiner verliehenen Spieler: aktueller Verein, Einsätze und Stärkeveränderung seit dem Verleih.",
       "Leihspieler gehören nicht wirklich zum Verein: sie lassen sich nicht selbst weiterverkaufen oder -verleihen, erscheinen nicht auf dem Transfermarkt und werden vom Trainer nicht als Verkaufskandidaten vorgeschlagen.",
