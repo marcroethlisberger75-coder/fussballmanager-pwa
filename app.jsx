@@ -7495,7 +7495,10 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
               return (
                 <div key={e.spielerId} className="flex items-center justify-between text-xs border border-orange-400/30 rounded px-3 py-1.5" style={{ backgroundColor: "rgba(251,146,60,0.05)" }}>
                   <span className="text-emerald-100">
-                    {e.name} <span className="text-emerald-600">· {e.posName}</span>
+                    {aktuellerSpieler ? (
+                      <span className="underline decoration-dotted hover:text-amber-300 cursor-pointer" onClick={() => setAusgewaehlterSpieler(aktuellerSpieler)}>{e.name}</span>
+                    ) : e.name}
+                    {" "}<span className="text-emerald-600">· {e.posName}{aktuellerSpieler ? ` · ${aktuellerSpieler.alter}J · Stärke ${aktuellerSpieler.rating}` : ""}</span>
                   </span>
                   <span className="text-orange-300 text-[11px]">
                     🔄 Ausgeliehen{aktuellerVerein ? ` zu ${aktuellerVerein}` : ""} · {aktuellerSpieler ? `${aktuellerSpieler.spiele || 0} Einsätze` : "Spur verloren"}
