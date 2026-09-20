@@ -7293,7 +7293,7 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
   );
 }
 
-function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, stab, vertragGesperrt, trophaeen, teamName, onJugendfoerderungUmschalten, onLeihoptionKaufen }) {
+function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, stab, vertragGesperrt, trophaeen, teamName, onJugendfoerderungUmschalten, onLeihoptionKaufen, meineAusgeliehenenSpieler, alleDivisionen }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   // Kollisionsfrei PRO TEAM — kein Porträt kommt innerhalb dieses Kaders zweimal vor.
   const squadPortraits = useMemo(() => spielerPortraitsFuerTeam(squad.map(p => p.id)), [squad]);
@@ -7485,6 +7485,27 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
           );})}
         </tbody>
       </table>
+      {meineAusgeliehenenSpieler && meineAusgeliehenenSpieler.length > 0 && (
+        <div className="mt-4">
+          <div className="text-[11px] uppercase tracking-wider text-orange-400/80 mb-1.5">Verliehen — aktueller Stand</div>
+          <div className="space-y-1">
+            {meineAusgeliehenenSpieler.map(e => {
+              const aktuellerVerein = e.verliehenAnDivId && alleDivisionen?.[e.verliehenAnDivId]?.teams.includes(e.verliehenAn) ? e.verliehenAn : null;
+              const aktuellerSpieler = aktuellerVerein ? alleDivisionen[e.verliehenAnDivId].squads[aktuellerVerein]?.find(p => p.id === e.spielerId) : null;
+              return (
+                <div key={e.spielerId} className="flex items-center justify-between text-xs border border-orange-400/30 rounded px-3 py-1.5" style={{ backgroundColor: "rgba(251,146,60,0.05)" }}>
+                  <span className="text-emerald-100">
+                    {e.name} <span className="text-emerald-600">· {e.posName}</span>
+                  </span>
+                  <span className="text-orange-300 text-[11px]">
+                    🔄 Ausgeliehen{aktuellerVerein ? ` zu ${aktuellerVerein}` : ""} · {aktuellerSpieler ? `${aktuellerSpieler.spiele || 0} Einsätze` : "Spur verloren"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {ausgewaehlterSpieler && (
         <SpielerDetailModal
           spieler={ausgewaehlterSpieler}
@@ -10014,7 +10035,7 @@ const SPIELREGELN_KATEGORIEN = [
     icon: Repeat, farbe: "#fb923c", titel: "Leihgeschäft",
     punkte: [
       "Im Transfermarkt-Tab lässt sich ein gelisteter Spieler eines anderen Vereins statt kaufen auch für eine Saison ausleihen (ca. 15% des Marktwerts als Leihgebühr) — er ist im Kader-Tab klar mit \"🔄 Leihe von [Verein]\" gekennzeichnet.",
-      "Umgekehrt lässt sich im Verkaufen-Modus ein eigener Spieler an einen anderen Verein (eigene, höhere oder tiefere Liga) verleihen — dafür gibt es eine kleine Entschädigung, und der Spieler sammelt dort Spielpraxis und entwickelt sich normal weiter.",
+      "Umgekehrt lässt sich im Verkaufen-Modus ein eigener Spieler an einen anderen Verein (eigene, höhere oder tiefere Liga) verleihen — dafür gibt es eine kleine Entschädigung. Der Ziel-Verein wird gezielt danach gewählt, wo an der Position des Spielers Bedarf besteht (einer der dort schwächsten Vereine), damit er dort realistisch auch tatsächlich zum Einsatz kommt und sich weiterentwickelt.",
       "Jede Leihe läuft genau eine Saison und kehrt beim Saisonübergang automatisch zum Stammverein zurück — sein ursprünglicher Vertrag lebt dabei wieder auf.",
       "Im Transfermarkt-Tab unter \"Meine Leihspieler\" siehst du jederzeit den aktuellen Stand deiner verliehenen Spieler: aktueller Verein, Einsätze und Stärkeveränderung seit dem Verleih.",
       "Leihspieler gehören nicht wirklich zum Verein: sie lassen sich nicht selbst weiterverkaufen oder -verleihen, erscheinen nicht auf dem Transfermarkt und werden vom Trainer nicht als Verkaufskandidaten vorgeschlagen.",
@@ -13253,7 +13274,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const gegnerSquad = division.squads[offenesTestspiel.gegner];
       const { tHeim, tGast, schwachstelle, neuesSquad, ereignisse, gegnerEreignisse } = simuliereTestspiel(eigenesSquad, gegnerSquad, formation);
       const { elf: testStartelf } = waehleStartelf(eigenesSquad, formation);
-      const spielerDesSpieltagesTest = bestimmeSpielerDesSpieltages({ tore: ereignisse.torSpieler, vorlagen: ereignisse.vorlagenSpieler }, testStartelf, tGast, { tore: gegnerEreignisse.torSpieler, vorlagen: gegnerEreignisse.vorlagenSpieler });
+      const spielerDesSpieltagesTestRoh = bestimmeSpielerDesSpieltages({ tore: ereignisse.torSpieler, vorlagen: ereignisse.vorlagenSpieler }, testStartelf, tGast, { tore: gegnerEreignisse.torSpieler, vorlagen: gegnerEreignisse.vorlagenSpieler });
+      const spielerDesSpieltagesTest = spielerDesSpieltagesTestRoh && !testStartelf.some(p => p.id === spielerDesSpieltagesTestRoh.id)
+        ? { ...spielerDesSpieltagesTestRoh, gegnerVerein: offenesTestspiel.gegner }
+        : spielerDesSpieltagesTestRoh;
       const neuesDatum = addTage(datum, 7);
       const istVorsaisonSpiel = !!offenesVorsaisonSpiel;
 
@@ -13924,7 +13948,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // Einwechslungen und Spieler des Spieltages — bislang nur bei Liga-Spielen berechnet, jetzt auch
       // beim Pokal. Nutzt dieselbe aktuelle Startelf/Bank-Aufteilung wie die Liga.
       const einwechslungenPokal = managerErgebnis ? waehleEinwechslungen(aktuelleStartelf.bank) : [];
-      const spielerDesSpieltagesPokal = managerErgebnis ? bestimmeSpielerDesSpieltages({ tore: managerPokalEreignisse.torSpieler, vorlagen: managerPokalEreignisse.vorlagenSpieler }, aktuelleStartelf.elf, managerErgebnis.heim === profile.team ? managerErgebnis.tGast : managerErgebnis.tHeim, { tore: managerPokalGegnerEreignisse.torSpieler, vorlagen: managerPokalGegnerEreignisse.vorlagenSpieler }) : null;
+      const spielerDesSpieltagesPokalRoh = managerErgebnis ? bestimmeSpielerDesSpieltages({ tore: managerPokalEreignisse.torSpieler, vorlagen: managerPokalEreignisse.vorlagenSpieler }, aktuelleStartelf.elf, managerErgebnis.heim === profile.team ? managerErgebnis.tGast : managerErgebnis.tHeim, { tore: managerPokalGegnerEreignisse.torSpieler, vorlagen: managerPokalGegnerEreignisse.vorlagenSpieler }) : null;
+      const spielerDesSpieltagesPokal = spielerDesSpieltagesPokalRoh && !aktuelleStartelf.elf.some(p => p.id === spielerDesSpieltagesPokalRoh.id)
+        ? { ...spielerDesSpieltagesPokalRoh, gegnerVerein: managerPokalGegnerTeam }
+        : spielerDesSpieltagesPokalRoh;
       if (spielerDesSpieltagesPokal) {
         const motmPokalIstGegner = !aktuelleStartelf.elf.some(p => p.id === spielerDesSpieltagesPokal.id);
         if (motmPokalIstGegner && managerPokalGegnerTeam && managerPokalGegnerDivId) {
@@ -14164,7 +14191,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         }
       }
     });
-    const spielerDesSpieltages = managerBericht ? bestimmeSpielerDesSpieltages(managerBericht, aktuelleStartelf.elf, managerBericht.istHeim ? managerBericht.tGast : managerBericht.tHeim, managerBericht.gegnerBericht) : null;
+    const spielerDesSpieltagesRoh = managerBericht ? bestimmeSpielerDesSpieltages(managerBericht, aktuelleStartelf.elf, managerBericht.istHeim ? managerBericht.tGast : managerBericht.tHeim, managerBericht.gegnerBericht) : null;
+    // Ist "Spieler des Tages" ein Gegenspieler, wird sein Verein direkt mitgespeichert, damit die
+    // Anzeige ihn eindeutig zuordnen kann (siehe SpielberichtKarte: "Name (Verein)").
+    const spielerDesSpieltages = spielerDesSpieltagesRoh && managerBericht && !aktuelleStartelf.elf.some(p => p.id === spielerDesSpieltagesRoh.id)
+      ? { ...spielerDesSpieltagesRoh, gegnerVerein: managerBericht.gegnerTeam }
+      : spielerDesSpieltagesRoh;
     const letzterSpielbericht = managerBericht ? { ...managerBericht, motm: spielerDesSpieltages, einwechslungen } : null;
     // Neuer Zusammenfassungs-Eintrag für die Spielplan-Historie: anders als letzterSpielbericht (der
     // beim nächsten Spieltag überschrieben wird) bleibt dieser dauerhaft erhalten — Basis für den neuen
@@ -17062,7 +17094,19 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         (neueDivisions[dId]?.teams || []).forEach(t => { if (t !== profile.team) kandidatenTeams.push({ team: t, divId: dId }); });
       });
       if (!kandidatenTeams.length) return cs; // praktisch nie der Fall
-      const gewaehlterVerein = kandidatenTeams[Math.floor(Math.random() * kandidatenTeams.length)];
+      // Ziel-Verein wird jetzt gezielt nach Bedarf an GENAU dieser Position gewählt statt rein
+      // zufällig — sonst konnte ein verliehener Spieler bei einem Verein landen, der dort schon
+      // bestens besetzt ist, und dort über Monate hinweg keine einzige Spielminute (und damit auch
+      // keine Weiterentwicklung) bekommen. Die drei an dieser Position schwächsten Kandidaten werden
+      // ermittelt, daraus wird zufällig gewählt — etwas Zufall bleibt, aber der Spieler bekommt so
+      // eine realistische Chance, dort tatsächlich zu spielen.
+      const staerkeAnPosition = (team, divId) => {
+        const kandidatenAnPos = (neueDivisions[divId]?.squads[team] || []).filter(p => p.pos === spieler.pos);
+        return kandidatenAnPos.length ? Math.max(...kandidatenAnPos.map(p => p.rating)) : 0;
+      };
+      const kandidatenSortiert = [...kandidatenTeams].sort((a, b) => staerkeAnPosition(a.team, a.divId) - staerkeAnPosition(b.team, b.divId));
+      const schwaechsteKandidaten = kandidatenSortiert.slice(0, Math.min(3, kandidatenSortiert.length));
+      const gewaehlterVerein = schwaechsteKandidaten[Math.floor(Math.random() * schwaechsteKandidaten.length)];
       const zielDiv = { ...neueDivisions[gewaehlterVerein.divId], squads: { ...neueDivisions[gewaehlterVerein.divId].squads } };
       const spielerBeimLeihverein = {
         ...spieler,
@@ -17888,7 +17932,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                     {(typ === "liga" || typ === "pokal" || typ === "europapokal" || typ === "testspiel") && bericht?.motm && (
                       <div className="text-xs border-t border-emerald-900 pt-2 mt-1">
                         <span className="text-amber-400">⭐ Spieler des Spieltages: </span>
-                        <span className="text-amber-300 font-semibold">{bericht.motm.name}</span>
+                        <span className="text-amber-300 font-semibold">{bericht.motm.name}{bericht.motm.gegnerVerein ? ` (${bericht.motm.gegnerVerein})` : ""}</span>
                       </div>
                     )}
                   </div>
@@ -17906,7 +17950,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           {tab === "vereinsinfos" && <VereinsinfosView careerState={careerState} />}
           {tab === "nationalmannschaft" && bundestrainerAmt && <NationalmannschaftView divisions={divisions} bundestrainerAmt={bundestrainerAmt} onNationalkaderSetzen={onNationalkaderSetzen} onNationalformationSetzen={onNationalformationSetzen} managerDivId={managerDivId} season={season} trophaeen={trophaeen} />}
           {tab === "spielplan" && <SpielplanView division={division} managerTeam={profile.team} testspiele={testspiele} season={season} pokal={pokal} europapokal={europapokal} aktuellesDatum={datum} trainingslager={trainingslager} spielHistorie={spielHistorie} />}
-          {tab === "kader" && <KaderView squad={division.squads[profile.team]} kapitaenId={kapitaenId} elfmeterSchuetzeId={elfmeterSchuetzeId} freistossSchuetzeId={freistossSchuetzeId} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} stab={stab} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} trophaeen={trophaeen} teamName={profile.team} onJugendfoerderungUmschalten={onJugendfoerderungUmschalten} onLeihoptionKaufen={onLeihoptionKaufen} />}
+          {tab === "kader" && <KaderView squad={division.squads[profile.team]} kapitaenId={kapitaenId} elfmeterSchuetzeId={elfmeterSchuetzeId} freistossSchuetzeId={freistossSchuetzeId} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} stab={stab} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} trophaeen={trophaeen} teamName={profile.team} onJugendfoerderungUmschalten={onJugendfoerderungUmschalten} onLeihoptionKaufen={onLeihoptionKaufen} meineAusgeliehenenSpieler={meineAusgeliehenenSpieler} alleDivisionen={divisions} />}
           {tab === "taktik" && (
             <TaktikView
               squad={division.squads[profile.team]}
