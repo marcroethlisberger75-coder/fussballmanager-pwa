@@ -6410,7 +6410,9 @@ function simulateDivisionMatchday(division, coachBonuses = {}, managerTeam = nul
     // noch: nur so wird für JEDEN Spieler eines KI-Vereins überhaupt einmal ein Spieleinsatz gezählt
     // (spiele-Feld) — vorher wurde das bei keinem KI-Verein je hochgezählt, wodurch z.B. ausgeliehene
     // eigene Spieler bei ihrem Leihverein für immer auf 0 Einsätzen stehen blieben, egal wie stark sie
-    // dort eigentlich gewesen wären.
+    // dort eigentlich gewesen wären. Beim EIGENEN Team (managerTeam) wird der spiele-Zähler bewusst
+    // NICHT hier erhöht — das übernimmt weiter die eigene, genauere Stelle weiter unten (basierend auf
+    // aktuelleStartelf/einwechslungen) — sonst würde er doppelt gezählt.
     const aiFormation = FORMATIONEN.find(f => f.id === "4-4-2");
     const spielerkreisUndEinsatz = (team) => {
       const formationFuerTeam = team === managerTeam && managerFormation ? managerFormation : aiFormation;
@@ -6422,8 +6424,8 @@ function simulateDivisionMatchday(division, coachBonuses = {}, managerTeam = nul
     const gastEinsatz = spielerkreisUndEinsatz(gast);
     const heimEreignisse = simuliereEreignisse(heimEinsatz.kreis, tHeim, standardInfoMap[heim] || null, heimRot);
     const gastEreignisse = simuliereEreignisse(gastEinsatz.kreis, tGast, standardInfoMap[gast] || null, gastRot);
-    neueSquads[heim] = wendeEreignisseUndKartenAn(neueSquads[heim], heimEreignisse, true).map(p => heimEinsatz.eingesetzteIds.has(p.id) ? { ...p, spiele: (p.spiele || 0) + 1 } : p);
-    neueSquads[gast] = wendeEreignisseUndKartenAn(neueSquads[gast], gastEreignisse, true).map(p => gastEinsatz.eingesetzteIds.has(p.id) ? { ...p, spiele: (p.spiele || 0) + 1 } : p);
+    neueSquads[heim] = wendeEreignisseUndKartenAn(neueSquads[heim], heimEreignisse, true).map(p => (heim !== managerTeam && heimEinsatz.eingesetzteIds.has(p.id)) ? { ...p, spiele: (p.spiele || 0) + 1 } : p);
+    neueSquads[gast] = wendeEreignisseUndKartenAn(neueSquads[gast], gastEreignisse, true).map(p => (gast !== managerTeam && gastEinsatz.eingesetzteIds.has(p.id)) ? { ...p, spiele: (p.spiele || 0) + 1 } : p);
 
     // Tageswertung für die "Elf des Tages" sammeln — für beide Teams dieser Paarung.
     [
