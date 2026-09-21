@@ -6205,6 +6205,100 @@ function applyResult(table, heim, gast, tHeim, tGast) {
   else if (tHeim < tGast) { G.s++; G.pkt += 3; H.n++; }
   else { H.u++; G.u++; H.pkt++; G.pkt++; }
 }
+// Spinnennetz-Diagramm für die sechs Teamgeist-Dimensionen — macht auf einen Blick sichtbar, wo die
+// Stärken/Schwächen liegen, statt sechs einzelne Zahlen lesen zu müssen.
+function TeamgeistRadar({ teamgeist }) {
+  const dimensionen = [
+    { key: "kontinuitaet", label: "Kontinuität" },
+    { key: "persoenlichkeitsmix", label: "Mix" },
+    { key: "gehaltsgleichheit", label: "Gehalt" },
+    { key: "bankzufriedenheit", label: "Bank" },
+    { key: "form", label: "Form" },
+    { key: "kapitaensfuehrung", label: "Kapitän" }
+  ];
+  const mitte = 60, radius = 42;
+  const punktFuer = (i, wert) => {
+    const winkel = (Math.PI * 2 * i) / dimensionen.length - Math.PI / 2;
+    const r = (Math.max(0, Math.min(100, wert)) / 100) * radius;
+    return [mitte + r * Math.cos(winkel), mitte + r * Math.sin(winkel)];
+  };
+  const datenPunkte = dimensionen.map((d, i) => punktFuer(i, teamgeist[d.key]));
+  const datenPfad = datenPunkte.map(p => p.join(",")).join(" ");
+  return (
+    <svg width={140} height={140} viewBox="0 0 120 120" className="shrink-0 mx-auto">
+      {[0.25, 0.5, 0.75, 1].map(f => (
+        <polygon
+          key={f}
+          points={dimensionen.map((_, i) => punktFuer(i, f * 100).join(",")).join(" ")}
+          fill="none" stroke="rgba(16,185,129,0.25)" strokeWidth="0.5"
+        />
+      ))}
+      {dimensionen.map((d, i) => {
+        const [x, y] = punktFuer(i, 100);
+        return <line key={d.key} x1={mitte} y1={mitte} x2={x} y2={y} stroke="rgba(16,185,129,0.25)" strokeWidth="0.5" />;
+      })}
+      <polygon points={datenPfad} fill="rgba(251,191,36,0.28)" stroke="#fbbf24" strokeWidth="1.5" />
+      {datenPunkte.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="2" fill="#fbbf24" />)}
+      {dimensionen.map((d, i) => {
+        const [x, y] = punktFuer(i, 122);
+        return (
+          <text key={d.key} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill="#6ee7b7" style={{ fontFamily: "monospace" }}>
+            {d.label}
+          </text>
+        );
+      })}
+    </svg>
+  );
+}
+
+// Navigation in 9 Hauptgruppen mit Unter-Tabs statt ~25 einzelnen Tabs — deutlich übersichtlicher,
+// besonders auf dem Handy. "Spielregeln" bleibt bewusst ein eigener, alleinstehender Eintrag.
+const TAB_GRUPPEN = [
+  { id: "kadertaktik", label: "Kader & Taktik", icon: Users, tabs: [
+    { id: "kader", label: "Kader", icon: Users },
+    { id: "taktik", label: "Taktik", icon: ClipboardList },
+    { id: "material", label: "Training", icon: Dumbbell },
+    { id: "trainingslager", label: "Trainingslager", icon: Tent }
+  ]},
+  { id: "personal", label: "Personal & Transfers", icon: UserCog, tabs: [
+    { id: "trainer", label: "Trainer", icon: UserCog },
+    { id: "stab", label: "Mitarbeiter", icon: UserPlus },
+    { id: "transfermarkt", label: "Transfermarkt", icon: Repeat }
+  ]},
+  { id: "wettbewerbe", label: "Wettbewerbe", icon: Trophy, tabs: [
+    { id: "tabelle", label: "Tabelle", icon: Shield },
+    { id: "spielplan", label: "Spielplan", icon: CalendarDays },
+    { id: "pokal", label: "Pokal", icon: Medal },
+    { id: "europa", label: "Europapokal", icon: Trophy },
+    { id: "nationalmannschaft", label: "DFB Team", icon: Flag, bedingung: "bundestrainerAmt" }
+  ]},
+  { id: "infrastruktur", label: "Infrastruktur", icon: Building2, tabs: [
+    { id: "stadion", label: "Stadion", icon: Building2 },
+    { id: "trainingsmaterial", label: "Material", icon: Package },
+    { id: "verpflegung", label: "Verpflegung", icon: Coffee },
+    { id: "fanshop", label: "Fanshop", icon: ShoppingBag }
+  ]},
+  { id: "finanzen", label: "Finanzen", icon: Wallet, tabs: [
+    { id: "sponsoring", label: "Sponsoring", icon: Megaphone },
+    { id: "buchhaltung", label: "Buchhaltung", icon: Wallet }
+  ]},
+  { id: "jugendabteilung", label: "Jugendabteilung", icon: Sprout, tabs: [
+    { id: "jugend", label: "Jugend", icon: Sprout }
+  ]},
+  { id: "historie", label: "Historie", icon: TrendingUp, tabs: [
+    { id: "statistik", label: "Statistik", icon: TrendingUp },
+    { id: "trophaeen", label: "Trophäen", icon: Trophy },
+    { id: "karriere", label: "Karriere", icon: Medal },
+    { id: "jahresbericht", label: "Jahresbericht", icon: Info }
+  ]},
+  { id: "vereinfans", label: "Verein/Fans", icon: Heart, tabs: [
+    { id: "vereinsinfos", label: "Vereinsinfos", icon: Newspaper },
+    { id: "fanclub", label: "Fanclub", icon: Heart }
+  ]}
+];
+const TAB_ZU_GRUPPE = {};
+TAB_GRUPPEN.forEach(g => g.tabs.forEach(t => { TAB_ZU_GRUPPE[t.id] = g.id; }));
+
 function sortedTable(table) {
   return Object.values(table).sort((a, b) => {
     if (b.pkt !== a.pkt) return b.pkt - a.pkt;
@@ -7068,7 +7162,12 @@ function TabelleView({ division, managerTeam, managerBonus = 0 }) {
                   <span className={`inline-block w-1 h-4 mr-1 align-middle rounded-sm ${auf ? "bg-emerald-400" : ab ? "bg-red-500" : relegation ? "bg-amber-400" : "bg-transparent"}`}></span>
                   {platz}
                 </td>
-                <td className="py-1.5">{row.name}</td>
+                <td className="py-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <VereinsWappen teamName={row.name} size={16} />
+                    {row.name}
+                  </span>
+                </td>
                 <td className="text-center py-1.5 text-emerald-400">
                   {staerke}
                   {istManager && Math.abs(managerBonus) >= 0.5 && (
@@ -7338,30 +7437,33 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
           <span className={`text-sm font-bold ${teamgeistInfo.farbe}`}>{teamgeist.gesamt}/100 — {teamgeistInfo.label}</span>
         </div>
         <p className="text-[11px] text-emerald-600 mb-2">Ein eingespieltes, harmonierendes Team spielt über seine Einzelqualität hinaus — wirkt sich direkt auf die Spielstärke aus.</p>
-        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-[10px]">
-          <div>
-            <div className="text-emerald-600">Kontinuität</div>
-            <div className="text-emerald-200 font-semibold">{teamgeist.kontinuitaet}</div>
-          </div>
-          <div>
-            <div className="text-emerald-600">Persönlichkeitsmix</div>
-            <div className="text-emerald-200 font-semibold">{teamgeist.persoenlichkeitsmix}</div>
-          </div>
-          <div>
-            <div className="text-emerald-600">Gehaltsgleichheit</div>
-            <div className="text-emerald-200 font-semibold">{teamgeist.gehaltsgleichheit}</div>
-          </div>
-          <div>
-            <div className="text-emerald-600">Bankzufriedenheit</div>
-            <div className="text-emerald-200 font-semibold">{teamgeist.bankzufriedenheit}</div>
-          </div>
-          <div>
-            <div className="text-emerald-600">Form</div>
-            <div className="text-emerald-200 font-semibold">{teamgeist.form}</div>
-          </div>
-          <div>
-            <div className="text-emerald-600">Kapitänsführung</div>
-            <div className="text-emerald-200 font-semibold">{teamgeist.kapitaensfuehrung}</div>
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <TeamgeistRadar teamgeist={teamgeist} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px] flex-1 w-full">
+            <div>
+              <div className="text-emerald-600">Kontinuität</div>
+              <div className="text-emerald-200 font-semibold">{teamgeist.kontinuitaet}</div>
+            </div>
+            <div>
+              <div className="text-emerald-600">Persönlichkeitsmix</div>
+              <div className="text-emerald-200 font-semibold">{teamgeist.persoenlichkeitsmix}</div>
+            </div>
+            <div>
+              <div className="text-emerald-600">Gehaltsgleichheit</div>
+              <div className="text-emerald-200 font-semibold">{teamgeist.gehaltsgleichheit}</div>
+            </div>
+            <div>
+              <div className="text-emerald-600">Bankzufriedenheit</div>
+              <div className="text-emerald-200 font-semibold">{teamgeist.bankzufriedenheit}</div>
+            </div>
+            <div>
+              <div className="text-emerald-600">Form</div>
+              <div className="text-emerald-200 font-semibold">{teamgeist.form}</div>
+            </div>
+            <div>
+              <div className="text-emerald-600">Kapitänsführung</div>
+              <div className="text-emerald-200 font-semibold">{teamgeist.kapitaensfuehrung}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -7719,7 +7821,9 @@ function SpielplanView({ division, managerTeam, testspiele, season, pokal, europ
                 <span className="text-emerald-500">{s.wettbewerb}{s.spieltag != null ? ` · Spieltag ${s.spieltag}` : ""} · {formatDatum(s.datum)}</span>
                 <span className="text-emerald-600">{s.formation}</span>
               </div>
-              <div className="text-sm text-emerald-100 font-semibold mb-1.5">{s.heim} {s.tHeim}:{s.tGast} {s.gast}</div>
+              <div className="text-sm text-emerald-100 font-semibold mb-1.5 flex items-center gap-1.5 flex-wrap">
+                <VereinsWappen teamName={s.heim} size={16} /> {s.heim} {s.tHeim}:{s.tGast} {s.gast} <VereinsWappen teamName={s.gast} size={16} />
+              </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-emerald-400">
                 {s.torSpieler?.length > 0 && (
                   <div className="col-span-2"><span className="text-emerald-600">Tore:</span> {s.torSpieler.map(t => t.name).join(", ")}</div>
@@ -9992,6 +10096,7 @@ const SPIELREGELN_KATEGORIEN = [
   {
     icon: Flag, farbe: "#fcd34d", titel: "Erste Schritte",
     punkte: [
+      "Auf dem Handy sind die Tabs in 9 Hauptgruppen zusammengefasst (z.B. \"Kader & Taktik\", \"Personal & Transfers\", \"Wettbewerbe\") — antippen zeigt darunter die passenden Unter-Tabs. Ein Punkt an einer Hauptgruppe bedeutet, dass mindestens einer ihrer Unter-Tabs etwas Neues hat.",
       "Kader ansehen: Wer spielt auf welcher Position, wer ist verletzt oder gesperrt?",
       "Taktik-Tab: Formation wählen und Philosophie-Paket festlegen.",
       "Trainer-Tab prüfen: Hat der Trainer Wünsche (Positionen, Verkäufe, Material, Mitarbeiter)? Erfüllte Wünsche machen ihn zufriedener.",
@@ -12903,6 +13008,48 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       setCareerState(cs => ({ ...cs, vereinsinfosGelesenAmDatum: datum }));
     }
     setTab(neuerTab);
+  };
+  // Ein Punkt pro Tab (rot = braucht Aufmerksamkeit, gelb = optionale Gelegenheit, blau = informativ) —
+  // exakt dieselben Bedingungen wie vorher pro Einzel-Tab, jetzt aber wiederverwendbar, damit sich eine
+  // Hauptgruppe automatisch färbt, sobald IRGENDEINER ihrer Unter-Tabs etwas anzuzeigen hat.
+  const tabBenachrichtigung = (tabId) => {
+    switch (tabId) {
+      case "transfermarkt":
+        if (!fenster.offen) return null;
+        return (eingehendeAngebote.length > 0 || spielerberaterAngebote.length > 0) ? "red" : "amber";
+      case "trainingslager": return campVerfuegbar ? "amber" : null;
+      case "jugend":
+        if (akademie?.namensSponsorAngebot || jugend?.sichtung) return "red";
+        if (jugend?.investition == null) return "amber";
+        if (jugendKannAusbauen) return "amber";
+        return null;
+      case "trainer": return (!coach || (coach && trainerBrauchtAktion)) ? "red" : null;
+      case "sponsoring": return (werbebanner.angebote.length > 0 || stadionBrauchtAktion || !trikotsponsor || !aermelsponsor || !trainingsanzugsponsor) ? "red" : null;
+      case "stab": return STAB_ROLLEN.some(r => !stab[r.id]) ? "red" : null;
+      case "fanshop": return FANARTIKEL_TYPEN.some(a => (fanshop[a.id]?.bestand ?? 0) <= 0) ? "red" : null;
+      case "fanclub": return fanclub.anliegen ? "red" : null;
+      case "europa": return europaSpielHeute ? "sky" : null;
+      case "stadion": return (stadionBrauchtAktion || stadionEventOffen) ? "red" : null;
+      case "verpflegung": return (IMBISS_ARTIKEL_TYPEN.some(a => (imbiss[a.id]?.bestand ?? 0) <= 0 || (vereinsheim[a.id]?.bestand ?? 0) <= 0)) ? "red" : null;
+      case "trainingsmaterial": return materialBrauchtAktion ? "red" : null;
+      case "kader": return kaderBrauchtAktion ? "red" : null;
+      case "taktik": return taktikBrauchtAktion ? "red" : null;
+      case "vereinsinfos": return vereinsinfosUngelesen ? "red" : null;
+      case "nationalmannschaft": return (bundestrainerAmt?.kaderIds || []).length < 11 ? "red" : null;
+      default: return null;
+    }
+  };
+  const BENACHRICHTIGUNG_FARBE = { red: "bg-red-500", amber: "bg-amber-400", sky: "bg-sky-400" };
+  // Für eine Hauptgruppe: die "schlimmste" Farbe unter allen ihren (sichtbaren) Unter-Tabs gewinnt.
+  const gruppeBenachrichtigung = (gruppe) => {
+    const farben = gruppe.tabs
+      .filter(t => !t.bedingung || (t.bedingung === "bundestrainerAmt" && bundestrainerAmt))
+      .map(t => tabBenachrichtigung(t.id))
+      .filter(Boolean);
+    if (farben.includes("red")) return "red";
+    if (farben.includes("amber")) return "amber";
+    if (farben.includes("sky")) return "sky";
+    return null;
   };
   const managerDivId = findManagerDivision(divisions, profile.team);
   const division = divisions[managerDivId];
@@ -17693,66 +17840,55 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           </nav>
 
           {/* Auf schmalen Bildschirmen (Handy) bleibt die Tab-Leiste wie bisher oben, waagrecht — die
-              linke Spalte (Frame 1) ist dort zu schmal, um sinnvoll Platz zu sparen. */}
+              linke Spalte (Frame 1) ist dort zu schmal, um sinnvoll Platz zu sparen. Navigation jetzt
+              zweistufig: oben die 9 Hauptgruppen (immer sichtbar), darunter die Unter-Tabs der gerade
+              aktiven Gruppe — statt bisher ~25 einzelner Tabs in einer einzigen, langen Reihe. */}
           <div className="flex-1 min-w-0 space-y-4">
-            <div className="md:hidden flex gap-1 border-b border-emerald-800 flex-wrap">
-              {[
-                { id: "tabelle", label: "Tabelle", icon: Shield },
-                { id: "vereinsinfos", label: "Vereinsinfos", icon: Newspaper },
-                { id: "spielplan", label: "Spielplan", icon: CalendarDays },
-                { id: "kader", label: "Kader", icon: Users },
-                ...(bundestrainerAmt ? [{ id: "nationalmannschaft", label: "DFB Team", icon: Flag }] : []),
-                { id: "taktik", label: "Taktik", icon: ClipboardList },
-                { id: "material", label: "Training", icon: Dumbbell },
-                { id: "trainer", label: "Trainer", icon: UserCog },
-                { id: "stab", label: "Mitarbeiter", icon: UserPlus },
-                { id: "transfermarkt", label: "Transfermarkt", icon: Repeat },
-                { id: "trainingslager", label: "Trainingslager", icon: Tent },
-                { id: "trainingsmaterial", label: "Material", icon: Package },
-                { id: "pokal", label: "Pokal", icon: Medal },
-                { id: "europa", label: "Europapokal", icon: Trophy },
-                { id: "statistik", label: "Statistik", icon: TrendingUp },
-                { id: "jugend", label: "Jugend", icon: Sprout },
-                { id: "stadion", label: "Stadion", icon: Building2 },
-                { id: "verpflegung", label: "Verpflegung", icon: Coffee },
-                { id: "fanshop", label: "Fanshop", icon: ShoppingBag },
-                { id: "sponsoring", label: "Sponsoring", icon: Megaphone },
-                { id: "fanclub", label: "Fanclub", icon: Heart },
-                { id: "buchhaltung", label: "Buchhaltung", icon: Wallet },
-                { id: "trophaeen", label: "Trophäen", icon: Trophy },
-                { id: "jahresbericht", label: "Jahresbericht", icon: Info },
-                { id: "karriere", label: "Karriere", icon: Medal },
-                { id: "regeln", label: "Spielregeln", icon: BookOpen }
-              ].map(t => (
+            <div className="md:hidden space-y-1.5">
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {TAB_GRUPPEN.map(g => {
+                  const aktiv = TAB_ZU_GRUPPE[tab] === g.id;
+                  const punkt = gruppeBenachrichtigung(g);
+                  const ersterTab = g.tabs.find(t => !t.bedingung || (t.bedingung === "bundestrainerAmt" && bundestrainerAmt)) || g.tabs[0];
+                  return (
+                    <button
+                      key={g.id}
+                      onClick={() => onTabWechseln(aktiv ? tab : ersterTab.id)}
+                      className={`shrink-0 flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded border text-[10px] relative ${aktiv ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500"}`}
+                    >
+                      <g.icon size={16} />
+                      <span className="whitespace-nowrap">{g.label}</span>
+                      {punkt && <span className={`absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full ${BENACHRICHTIGUNG_FARBE[punkt]}`}></span>}
+                    </button>
+                  );
+                })}
                 <button
-                  key={t.id}
-                  onClick={() => onTabWechseln(t.id)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm border-b-2 -mb-px transition-colors ${tab === t.id ? "border-amber-400 text-amber-400" : "border-transparent text-emerald-500 hover:text-emerald-300"}`}
+                  onClick={() => onTabWechseln("regeln")}
+                  className={`shrink-0 flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded border text-[10px] ${tab === "regeln" ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500"}`}
                 >
-                  <t.icon size={14} /> {t.label}
-                  {t.id === "transfermarkt" && fenster.offen && (
-                    (eingehendeAngebote.length > 0 || spielerberaterAngebote.length > 0)
-                      ? <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                      : <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                  )}
-                  {t.id === "trainingslager" && campVerfuegbar && <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>}
-                  {t.id === "jugend" && (akademie?.namensSponsorAngebot || jugend?.sichtung) ? <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span> : t.id === "jugend" && jugend?.investition == null ? <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span> : t.id === "jugend" && jugendKannAusbauen && <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>}
-                  {t.id === "trainer" && !coach && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "trainer" && coach && trainerBrauchtAktion && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "sponsoring" && (werbebanner.angebote.length > 0 || stadionBrauchtAktion || !trikotsponsor || !aermelsponsor || !trainingsanzugsponsor) && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "stab" && STAB_ROLLEN.some(r => !stab[r.id]) && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "fanshop" && FANARTIKEL_TYPEN.some(a => (fanshop[a.id]?.bestand ?? 0) <= 0) && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "fanclub" && fanclub.anliegen && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "europa" && europaSpielHeute && <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>}
-                  {t.id === "stadion" && (stadionBrauchtAktion || stadionEventOffen) && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "verpflegung" && IMBISS_ARTIKEL_TYPEN.some(a => (imbiss[a.id]?.bestand ?? 0) <= 0 || (vereinsheim[a.id]?.bestand ?? 0) <= 0) && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "trainingsmaterial" && materialBrauchtAktion && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "kader" && kaderBrauchtAktion && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "taktik" && taktikBrauchtAktion && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "vereinsinfos" && vereinsinfosUngelesen && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
-                  {t.id === "nationalmannschaft" && (bundestrainerAmt?.kaderIds || []).length < 11 && <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>}
+                  <BookOpen size={16} />
+                  <span className="whitespace-nowrap">Spielregeln</span>
                 </button>
-              ))}
+              </div>
+              {tab !== "regeln" && TAB_GRUPPEN.find(g => g.id === TAB_ZU_GRUPPE[tab])?.tabs.length > 1 && (
+                <div className="flex gap-1 border-b border-emerald-800 flex-wrap">
+                  {TAB_GRUPPEN.find(g => g.id === TAB_ZU_GRUPPE[tab]).tabs
+                    .filter(t => !t.bedingung || (t.bedingung === "bundestrainerAmt" && bundestrainerAmt))
+                    .map(t => {
+                      const punkt = tabBenachrichtigung(t.id);
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => onTabWechseln(t.id)}
+                          className={`flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm border-b-2 -mb-px transition-colors ${tab === t.id ? "border-amber-400 text-amber-400" : "border-transparent text-emerald-500 hover:text-emerald-300"}`}
+                        >
+                          <t.icon size={14} /> {t.label}
+                          {punkt && <span className={`w-1.5 h-1.5 rounded-full ${BENACHRICHTIGUNG_FARBE[punkt]}`}></span>}
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
             </div>
 
             {/* FRAME 2 — alle übrigen Informationen (Ligapyramide, Spieltagskarte, Ein-/Ausgaben,
@@ -17809,7 +17945,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                 {naechsterGegnerInfo.typ === "pokal" && <Medal size={12} />}
                 {naechsterGegnerInfo.typ === "europapokal" && <Trophy size={12} />}
                 {naechsterGegnerInfo.typ === "testspiel" && <Play size={12} />}
-                {naechsterGegnerInfo.typ === "pokal" ? `Pokal (${naechsterGegnerInfo.label})` : naechsterGegnerInfo.typ === "europapokal" ? naechsterGegnerInfo.label : naechsterGegnerInfo.typ === "testspiel" ? "Testspiel" : "Nächster Gegner"}: {naechsterGegnerInfo.heim === null ? "gegen" : naechsterGegnerInfo.heim ? "vs" : "bei"} {naechsterGegnerInfo.gegner}{naechsterGegnerInfo.datumAnzeige && ` · ${formatDatum(naechsterGegnerInfo.datumAnzeige)}`}
+                {naechsterGegnerInfo.typ === "pokal" ? `Pokal (${naechsterGegnerInfo.label})` : naechsterGegnerInfo.typ === "europapokal" ? naechsterGegnerInfo.label : naechsterGegnerInfo.typ === "testspiel" ? "Testspiel" : "Nächster Gegner"}: {naechsterGegnerInfo.heim === null ? "gegen" : naechsterGegnerInfo.heim ? "vs" : "bei"}
+                {naechsterGegnerInfo.gegner && <VereinsWappen teamName={naechsterGegnerInfo.gegner} size={14} />}
+                {" "}{naechsterGegnerInfo.gegner}{naechsterGegnerInfo.datumAnzeige && ` · ${formatDatum(naechsterGegnerInfo.datumAnzeige)}`}
               </div>
             )}
             {wartendeLigen.length > 0 && (
