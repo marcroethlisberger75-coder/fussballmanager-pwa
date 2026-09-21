@@ -6267,9 +6267,9 @@ const TAB_GRUPPEN = [
   ]},
   { id: "wettbewerbe", label: "Wettbewerbe", icon: Trophy, tabs: [
     { id: "tabelle", label: "Tabelle", icon: Shield },
-    { id: "spielplan", label: "Spielplan", icon: CalendarDays },
     { id: "pokal", label: "Pokal", icon: Medal },
     { id: "europa", label: "Europapokal", icon: Trophy },
+    { id: "spielplan", label: "Spielplan", icon: CalendarDays },
     { id: "nationalmannschaft", label: "DFB Team", icon: Flag, bedingung: "bundestrainerAmt" }
   ]},
   { id: "infrastruktur", label: "Infrastruktur", icon: Building2, tabs: [
@@ -9705,6 +9705,35 @@ function PokalView({ pokal, managerTeam }) {
   );
 }
 
+// Wrapper mit Saison-Auswahl fürs Buchhaltungs-Tab (siehe fanshopHistorie/imbissHistorie fürs
+// gleiche Prinzip beim Fanshop/Verpflegung) — zeigt standardmässig die laufende Saison, erlaubt aber
+// den Zugriff auf archivierte vergangene Saisons, sobald welche vorhanden sind.
+function BuchhaltungTabView({ saisonFinanzen, finanzenHistorie = [], season }) {
+  const [gewaehlteSaison, setGewaehlteSaison] = useState(season);
+  const istAktuelleSaison = gewaehlteSaison === season;
+  const angezeigteFinanzen = istAktuelleSaison ? saisonFinanzen : (finanzenHistorie.find(h => h.saison === gewaehlteSaison)?.finanzen || null);
+  const vorhandeneSaisons = [...finanzenHistorie.map(h => h.saison), season].sort((a, b) => b - a);
+  return (
+    <div>
+      {vorhandeneSaisons.length > 1 && (
+        <div className="flex items-center justify-end mb-2">
+          <select
+            value={gewaehlteSaison}
+            onChange={e => setGewaehlteSaison(Number(e.target.value))}
+            className="text-[11px] border border-emerald-700/50 rounded px-1.5 py-0.5"
+            style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+          >
+            {vorhandeneSaisons.map(s => (
+              <option key={s} value={s}>{s === season ? "Aktuelle Saison" : `Saison ${s}/${(s + 1) % 100}`}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      <FinanzAbrechnungView finanzen={angezeigteFinanzen} live={istAktuelleSaison} />
+    </div>
+  );
+}
+
 function FinanzAbrechnungView({ finanzen, live }) {
   const f = finanzen || leereSaisonFinanzen();
   const ertragGesamt = f.ertragTicketing + (f.ertragFanartikel || 0) + (f.ertragImbiss || 0) + f.ertragTransfers + f.ertragSponsoring + (f.ertragTV || 0) + (f.ertragEuropapokal || 0) + (f.ertragLaenderspiel || 0) + (f.ertragEvents || 0);
@@ -10662,7 +10691,10 @@ function VereinsinfosView({ careerState }) {
           <div className="flex items-center gap-2 border border-amber-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#faf3df" }}>
             <Sprout size={14} className="text-amber-700 shrink-0" />
             <span className="text-stone-800">
-              Aus der Jugendabteilung rückt auf: <span className="text-amber-800 font-semibold">{careerState.letzterJunior.name}</span>
+              {careerState.letzterJunior.ziel === "erste"
+                ? <>Aus der Jugendabteilung rückt in die erste Mannschaft auf: </>
+                : <>Neuer Junior im eigenen U19-Kader: </>}
+              <span className="text-amber-800 font-semibold">{careerState.letzterJunior.name}</span>
               <span className="text-stone-500"> · {careerState.letzterJunior.posName} · {careerState.letzterJunior.alter}J · Stärke {careerState.letzterJunior.rating}</span>
             </span>
           </div>
@@ -11790,7 +11822,7 @@ function StadionView({ stadion, budget, datum, heimspieleAnzahl, letzteHeimspiel
   );
 }
 
-function VerpflegungView({ stadion, budget, imbiss, onImbissPreisSetzen, onImbissZielSetzen, vereinsheim, onVereinsheimPreisSetzen, onVereinsheimZielSetzen, managerDivId }) {
+function VerpflegungView({ stadion, budget, imbiss, onImbissPreisSetzen, onImbissZielSetzen, vereinsheim, onVereinsheimPreisSetzen, onVereinsheimZielSetzen, managerDivId, imbissHistorie, season }) {
   const gesamtKapazitaet = STADION_KATEGORIEN.reduce((s, k) => s + (stadion[k]?.kapazitaet || 0), 0);
   const anzahlVerkaufsstaende = Math.max(2, Math.round(gesamtKapazitaet / 2500));
   const vereinsheimGroesse = berechneVereinsheimGroesse(gesamtKapazitaet);
@@ -11856,32 +11888,48 @@ function VerpflegungView({ stadion, budget, imbiss, onImbissPreisSetzen, onImbis
         </div>
       </div>
 
-      <ImbissVerkaufsstatistik imbiss={imbiss} vereinsheim={vereinsheim} />
+      <ImbissVerkaufsstatistik imbiss={imbiss} vereinsheim={vereinsheim} imbissHistorie={imbissHistorie} season={season} />
     </div>
   );
 }
 
-function ImbissVerkaufsstatistik({ imbiss, vereinsheim }) {
-  const statistikSortiert = [...IMBISS_ARTIKEL_TYPEN]
-    .map(t => {
-      const verkauftImbiss = imbiss?.[t.id]?.verkauftSaison || 0;
-      const verkauftVereinsheim = vereinsheim?.[t.id]?.verkauftSaison || 0;
-      const umsatzImbiss = imbiss?.[t.id]?.umsatzSaison || 0;
-      const umsatzVereinsheim = vereinsheim?.[t.id]?.umsatzSaison || 0;
-      return { ...t, verkauftSaison: verkauftImbiss + verkauftVereinsheim, umsatzSaison: umsatzImbiss + umsatzVereinsheim };
-    })
-    .sort((a, b) => b.verkauftSaison - a.verkauftSaison);
+function ImbissVerkaufsstatistik({ imbiss, vereinsheim, imbissHistorie = [], season }) {
+  const [gewaehlteSaison, setGewaehlteSaison] = useState(season);
+  const istAktuelleSaison = gewaehlteSaison === season;
+  const artikelDaten = istAktuelleSaison
+    ? IMBISS_ARTIKEL_TYPEN.map(t => ({
+        ...t,
+        verkauftSaison: (imbiss?.[t.id]?.verkauftSaison || 0) + (vereinsheim?.[t.id]?.verkauftSaison || 0),
+        umsatzSaison: (imbiss?.[t.id]?.umsatzSaison || 0) + (vereinsheim?.[t.id]?.umsatzSaison || 0)
+      }))
+    : (imbissHistorie.find(h => h.saison === gewaehlteSaison)?.artikel || []).map(a => ({ ...a, verkauftSaison: a.verkauft, umsatzSaison: a.umsatz }));
+  const statistikSortiert = [...artikelDaten].sort((a, b) => b.verkauftSaison - a.verkauftSaison);
   const gesamtVerkauft = statistikSortiert.reduce((s, t) => s + t.verkauftSaison, 0);
   const gesamtUmsatz = statistikSortiert.reduce((s, t) => s + t.umsatzSaison, 0);
   const maxVerkauft = statistikSortiert[0]?.verkauftSaison || 0;
-  if (gesamtVerkauft === 0) return null;
+  const vorhandeneSaisons = [...imbissHistorie.map(h => h.saison), season].sort((a, b) => b - a);
+  if (gesamtVerkauft === 0 && istAktuelleSaison && !imbissHistorie.length) return null;
 
   return (
     <div className="mt-4 border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Verkaufsstatistik dieser Saison (Stände + Vereinsheim)</div>
-        <div className="text-[11px] text-emerald-500">{gesamtVerkauft.toLocaleString("de-CH")} Stk. · {gesamtUmsatz.toLocaleString("de-CH")} €</div>
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-1.5">
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">
+          Verkaufsstatistik {istAktuelleSaison ? "dieser Saison" : `Saison ${gewaehlteSaison}/${(gewaehlteSaison + 1) % 100}`} (Stände + Vereinsheim)
+        </div>
+        {vorhandeneSaisons.length > 1 && (
+          <select
+            value={gewaehlteSaison}
+            onChange={e => setGewaehlteSaison(Number(e.target.value))}
+            className="text-[11px] border border-emerald-700/50 rounded px-1.5 py-0.5"
+            style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+          >
+            {vorhandeneSaisons.map(s => (
+              <option key={s} value={s}>{s === season ? "Aktuelle Saison" : `Saison ${s}/${(s + 1) % 100}`}</option>
+            ))}
+          </select>
+        )}
       </div>
+      <div className="text-[11px] text-emerald-500 mb-2">{gesamtVerkauft.toLocaleString("de-CH")} Stk. · {gesamtUmsatz.toLocaleString("de-CH")} €</div>
       <div className="space-y-1.5">
         {statistikSortiert.filter(t => t.verkauftSaison > 0).map((t, i) => (
           <div key={t.id} className="text-xs">
@@ -11894,6 +11942,7 @@ function ImbissVerkaufsstatistik({ imbiss, vereinsheim }) {
             </div>
           </div>
         ))}
+        {gesamtVerkauft === 0 && <div className="text-[11px] text-emerald-700">Keine Verkäufe in dieser Saison.</div>}
       </div>
     </div>
   );
@@ -12345,13 +12394,17 @@ function TrainingsmaterialEinkaufView({ trainingsmaterial, budget, managerDivId,
   );
 }
 
-function FanshopView({ fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, kapazitaet = 5000, markenwert = 50, marketingKampagnenGebucht = [], managerDivId, onMarketingKampagneKaufen, marketingBudgetProMonat = 0, onMarketingBudgetSetzen }) {
-  const statistikSortiert = [...FANARTIKEL_TYPEN]
-    .map(t => ({ ...t, verkauftSaison: fanshop[t.id]?.verkauftSaison || 0, umsatzSaison: fanshop[t.id]?.umsatzSaison || 0 }))
-    .sort((a, b) => b.verkauftSaison - a.verkauftSaison);
+function FanshopView({ fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, kapazitaet = 5000, markenwert = 50, marketingKampagnenGebucht = [], managerDivId, onMarketingKampagneKaufen, marketingBudgetProMonat = 0, onMarketingBudgetSetzen, fanshopHistorie = [], season }) {
+  const [gewaehlteSaison, setGewaehlteSaison] = useState(season);
+  const istAktuelleSaison = gewaehlteSaison === season;
+  const statistikSortiert = (istAktuelleSaison
+    ? [...FANARTIKEL_TYPEN].map(t => ({ ...t, verkauftSaison: fanshop[t.id]?.verkauftSaison || 0, umsatzSaison: fanshop[t.id]?.umsatzSaison || 0 }))
+    : (fanshopHistorie.find(h => h.saison === gewaehlteSaison)?.artikel || []).map(a => ({ ...a, verkauftSaison: a.verkauft, umsatzSaison: a.umsatz }))
+  ).sort((a, b) => b.verkauftSaison - a.verkauftSaison);
   const gesamtVerkauftSaison = statistikSortiert.reduce((s, t) => s + t.verkauftSaison, 0);
   const gesamtUmsatzSaison = statistikSortiert.reduce((s, t) => s + t.umsatzSaison, 0);
   const maxVerkauft = statistikSortiert[0]?.verkauftSaison || 0;
+  const vorhandeneFanshopSaisons = [...fanshopHistorie.map(h => h.saison), season].sort((a, b) => b - a);
   const markenwertInfo = markenwertEinordnung(markenwert);
 
   return (
@@ -12480,12 +12533,26 @@ function FanshopView({ fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, k
         })}
       </div>
 
-      {gesamtVerkauftSaison > 0 && (
+      {(gesamtVerkauftSaison > 0 || fanshopHistorie.length > 0) && (
         <div className="mt-4 border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Verkaufsstatistik dieser Saison</div>
-            <div className="text-[11px] text-emerald-500">{gesamtVerkauftSaison.toLocaleString("de-CH")} Stk. · {gesamtUmsatzSaison.toLocaleString("de-CH")} €</div>
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-1.5">
+            <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">
+              Verkaufsstatistik {istAktuelleSaison ? "dieser Saison" : `Saison ${gewaehlteSaison}/${(gewaehlteSaison + 1) % 100}`}
+            </div>
+            {vorhandeneFanshopSaisons.length > 1 && (
+              <select
+                value={gewaehlteSaison}
+                onChange={e => setGewaehlteSaison(Number(e.target.value))}
+                className="text-[11px] border border-emerald-700/50 rounded px-1.5 py-0.5"
+                style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+              >
+                {vorhandeneFanshopSaisons.map(s => (
+                  <option key={s} value={s}>{s === season ? "Aktuelle Saison" : `Saison ${s}/${(s + 1) % 100}`}</option>
+                ))}
+              </select>
+            )}
           </div>
+          <div className="text-[11px] text-emerald-500 mb-2">{gesamtVerkauftSaison.toLocaleString("de-CH")} Stk. · {gesamtUmsatzSaison.toLocaleString("de-CH")} €</div>
           <div className="space-y-1.5">
             {statistikSortiert.filter(t => t.verkauftSaison > 0).map((t, i) => (
               <div key={t.id} className="text-xs">
@@ -12498,6 +12565,7 @@ function FanshopView({ fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, k
                 </div>
               </div>
             ))}
+            {gesamtVerkauftSaison === 0 && <div className="text-[11px] text-emerald-700">Keine Verkäufe in dieser Saison.</div>}
           </div>
         </div>
       )}
@@ -13006,7 +13074,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnenGebucht = [], karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, marketingBudgetProMonat = 0, naechsteMarketingZahlung = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0 } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnenGebucht = [], karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, marketingBudgetProMonat = 0, naechsteMarketingZahlung = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [] } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -13031,7 +13099,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       case "jugend-u19": return null;
       case "trainer": return (!coach || (coach && trainerBrauchtAktion)) ? "red" : null;
       case "sponsoring": return (werbebanner.angebote.length > 0 || stadionBrauchtAktion || !trikotsponsor || !aermelsponsor || !trainingsanzugsponsor) ? "red" : null;
-      case "stab": return STAB_ROLLEN.some(r => !stab[r.id]) ? "red" : null;
+      case "stab": return null;
       case "fanshop": return FANARTIKEL_TYPEN.some(a => (fanshop[a.id]?.bestand ?? 0) <= 0) ? "red" : null;
       case "fanclub": return fanclub.anliegen ? "red" : null;
       case "europa": return europaSpielHeute ? "sky" : null;
@@ -15912,6 +15980,22 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         ertragSponsoring: sponsorZahlung + aermelZahlung + trainingsanzugZahlung + werbebannerZahlung + namensSponsorZahlung + akademieNamensSponsorZahlung,
         ertragTransfers: ausbildungsentschaedigungGesamt
       },
+      // Saison-Archiv der Verkaufsstatistik (Fanshop UND Verpflegung/Vereinsheim), BEVOR die
+      // laufenden verkauftSaison/umsatzSaison-Zähler unten auf 0 zurückgesetzt werden — ermöglicht den
+      // saisonübergreifenden Zugriff über einen Auswahl-Schalter in der jeweiligen Statistik-Anzeige.
+      fanshopHistorie: [...(fanshopHistorie || []), {
+        saison: season,
+        artikel: FANARTIKEL_TYPEN.map(t => ({ id: t.id, name: t.name, verkauft: fanshop?.[t.id]?.verkauftSaison || 0, umsatz: fanshop?.[t.id]?.umsatzSaison || 0 }))
+      }],
+      imbissHistorie: [...(imbissHistorie || []), {
+        saison: season,
+        artikel: IMBISS_ARTIKEL_TYPEN.map(t => ({
+          id: t.id, name: t.name,
+          verkauft: (imbiss?.[t.id]?.verkauftSaison || 0) + (vereinsheim?.[t.id]?.verkauftSaison || 0),
+          umsatz: (imbiss?.[t.id]?.umsatzSaison || 0) + (vereinsheim?.[t.id]?.umsatzSaison || 0)
+        }))
+      }],
+      finanzenHistorie: [...(finanzenHistorie || []), { saison: season, finanzen: saisonFinanzen }],
       fanshop: fanshop
         ? Object.fromEntries(FANARTIKEL_TYPEN.map(t => [t.id, { ...(fanshop[t.id] || { bestand: 0, verkaufspreis: t.einkaufspreis * 2 }), verkauftSaison: 0, umsatzSaison: 0 }]))
         : initialerFanshop(),
@@ -16794,7 +16878,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           jugendKader: [...(cs.jugendKader || []), { ...kandidat.spieler, alter: 17, u19: true, akademieProdukt: true, ausgebildetVon: profile.team }],
           akademie: { ...(cs.akademie || { level: 0, umbau: null, absolventenGesamt: 0 }), absolventenGesamt: (cs.akademie?.absolventenGesamt || 0) + 1 },
           jugend: { ...cs.jugend, sichtung: null },
-          letzterJunior: kandidat.spieler
+          letzterJunior: { ...kandidat.spieler, ziel: "u19" }
         };
       }
 
@@ -16818,7 +16902,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           : cs.saisonFinanzen,
         akademie: istAkademieProdukt ? { ...(cs.akademie || { level: 0, umbau: null, absolventenGesamt: 0 }), absolventenGesamt: (cs.akademie?.absolventenGesamt || 0) + 1 } : cs.akademie,
         jugend: { ...cs.jugend, sichtung: null },
-        letzterJunior: kandidat.spieler
+        letzterJunior: { ...kandidat.spieler, ziel: "erste" }
       };
     });
   };
@@ -18229,7 +18313,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           {tab === "statistik" && <StatistikView squad={division.squads[profile.team]} managerDivId={managerDivId} />}
           {tab === "karriere" && <KarriereView trophaeen={trophaeen} saisonHistorie={saisonHistorie} teamName={profile.team} profileVorname={profile.vorname} profileNachname={profile.nachname} anzahlSaisonsImAmt={anzahlSaisonsImAmt} karriereAufstiege={karriereAufstiege} karriereAbstiege={karriereAbstiege} karriereEntlassungen={karriereEntlassungen} managerReputation={managerReputation} />}
           {tab === "regeln" && <SpielregelnView />}
-          {tab === "buchhaltung" && <FinanzAbrechnungView finanzen={saisonFinanzen} live={true} />}
+          {tab === "buchhaltung" && <BuchhaltungTabView saisonFinanzen={saisonFinanzen} finanzenHistorie={finanzenHistorie} season={season} />}
           {tab === "sponsoring" && (
             <SponsoringView
               trikotsponsor={trikotsponsor}
@@ -18270,6 +18354,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onMarketingKampagneKaufen={buchMarketingKampagne}
               marketingBudgetProMonat={marketingBudgetProMonat}
               onMarketingBudgetSetzen={onMarketingBudgetSetzen}
+              fanshopHistorie={fanshopHistorie}
+              season={season}
             />
           )}
           {tab === "stadion" && (
@@ -18334,6 +18420,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onVereinsheimPreisSetzen={onVereinsheimPreisSetzen}
               onVereinsheimZielSetzen={onVereinsheimZielSetzen}
               managerDivId={managerDivId}
+              imbissHistorie={imbissHistorie}
+              season={season}
             />
           )}
           {tab === "material" && (
