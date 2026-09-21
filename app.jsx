@@ -6283,7 +6283,9 @@ const TAB_GRUPPEN = [
     { id: "buchhaltung", label: "Buchhaltung", icon: Wallet }
   ]},
   { id: "jugendabteilung", label: "Jugendabteilung", icon: Sprout, tabs: [
-    { id: "jugend", label: "Jugend", icon: Sprout }
+    { id: "jugend-investition", label: "Investition", icon: Sprout },
+    { id: "jugend-akademie", label: "Jugendakademie", icon: Building2 },
+    { id: "jugend-u19", label: "U19 Team", icon: Users }
   ]},
   { id: "historie", label: "Historie", icon: TrendingUp, tabs: [
     { id: "statistik", label: "Statistik", icon: TrendingUp },
@@ -11329,7 +11331,7 @@ function ZuschauerChart({ historie, kapazitaet }) {
   );
 }
 
-function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen }) {
+function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen }) {
   const [betrag, setBetrag] = useState(0);
   const level = akademie?.level || 0;
   const umbau = akademie?.umbau || null;
@@ -11355,6 +11357,7 @@ function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, o
 
   return (
     <div>
+      {abschnitt === "investition" && (<>
       {jugend?.sichtung && (
         <div className="mb-4">
           <TalentSichtungBanner sichtung={jugend.sichtung} budget={budget} onWaehlen={onTalentWaehlen} onAblehnen={onTalentAblehnen} />
@@ -11414,7 +11417,9 @@ function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, o
           <span className="text-amber-300 font-semibold">{jugend.investition.toLocaleString("de-CH")} €</span>
         </div>
       )}
+      </>)}
 
+      {abschnitt === "akademie" && (<>
       <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs uppercase tracking-wider text-emerald-400/80">Jugendakademie</span>
@@ -11496,7 +11501,9 @@ function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, o
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Absolventen insgesamt</div>
         </div>
       </div>
+      </>)}
 
+      {abschnitt === "u19" && (<>
       {jugendliga && (
         <div className="border border-sky-800/50 rounded p-4 mt-4" style={{ backgroundColor: "#0b1f2a" }}>
           <div className="text-xs uppercase tracking-wider text-sky-400/80 mb-2">
@@ -11551,6 +11558,7 @@ function JugendAkademieView({ akademie, budget, managerDivId, teamName, squad, o
           </div>
         </div>
       )}
+      </>)}
     </div>
   );
 }
@@ -13018,11 +13026,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         if (!fenster.offen) return null;
         return (eingehendeAngebote.length > 0 || spielerberaterAngebote.length > 0) ? "red" : "amber";
       case "trainingslager": return campVerfuegbar ? "amber" : null;
-      case "jugend":
-        if (akademie?.namensSponsorAngebot || jugend?.sichtung) return "red";
-        if (jugend?.investition == null) return "amber";
-        if (jugendKannAusbauen) return "amber";
-        return null;
+      case "jugend-investition": return jugend?.sichtung ? "red" : jugend?.investition == null ? "amber" : null;
+      case "jugend-akademie": return akademie?.namensSponsorAngebot ? "red" : jugendKannAusbauen ? "amber" : null;
+      case "jugend-u19": return null;
       case "trainer": return (!coach || (coach && trainerBrauchtAktion)) ? "red" : null;
       case "sponsoring": return (werbebanner.angebote.length > 0 || stadionBrauchtAktion || !trikotsponsor || !aermelsponsor || !trainingsanzugsponsor) ? "red" : null;
       case "stab": return STAB_ROLLEN.some(r => !stab[r.id]) ? "red" : null;
@@ -18138,8 +18144,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onPersonalstufeSetzen={onPersonalstufeSetzen}
             />
           )}
-          {tab === "jugend" && (
+          {(tab === "jugend-investition" || tab === "jugend-akademie" || tab === "jugend-u19") && (
             <JugendAkademieView
+              abschnitt={tab === "jugend-investition" ? "investition" : tab === "jugend-akademie" ? "akademie" : "u19"}
               akademie={akademie}
               budget={budget}
               managerDivId={managerDivId}
