@@ -17779,70 +17779,53 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       <main className="max-w-6xl mx-auto px-4 pt-4">
         <div className="flex gap-4 items-start">
           {/* FRAME 1 — feste linke Navigation, unabhängig vom Inhalt der anderen beiden Bereiche scrollbar */}
-          <nav className="hidden md:flex flex-col gap-0.5 shrink-0 w-48 border border-emerald-800 rounded p-2 sticky top-[88px] max-h-[calc(100vh-104px)] overflow-y-auto" style={{ backgroundColor: "#0e2818" }}>
-            {[
-              { id: "tabelle", label: "Tabelle", icon: Shield },
-              { id: "vereinsinfos", label: "Vereinsinfos", icon: Newspaper },
-              { id: "spielplan", label: "Spielplan", icon: CalendarDays },
-              { id: "kader", label: "Kader", icon: Users },
-              ...(bundestrainerAmt ? [{ id: "nationalmannschaft", label: "DFB Team", icon: Flag }] : []),
-              { id: "taktik", label: "Taktik", icon: ClipboardList },
-              { id: "material", label: "Training", icon: Dumbbell },
-              { id: "trainer", label: "Trainer", icon: UserCog },
-              { id: "stab", label: "Mitarbeiter", icon: UserPlus },
-              { id: "transfermarkt", label: "Transfermarkt", icon: Repeat },
-              { id: "trainingslager", label: "Trainingslager", icon: Tent },
-              { id: "trainingsmaterial", label: "Material", icon: Package },
-              { id: "pokal", label: "Pokal", icon: Medal },
-              { id: "europa", label: "Europapokal", icon: Trophy },
-              { id: "statistik", label: "Statistik", icon: TrendingUp },
-              { id: "jugend", label: "Jugend", icon: Sprout },
-              { id: "stadion", label: "Stadion", icon: Building2 },
-              { id: "verpflegung", label: "Verpflegung", icon: Coffee },
-              { id: "fanshop", label: "Fanshop", icon: ShoppingBag },
-              { id: "sponsoring", label: "Sponsoring", icon: Megaphone },
-              { id: "fanclub", label: "Fanclub", icon: Heart },
-              { id: "buchhaltung", label: "Buchhaltung", icon: Wallet },
-              { id: "trophaeen", label: "Trophäen", icon: Trophy },
-              { id: "jahresbericht", label: "Jahresbericht", icon: Info },
-              { id: "karriere", label: "Karriere", icon: Medal },
-              { id: "regeln", label: "Spielregeln", icon: BookOpen }
-            ].map(t => (
-              <button
-                key={t.id}
-                onClick={() => onTabWechseln(t.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs sm:text-sm rounded text-left transition-colors ${tab === t.id ? "bg-amber-400 text-[#0b1f14] font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
-              >
-                <t.icon size={14} className="shrink-0" /> <span className="flex-1">{t.label}</span>
-                {t.id === "transfermarkt" && fenster.offen && (
-                  (eingehendeAngebote.length > 0 || spielerberaterAngebote.length > 0)
-                    ? <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
-                    : <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>
-                )}
-                {t.id === "trainingslager" && campVerfuegbar && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>}
-                {t.id === "jugend" && (akademie?.namensSponsorAngebot || jugend?.sichtung) ? <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span> : t.id === "jugend" && jugend?.investition == null ? <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span> : t.id === "jugend" && jugendKannAusbauen && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>}
-                {t.id === "trainer" && !coach && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "trainer" && coach && trainerBrauchtAktion && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "sponsoring" && (werbebanner.angebote.length > 0 || stadionBrauchtAktion || !trikotsponsor || !aermelsponsor || !trainingsanzugsponsor) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "stab" && STAB_ROLLEN.some(r => !stab[r.id]) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "fanshop" && FANARTIKEL_TYPEN.some(a => (fanshop[a.id]?.bestand ?? 0) <= 0) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "fanclub" && fanclub.anliegen && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "europa" && europaSpielHeute && <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0"></span>}
-                {t.id === "stadion" && (stadionBrauchtAktion || stadionEventOffen) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "verpflegung" && IMBISS_ARTIKEL_TYPEN.some(a => (imbiss[a.id]?.bestand ?? 0) <= 0 || (vereinsheim[a.id]?.bestand ?? 0) <= 0) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "trainingsmaterial" && materialBrauchtAktion && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "kader" && kaderBrauchtAktion && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "taktik" && taktikBrauchtAktion && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "vereinsinfos" && vereinsinfosUngelesen && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-                {t.id === "nationalmannschaft" && (bundestrainerAmt?.kaderIds || []).length < 11 && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>}
-              </button>
-            ))}
+          <nav className="hidden md:flex flex-col gap-0.5 shrink-0 w-52 border border-emerald-800 rounded p-2 sticky top-[88px] max-h-[calc(100vh-104px)] overflow-y-auto" style={{ backgroundColor: "#0e2818" }}>
+            {TAB_GRUPPEN.map(g => {
+              const aktiv = TAB_ZU_GRUPPE[tab] === g.id;
+              const punkt = gruppeBenachrichtigung(g);
+              const sichtbareTabs = g.tabs.filter(t => !t.bedingung || (t.bedingung === "bundestrainerAmt" && bundestrainerAmt));
+              const ersterTab = sichtbareTabs[0];
+              return (
+                <div key={g.id}>
+                  <button
+                    onClick={() => onTabWechseln(aktiv ? tab : ersterTab.id)}
+                    className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs sm:text-sm rounded text-left transition-colors ${aktiv ? "bg-emerald-900/60 text-amber-300 font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
+                  >
+                    <g.icon size={14} className="shrink-0" /> <span className="flex-1">{g.label}</span>
+                    {punkt && <span className={`w-1.5 h-1.5 rounded-full ${BENACHRICHTIGUNG_FARBE[punkt]} shrink-0`}></span>}
+                  </button>
+                  {aktiv && sichtbareTabs.length > 1 && (
+                    <div className="ml-4 border-l border-emerald-800 pl-2 my-0.5 space-y-0.5">
+                      {sichtbareTabs.map(t => {
+                        const tPunkt = tabBenachrichtigung(t.id);
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => onTabWechseln(t.id)}
+                            className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs rounded text-left transition-colors ${tab === t.id ? "bg-amber-400 text-[#0b1f14] font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
+                          >
+                            <t.icon size={12} className="shrink-0" /> <span className="flex-1">{t.label}</span>
+                            {tPunkt && <span className={`w-1.5 h-1.5 rounded-full ${BENACHRICHTIGUNG_FARBE[tPunkt]} shrink-0`}></span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              onClick={() => onTabWechseln("regeln")}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs sm:text-sm rounded text-left transition-colors mt-1 border-t border-emerald-800 pt-2 ${tab === "regeln" ? "bg-amber-400 text-[#0b1f14] font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
+            >
+              <BookOpen size={14} className="shrink-0" /> <span className="flex-1">Spielregeln</span>
+            </button>
           </nav>
 
-          {/* Auf schmalen Bildschirmen (Handy) bleibt die Tab-Leiste wie bisher oben, waagrecht — die
-              linke Spalte (Frame 1) ist dort zu schmal, um sinnvoll Platz zu sparen. Navigation jetzt
-              zweistufig: oben die 9 Hauptgruppen (immer sichtbar), darunter die Unter-Tabs der gerade
-              aktiven Gruppe — statt bisher ~25 einzelner Tabs in einer einzigen, langen Reihe. */}
+          {/* Auf schmalen Bildschirmen (Handy) läuft die Navigation waagrecht oben statt in der linken
+              Seitenleiste (die dort zu schmal wäre, um sinnvoll Platz zu sparen) — dieselbe Gruppierung
+              wie in der Seitenleiste, nur horizontal: oben die 9 Hauptgruppen, darunter die Unter-Tabs
+              der gerade aktiven Gruppe. */}
           <div className="flex-1 min-w-0 space-y-4">
             <div className="md:hidden space-y-1.5">
               <div className="flex gap-1.5 overflow-x-auto pb-1">
