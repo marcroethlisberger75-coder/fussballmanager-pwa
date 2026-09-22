@@ -2778,15 +2778,23 @@ function ermittlePositionsBedarf(squad, eigeneStaerke) {
   return bedarf.sort((a, b) => a.spielerIdsVorher.length - b.spielerIdsVorher.length).slice(0, 3);
 }
 
-function generiereTrainerVorschlaege(alleDivisionen, managerDivId, managerTeam, budget, season, trainingsmaterial, stab, coach) {
+// Statt immer fix 3 Spieler vorzuschlagen (unabhängig vom echten Bedarf), schlägt der Trainer nur noch
+// Spieler vor, die spürbar (mind. 8 Punkte) unter dem effektiven Kaderschnitt liegen — kann je nach
+// Kaderqualität auch 0, 1 oder 2 sein, maximal weiterhin 3. Einmal abgelehnte Spieler (siehe
+// abgelehnteVerkaufsvorschlaege, für den Rest der Saison geschützt) werden nicht erneut vorgeschlagen,
+// selbst wenn sie weiterhin zu den schwächsten gehören — die Entscheidung des Managers zählt.
+function generiereTrainerVorschlaege(alleDivisionen, managerDivId, managerTeam, budget, season, trainingsmaterial, stab, coach, abgelehnteVerkaufsvorschlaege = []) {
   const eigeneDivision = alleDivisionen[managerDivId];
   const eigenesSquad = eigeneDivision.squads[managerTeam];
 
   let verkaufen = [];
   if (eigenesSquad.length > 12) {
-    verkaufen = eigenesSquad
-      .filter(p => !p.leihspieler)
-      .map(p => ({ p, effektiv: berechneEffektiveStaerke(p, managerDivId, season) }))
+    const bewertet = eigenesSquad
+      .filter(p => !p.leihspieler && !abgelehnteVerkaufsvorschlaege.includes(p.id))
+      .map(p => ({ p, effektiv: berechneEffektiveStaerke(p, managerDivId, season) }));
+    const kaderschnitt = bewertet.length ? bewertet.reduce((s, e) => s + e.effektiv, 0) / bewertet.length : 0;
+    verkaufen = bewertet
+      .filter(e => kaderschnitt - e.effektiv >= 8)
       .sort((a, b) => a.effektiv - b.effektiv)
       .slice(0, 3)
       .map(({ p }) => ({ playerId: p.id, name: p.name, rating: p.rating, alter: p.alter, vertragBisSaison: p.vertragBisSaison, gehalt: p.gehalt, grund: bestimmeVerkaufGrund(p), antwort: null, ersetzenBeimNaechstenSpieltag: false }));
@@ -3966,7 +3974,7 @@ const PRESSEKONFERENZ_FRAGEN = [
     ]
   },
   {
-    id: "verein_marketingbudget", bedingung: k => k.marketingBudgetHoch, thema: "Verein", frage: "Sie investieren aktuell spürbar mehr Geld ins Marketing. Zahlt sich das aus Ihrer Sicht aus?",
+    id: "verein_marketingbudget", bedingung: k => k.marketingBudgetHoch, thema: "Verein", frage: "Sie haben aktuell eine oder mehrere Marketingmassnahmen laufen. Zahlt sich das aus Ihrer Sicht aus?",
     antworten: [
       { text: "Absolut — ein starker Markenauftritt zahlt sich langfristig für den ganzen Verein aus.", ziel: "marke", delta: 4 },
       { text: "Wir beobachten die Entwicklung genau.", ziel: "marke", delta: 1 },
@@ -4194,17 +4202,11 @@ const FANCLUB_AKTIVITAETEN_POOL = [
    ========================================================================= */
 
 function berechneMarkenwertAenderung(kontext) {
-  const { marketingRating, tabellenplatz, anzahlTeams, digitaleInfrastruktur, teamgeist, marketingBudgetProMonat, managerDivId } = kontext;
+  const { marketingRating, tabellenplatz, anzahlTeams, digitaleInfrastruktur, teamgeist } = kontext;
   let aenderung = 0;
   // Marketingchef: kontinuierlicher, passiver Aufbau — je besser, desto stärker der wöchentliche Zuwachs
   if (marketingRating) aenderung += Math.max(0, (marketingRating - 30) / 400);
   else aenderung -= 0.02; // ohne Marketingchef bröckelt der Markenwert langsam
-  // Eigenes laufendes Marketingbudget (Schieberegler) — unabhängig vom Marketingchef, beide addieren
-  // sich. Skaliert linear bis zum Liga-Maximum (siehe MARKETING_BUDGET_MAX).
-  if (marketingBudgetProMonat > 0) {
-    const budgetMax = MARKETING_BUDGET_MAX[managerDivId] || MARKETING_BUDGET_MAX.OL;
-    aenderung += Math.min(1, marketingBudgetProMonat / budgetMax) * MARKETING_BUDGET_MAX_BONUS;
-  }
   // Sportlicher Erfolg: eine gute Tabellenposition hebt den Markenwert, eine schlechte senkt ihn
   const erfolgsFaktor = 1 - (tabellenplatz - 1) / Math.max(1, anzahlTeams - 1);
   aenderung += (erfolgsFaktor - 0.5) * 0.15;
@@ -4574,28 +4576,41 @@ const MARKETING_KAMPAGNEN = [
   { id: "kooperation", name: "Kooperation mit lokalen Unternehmen", beschreibung: "Langfristige Partnerschaften öffnen Türen — verbessert auch kommende Sponsoring-Angebote.", kosten: { BL: 1400000, L2: 340000, L3: 65000, RL: 36250, OL: 7500 }, markenwertBonus: 8 }
 ];
 
-// Laufendes monatliches Marketingbudget — ergänzt die vier einmaligen Kampagnen oben um eine
-// dauerhafte, frei wählbare Investition (Schieberegler). Anders als die Kampagnen (einmaliger,
-// fester Bonus) wirkt dieses Budget kontinuierlich Woche für Woche, ähnlich wie der Marketingchef,
-// aber unabhängig davon — beide Quellen addieren sich in berechneMarkenwertAenderung.
-const MARKETING_BUDGET_MAX = { BL: 800000, L2: 180000, L3: 32000, RL: 15000, OL: 3500 };
-// Bei maximalem Budget für die jeweilige Liga ein vergleichbarer wöchentlicher Zuwachs wie ein
-// Top-Marketingchef (siehe berechneMarkenwertAenderung: (99-30)/400 ≈ 0.17) — beide Quellen sollen
-// sich sinnvoll ergänzen, keine für sich allein den Markenwert im Alleingang durch die Decke schiessen lassen.
-const MARKETING_BUDGET_MAX_BONUS = 0.15;
-function berechneMarketingBudgetZahlung(naechsteZahlung, betragProMonat, neuesDatum) {
-  if (!betragProMonat) return { naechsteZahlung: naechsteZahlung || neuesDatum, gezahlt: 0 };
-  let naechste = naechsteZahlung || neuesDatum;
-  let gezahlt = 0;
-  let sicherheit = 0;
-  while (naechste <= neuesDatum && sicherheit < 6) {
-    gezahlt += betragProMonat;
-    naechste = addTage(naechste, 30);
-    sicherheit++;
-  }
-  return { naechsteZahlung: naechste, gezahlt };
+// Jede Kampagne wirkt nur eine begrenzte Zeit (siehe MARKETING_LAUFZEIT_SAISONS) — danach lässt die
+// Reichweite nach, der Bonus verschwindet automatisch wieder (siehe verarbeiteMarketingAblaeufe) und
+// die Kampagne wird erneut buchbar. Ersetzt das frühere, dauerhafte "einmal kaufen, für immer wirken"
+// zusammen mit dem inzwischen entfernten laufenden Marketingbudget-Schieberegler — jetzt gibt es nur
+// noch eine einzige, verständliche Mechanik.
+const MARKETING_LAUFZEIT_SAISONS = 3;
+
+// Spielerauftritt beim Sponsor: anders als die vier Kampagnen oben braucht diese Massnahme zusätzlich
+// die Wahl eines konkreten Spielers (siehe onSpielerauftrittBuchen) — Kosten und Bonus hängen von
+// dessen Spielstärke ab (ein bekannterer Spieler bringt mehr, kostet aber auch mehr Verhandlungsgeschick
+// mit dem Sponsor). "Ehrgeizige" Spieler nehmen den Termin ungern wahr und verlieren etwas Zufriedenheit.
+function berechneSpielerauftrittKosten(spieler, managerDivId) {
+  const basis = { BL: 60000, L2: 16000, L3: 3200, RL: 1800, OL: 400 }[managerDivId] || 400;
+  return Math.round(basis * (0.5 + spieler.rating / 100));
+}
+function berechneSpielerauftrittBonus(spieler) {
+  return Math.max(1, Math.round(spieler.rating / 20)); // ca. 1-5, je nach Spielstärke
 }
 
+// Läuft bei jedem Saisonübergang: prüft alle gebuchten Kampagnen (die vier festen plus laufende
+// Spielerauftritte) auf Ablauf (siehe MARKETING_LAUFZEIT_SAISONS) und zieht den seinerzeit gewährten
+// Bonus wieder ab, sobald die Reichweite nach 3 Saisons nachlässt. Gibt den neuen Markenwert, die
+// bereinigte Kampagnen-Liste sowie eine Meldung für Vereinsinfos zurück (nur die zuerst abgelaufene,
+// falls mehrere gleichzeitig ablaufen — selten, aber möglich).
+function verarbeiteMarketingAblaeufe(marketingKampagnen, markenwert, season, managerDivId) {
+  let neuerMarkenwert = markenwert;
+  const neueKampagnen = {};
+  let meldung = null;
+  Object.entries(marketingKampagnen || {}).forEach(([id, eintrag]) => {
+    if (season - eintrag.gebuchtSaison < MARKETING_LAUFZEIT_SAISONS) { neueKampagnen[id] = eintrag; return; }
+    neuerMarkenwert = Math.max(0, neuerMarkenwert - eintrag.bonus);
+    if (!meldung) meldung = { name: eintrag.name };
+  });
+  return { markenwert: neuerMarkenwert, marketingKampagnen: neueKampagnen, meldung };
+}
 
 
 // Wählt zufällig ein anwendbares Ereignis aus dem Pool und wendet es an. Rückgabe: das ausgewählte
@@ -10270,6 +10285,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Mitarbeiter lassen sich jederzeit sofort und kostenlos entlassen — kein Abfindungsangebot nötig.",
       "Verfügbare Qualität und Gehälter richten sich nach der eigenen Liga.",
       "Der Trainer äussert zweimal pro Saison Wünsche zu Position, Verkauf, Material und Mitarbeitern — abhängig von seinem persönlichen Stil und Alter. Erfüllen erhöht seine Zufriedenheit.",
+      "Verkaufsvorschläge betreffen nur Spieler, die spürbar unter dem Kaderschnitt liegen — je nach Kaderqualität können das 0 bis 3 sein, nicht mehr zwingend immer drei. Lehnst du einen Vorschlag ab (\"Er bleibt im Verein\"), ist dieser Spieler für den Rest der Saison vor erneuten Verkaufsvorschlägen geschützt.",
       "Den Cheftrainer während laufendem Vertrag zu entlassen kostet dagegen ein Abfindungsangebot (25-150% des Restvertragswerts) — je höher das Angebot, desto sicherer nimmt er an.",
       "Der Cheftrainer entwickelt sich einmal pro Saison weiter, abhängig von Alter und sportlichem Erfolg (Aufstieg, obere Tabellenhälfte, Titel beschleunigen; Abstieg bremst). Ab 62 Jahren baut er stattdessen zunehmend altersbedingt ab.",
       "Klick auf den Trainer öffnet sein Datenblatt mit Bilanz und Titeln."
@@ -10350,8 +10366,9 @@ const SPIELREGELN_KATEGORIEN = [
       "Der Markenwert (0-100) wirkt sich auf Fanartikel-/Verpflegungsumsatz, Sponsoring-Angebote, Fanclub-Wachstum, Ticketpreis-Toleranz und Transferverhandlungen aus.",
       "Fanclub-Grösse startet je nach Liga bei einer realistischen Basis (Oberliga ~180, Regionalliga ~590, 3. Liga ~1'000, 2. Liga ~3'500, Bundesliga ~12'000) und wächst/schrumpft normalerweise langsam mit der Fanzufriedenheit. Bei einem Liga-Wechsel springt die Grösse zusätzlich spürbar Richtung der neuen Liga-Basis — ein Aufstieg zieht sofort viele neue Fans an, ein Abstieg kostet nur einen kleineren Teil (die meisten bleiben loyal).",
       "Baut sich durch Marketing-Kampagnen, sportlichen Erfolg, digitale Stadion-Infrastruktur und Teamgeist auf — sinkt ohne Pflege langsam wieder.",
-      "Vier einmalige Marketing-Kampagnen (Social-Media, Plakatwerbung, Merchandise-Launch, Kooperationen) geben je einen festen, dauerhaften Markenwert-Bonus. Zusätzlich lässt sich ein laufendes monatliches Marketingbudget per Schieberegler einstellen — wirkt kontinuierlich, unabhängig vom Marketingchef (beide Quellen addieren sich).",
-      "Der Markenwert ist pro Liga gedeckelt (siehe oben) — steht er schon auf dem Höchstwert, verpufft zusätzliches Marketingbudget grösstenteils wirkungslos. Eine Warnung im Fanshop-Tab macht darauf aufmerksam.",
+      "Fünf Marketingmassnahmen stehen zur Wahl: vier feste Kampagnen (Social-Media, Plakatwerbung, Merchandise-Launch, Kooperationen) sowie ein Spielerauftritt beim Sponsor, für den du gezielt einen Spieler aus deinem Kader auswählst — Kosten und Markenwert-Bonus richten sich nach seiner Spielstärke, \"ehrgeizige\" Spieler verlieren dabei etwas Zufriedenheit.",
+      "Jede Massnahme wirkt 3 Saisons lang, danach lässt die Reichweite nach: der Bonus verschwindet automatisch wieder und die Massnahme wird erneut buchbar (mit eigener Vereinsinfos-Meldung, sobald das passiert). Es gibt kein zusätzliches laufendes Marketingbudget mehr — dieses eine System deckt alles ab.",
+      "Der Markenwert ist pro Liga gedeckelt (siehe oben) — steht er schon auf dem Höchstwert, wirkt eine neu gebuchte Massnahme nur bis zu diesem Deckel.",
       "Nach oben gedeckelt je nach Liga-Niveau: Oberliga/Regionalliga/3. Liga erreichen realistischerweise nie \"national bekannt\" oder \"Weltmarke\" — das ist erst ab der 2. Bundesliga möglich.",
       "Trikotsponsor-Verträge laufen über mehrere Saisons — bei einem Auf- oder Abstieg wird der Vertrag aber immer sofort aufgelöst, egal wie lange er noch gegangen wäre, und muss in der neuen Liga zu deren (höheren bzw. tieferen) Beträgen neu verhandelt werden.",
       "Zusätzlich zum Trikotsponsor lassen sich im Sponsoring-Tab jederzeit optional ein Ärmelsponsor und ein Trainingsanzug-Sponsor abschliessen — beide unabhängig vom Trikotsponsor, kleiner dimensioniert, aber ebenfalls mehrjährig und bei Liga-Wechsel neu zu verhandeln.",
@@ -10662,6 +10679,15 @@ function VereinsinfosView({ careerState }) {
             <span className="text-stone-800">
               <span className="font-semibold text-sky-800">U19 in Form: </span>
               {careerState.letztesU19Highlight.name} ({careerState.letztesU19Highlight.posName}) erzielte {careerState.letztesU19Highlight.tore} Tore in den letzten {careerState.letztesU19Highlight.spiele} Spielen.
+            </span>
+          </div>
+        )}
+
+        {careerState.letzteMarketingAblauf && (
+          <div className="flex items-center gap-2 border border-amber-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#faf3df" }}>
+            <Radio size={14} className="text-amber-700 shrink-0" />
+            <span className="text-stone-800">
+              Die Reichweite von <span className="font-semibold text-amber-800">{careerState.letzteMarketingAblauf.name}</span> lässt nach — die Massnahme ist wieder buchbar.
             </span>
           </div>
         )}
@@ -12456,7 +12482,8 @@ function TrainingsmaterialEinkaufView({ trainingsmaterial, budget, managerDivId,
   );
 }
 
-function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, kapazitaet = 5000, markenwert = 50, marketingKampagnenGebucht = [], managerDivId, onMarketingKampagneKaufen, marketingBudgetProMonat = 0, onMarketingBudgetSetzen, fanshopHistorie = [], season }) {
+function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, kapazitaet = 5000, markenwert = 50, marketingKampagnen = {}, managerDivId, onMarketingKampagneKaufen, squad = [], onSpielerauftrittBuchen, fanshopHistorie = [], season }) {
+  const [gewaehlterSpieler, setGewaehlterSpieler] = useState(squad[0]?.id || "");
   const [gewaehlteSaison, setGewaehlteSaison] = useState(season);
   const istAktuelleSaison = gewaehlteSaison === season;
   const statistikSortiert = (istAktuelleSaison
@@ -12468,6 +12495,12 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
   const maxVerkauft = statistikSortiert[0]?.verkauftSaison || 0;
   const vorhandeneFanshopSaisons = [...fanshopHistorie.map(h => h.saison), season].sort((a, b) => b - a);
   const markenwertInfo = markenwertEinordnung(markenwert);
+  // Für die Laufzeit-Anzeige der Kampagnen unten (siehe MARKETING_LAUFZEIT_SAISONS).
+  const restlaufzeit = (id) => marketingKampagnen[id] ? MARKETING_LAUFZEIT_SAISONS - (season - marketingKampagnen[id].gebuchtSaison) : 0;
+  const spielerFuerAuftritt = squad.find(p => p.id === gewaehlterSpieler);
+  const auftrittKosten = spielerFuerAuftritt ? berechneSpielerauftrittKosten(spielerFuerAuftritt, managerDivId) : 0;
+  const auftrittBonus = spielerFuerAuftritt ? berechneSpielerauftrittBonus(spielerFuerAuftritt) : 0;
+  const auftrittRestlaufzeit = restlaufzeit("spielerauftritt");
 
   return (
     <div>
@@ -12483,17 +12516,23 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
         <p className="text-[11px] text-emerald-600 mb-2">
           Wirkt sich auf Fanartikel-/Verpflegungsumsatz, Sponsoring-Angebote, Fanclub-Wachstum, Ticketpreis-Toleranz und Transferverhandlungen aus. Baut sich durch einen Marketingchef, sportlichen Erfolg, digitale Stadion-Infrastruktur und Teamgeist kontinuierlich auf.
         </p>
+        <p className="text-[11px] text-emerald-600 mb-2">
+          Jede Massnahme unten wirkt {MARKETING_LAUFZEIT_SAISONS} Saisons lang, danach lässt die Reichweite nach und sie wird erneut buchbar.
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {MARKETING_KAMPAGNEN.map(k => {
             const kosten = k.kosten[managerDivId] || k.kosten.OL;
-            const gebucht = marketingKampagnenGebucht.includes(k.id);
+            const rest = restlaufzeit(k.id);
+            const aktiv = rest > 0;
             return (
-              <div key={k.id} className={`border rounded p-2 ${gebucht ? "border-emerald-700" : "border-amber-800/50"}`}>
+              <div key={k.id} className={`border rounded p-2 ${aktiv ? "border-emerald-700" : "border-amber-800/50"}`}>
                 <div className="flex items-center justify-between">
-                  <span className={`text-xs font-semibold ${gebucht ? "text-emerald-300" : "text-emerald-100"}`}>{k.name} {gebucht && "✓"}</span>
+                  <span className={`text-xs font-semibold ${aktiv ? "text-emerald-300" : "text-emerald-100"}`}>{k.name}</span>
                 </div>
                 <div className="text-[10px] text-emerald-600 mt-0.5 mb-1.5">{k.beschreibung}</div>
-                {!gebucht && (
+                {aktiv ? (
+                  <div className="text-[11px] text-emerald-400 text-center py-1.5">✓ Aktiv — noch {rest} Saison{rest > 1 ? "en" : ""}</div>
+                ) : (
                   <button
                     disabled={kosten > budget}
                     onClick={() => onMarketingKampagneKaufen(k)}
@@ -12508,31 +12547,33 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
         </div>
 
         <div className="border-t border-amber-800/40 mt-3 pt-3">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-[11px] uppercase tracking-wider text-amber-400/90">Laufendes Marketingbudget</div>
-            <span className="text-xs font-semibold text-amber-300">{marketingBudgetProMonat.toLocaleString("de-CH")} €/Monat</span>
-          </div>
+          <div className="text-[11px] uppercase tracking-wider text-amber-400/90 mb-1">Spielerauftritt beim Sponsor</div>
           <p className="text-[10px] text-emerald-600 mb-2">
-            Ergänzt die Kampagnen oben um eine dauerhafte, frei wählbare Investition — wirkt kontinuierlich auf den Markenwert, unabhängig vom Marketingchef (beide addieren sich).
+            Ein Spieler nimmt einen Sponsoring-Termin wahr — Kosten und Markenwert-Bonus richten sich nach seiner Spielstärke. "Ehrgeizige" Spieler nehmen den Termin nur widerwillig wahr und verlieren dabei etwas Zufriedenheit.
           </p>
-          {marketingBudgetProMonat > 0 && markenwert >= markenwertDeckel(managerDivId) && (
-            <div className="text-[11px] text-red-400 border border-red-500/40 rounded px-2 py-1.5 mb-2" style={{ backgroundColor: "rgba(239,68,68,0.06)" }}>
-              ⚠ Markenwert steht bereits auf dem Höchstwert für deine Liga ({markenwertDeckel(managerDivId)}/100) — dieses Budget hat aktuell keine sichtbare zusätzliche Wirkung mehr, ausser als kleines Polster gegen künftige Rückgänge (z.B. bei schlechter Tabellenposition). Solange das anhält, verpufft das Geld grösstenteils ungenutzt — Regler ruhig runterziehen.
-            </div>
+          {auftrittRestlaufzeit > 0 ? (
+            <div className="text-[11px] text-emerald-400 text-center py-1.5 border border-emerald-700 rounded">✓ Aktiv — noch {auftrittRestlaufzeit} Saison{auftrittRestlaufzeit > 1 ? "en" : ""}</div>
+          ) : (
+            <>
+              <select
+                value={gewaehlterSpieler}
+                onChange={e => setGewaehlterSpieler(e.target.value)}
+                className="w-full text-xs border border-emerald-700/50 rounded px-2 py-1.5 mb-2"
+                style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+              >
+                {squad.slice().sort((a, b) => b.rating - a.rating).map(p => (
+                  <option key={p.id} value={p.id}>{p.name} · {p.posName} · Stärke {p.rating}{p.persoenlichkeit === "ehrgeizig" ? " (ehrgeizig)" : ""}</option>
+                ))}
+              </select>
+              <button
+                disabled={!spielerFuerAuftritt || auftrittKosten > budget}
+                onClick={() => onSpielerauftrittBuchen(gewaehlterSpieler)}
+                className="w-full text-[11px] border border-amber-400/50 text-amber-300 rounded py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Buchen — {auftrittKosten.toLocaleString("de-CH")} € (+{auftrittBonus} Markenwert)
+              </button>
+            </>
           )}
-          <input
-            type="range"
-            min={0}
-            max={MARKETING_BUDGET_MAX[managerDivId] || MARKETING_BUDGET_MAX.OL}
-            step={Math.max(100, Math.round((MARKETING_BUDGET_MAX[managerDivId] || MARKETING_BUDGET_MAX.OL) / 100 / 100) * 100)}
-            value={marketingBudgetProMonat}
-            onChange={e => onMarketingBudgetSetzen(Number(e.target.value))}
-            className="w-full accent-amber-500"
-          />
-          <div className="flex justify-between text-[10px] text-emerald-600 mt-1">
-            <span>0 €/Monat</span>
-            <span>{(MARKETING_BUDGET_MAX[managerDivId] || MARKETING_BUDGET_MAX.OL).toLocaleString("de-CH")} €/Monat</span>
-          </div>
         </div>
       </div>
       </>)}
@@ -13140,7 +13181,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnenGebucht = [], karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, marketingBudgetProMonat = 0, naechsteMarketingZahlung = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [] } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -13322,7 +13363,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   // Sicherheitsnetz: bestehende Spielstände ohne Vorschlagsliste (vor diesem Feature) sofort nachrüsten
   useEffect(() => {
     if (coach && !trainerVorschlaege) {
-      const neueVorschlaege = generiereTrainerVorschlaege(divisions, managerDivId, profile.team, budget, season, trainingsmaterial, stab, coach);
+      const neueVorschlaege = generiereTrainerVorschlaege(divisions, managerDivId, profile.team, budget, season, trainingsmaterial, stab, coach, abgelehnteVerkaufsvorschlaege);
       setCareerState(cs => (cs.trainerVorschlaege
         ? cs
         : { ...cs, trainerVorschlaege: neueVorschlaege, trainerZufriedenheit: cs.trainerZufriedenheit ?? 70 }));
@@ -13648,6 +13689,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letztesJugendligaErgebnis: null,
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
+          letzteMarketingAblauf: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           letzteVerletzungen: null,
@@ -13994,6 +14036,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letztesJugendligaErgebnis: null,
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
+          letzteMarketingAblauf: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           trophaeen: neuerEuropapokal.phase === "sieger" && neuerEuropapokal.finalSieg
@@ -14322,6 +14365,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letztesJugendligaErgebnis: null,
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
+          letzteMarketingAblauf: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           letzterEuroBericht: null,
@@ -14612,7 +14656,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           budgetKriseAktiv: (bankrottWarnstufe || 0) >= 1,
           sternTransferAktiv: !!sternTransferBoost && datum <= sternTransferBoost.bisDatum,
           bundestrainerAktiv: !!bundestrainerAmt,
-          marketingBudgetHoch: (marketingBudgetProMonat || 0) > 0,
+          marketingBudgetHoch: Object.keys(marketingKampagnen || {}).length > 0,
           vermieterBautAus: !!careerState.vermieterAusbauAngekuendigt,
           titelDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season),
           ausbildungsentschaedigungErhalten: !!careerState.letzteAusbildungsentschaedigung,
@@ -14968,12 +15012,6 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const { coach: managerVertragNachLohn, gezahlt: managerlohnGezahlt } = verarbeiteLohnzahlung(managerVertrag && managerVertrag.jahressalaer ? managerVertrag : null, neuesDatum);
     const spielerLohnsumme = berechneSquadLohnsumme(neueDivisions[managerDivId].squads[profile.team], managerDivId);
     const { coach: spielerLohnObjekt, gezahlt: spielerloehneGezahlt } = verarbeiteLohnzahlung({ jahressalaer: spielerLohnsumme, naechsteLohnzahlung: naechsteSpielerLohnzahlung }, neuesDatum);
-    // Laufendes Marketingbudget (Schieberegler) — monatlich fällig, unabhängig von den vier einmaligen
-    // Kampagnen. Trägt kontinuierlich zum Markenwert bei (siehe berechneMarkenwertAenderung).
-    // Auf das aktuelle Liga-Maximum gedeckelt: sonst würde nach einem Abstieg weiterhin der volle,
-    // viel zu hohe Betrag aus einer höheren Liga abgebucht, obwohl die Wirkung längst gedeckelt ist.
-    const marketingBudgetEffektiv = Math.min(marketingBudgetProMonat, MARKETING_BUDGET_MAX[managerDivId] || MARKETING_BUDGET_MAX.OL);
-    const { naechsteZahlung: naechsteMarketingZahlungNeu, gezahlt: marketingBudgetGezahlt } = berechneMarketingBudgetZahlung(naechsteMarketingZahlung, marketingBudgetEffektiv, neuesDatum);
 
     // Stadionmiete: nur solange das Stadion nicht im Eigentum des Vereins ist (siehe onStadionKaufen).
     const eigenesStadionFuerMiete = neueDivisions[managerDivId].stadien[profile.team];
@@ -15009,14 +15047,14 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // Rückrunde beginnt: alte (Vorrunde-)Vorschläge bewerten, neue generieren
       const delta = bewerteVorschlagsErfuellung(trainerVorschlaege, neueDivisions, managerDivId, profile.team, trainingsmaterial, stab);
       neueTrainerZufriedenheit = Math.max(0, Math.min(100, neueTrainerZufriedenheit + delta));
-      neueTrainerVorschlaege = generiereTrainerVorschlaege(neueDivisions, managerDivId, profile.team, budget, season, trainingsmaterial, stab, coach);
+      neueTrainerVorschlaege = generiereTrainerVorschlaege(neueDivisions, managerDivId, profile.team, budget, season, trainingsmaterial, stab, coach, abgelehnteVerkaufsvorschlaege);
     } else if (coach && trainerVorschlaege) {
       // Einzelne, vom Manager abgelehnte Verkaufsvorschläge werden nach diesem Spieltag ersetzt
       // (Kaufvorschläge sind reine Positionswünsche ohne Einzelspieler-Antwort, keine Ersetzung nötig).
       // WICHTIG: die Ausschlussliste wird bei jedem Ersatz sofort erweitert (statt einmalig vorab
       // berechnet) — sonst könnten zwei gleichzeitig abgelehnte Vorschläge unabhängig voneinander auf
       // denselben "nächstschlechtesten" Spieler zurückgreifen und ihn doppelt vorschlagen.
-      let laufendeAusschlussIds = trainerVorschlaege.verkaufen.map(v => v.playerId);
+      let laufendeAusschlussIds = [...trainerVorschlaege.verkaufen.map(v => v.playerId), ...(abgelehnteVerkaufsvorschlaege || [])];
       let irgendwasErsetzt = false;
       const neuesVerkaufen = trainerVorschlaege.verkaufen.map(v => {
         if (!v.ersetzenBeimNaechstenSpieltag) return v;
@@ -15172,7 +15210,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       if (einnahmen.typ === "heim") sfErtragTicketing += einnahmen.ticketeinnahmen + (einnahmen.fanzoneEinnahmen || 0);
       else sfAufwandReisen += einnahmen.kosten;
     }
-    const neueSaisonFinanzen = { ...sfBasis, ertragTicketing: sfErtragTicketing, ertragFanartikel: sfErtragFanartikel, ertragImbiss: sfErtragImbiss, ertragTV: sfErtragTV, ertragLaenderspiel: (sfBasis.ertragLaenderspiel || 0) + laenderspielEinnahmen, aufwandReisen: sfAufwandReisen, aufwandGehalt: sfBasis.aufwandGehalt + trainergehaltGezahlt, aufwandMitarbeiterstab: (sfBasis.aufwandMitarbeiterstab || 0) + stabGehaltGezahlt, aufwandManagerlohn: (sfBasis.aufwandManagerlohn || 0) + managerlohnGezahlt, aufwandSpielerloehne: (sfBasis.aufwandSpielerloehne || 0) + spielerloehneGezahlt, aufwandPersonal: (sfBasis.aufwandPersonal || 0) + personalkostenGezahlt, aufwandSicherheit: (sfBasis.aufwandSicherheit || 0) + sicherheitskostenGezahlt, aufwandBetrieb: (sfBasis.aufwandBetrieb || 0) + betriebskostenGezahlt, aufwandSchiedsrichter: (sfBasis.aufwandSchiedsrichter || 0) + schiedsrichterkostenGezahlt, aufwandStadionmiete: (sfBasis.aufwandStadionmiete || 0) + stadionMieteGezahlt, aufwandSonstiges: (sfBasis.aufwandSonstiges || 0) + marketingBudgetGezahlt, aufwandFanartikel: (sfBasis.aufwandFanartikel || 0) + nachbestellKostenFanshop, aufwandImbiss: (sfBasis.aufwandImbiss || 0) + nachbestellKostenImbiss };
+    const neueSaisonFinanzen = { ...sfBasis, ertragTicketing: sfErtragTicketing, ertragFanartikel: sfErtragFanartikel, ertragImbiss: sfErtragImbiss, ertragTV: sfErtragTV, ertragLaenderspiel: (sfBasis.ertragLaenderspiel || 0) + laenderspielEinnahmen, aufwandReisen: sfAufwandReisen, aufwandGehalt: sfBasis.aufwandGehalt + trainergehaltGezahlt, aufwandMitarbeiterstab: (sfBasis.aufwandMitarbeiterstab || 0) + stabGehaltGezahlt, aufwandManagerlohn: (sfBasis.aufwandManagerlohn || 0) + managerlohnGezahlt, aufwandSpielerloehne: (sfBasis.aufwandSpielerloehne || 0) + spielerloehneGezahlt, aufwandPersonal: (sfBasis.aufwandPersonal || 0) + personalkostenGezahlt, aufwandSicherheit: (sfBasis.aufwandSicherheit || 0) + sicherheitskostenGezahlt, aufwandBetrieb: (sfBasis.aufwandBetrieb || 0) + betriebskostenGezahlt, aufwandSchiedsrichter: (sfBasis.aufwandSchiedsrichter || 0) + schiedsrichterkostenGezahlt, aufwandStadionmiete: (sfBasis.aufwandStadionmiete || 0) + stadionMieteGezahlt, aufwandSonstiges: (sfBasis.aufwandSonstiges || 0), aufwandFanartikel: (sfBasis.aufwandFanartikel || 0) + nachbestellKostenFanshop, aufwandImbiss: (sfBasis.aufwandImbiss || 0) + nachbestellKostenImbiss };
 
     // Markenwert: wöchentlicher Auf- oder Abbau durch Marketingchef, sportlichen Erfolg, digitale
     // Infrastruktur und Teamgeist — die eigentliche Kreuzverbindung der neuen Marketingabteilung.
@@ -15185,7 +15223,6 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       anzahlTeams: division.teams.length,
       digitaleInfrastruktur: division.stadien[profile.team]?.digitaleInfrastruktur,
       teamgeist: berechneTeamgeist(division.squads[profile.team], season, stab.psychologe?.rating, kapitaenId).gesamt,
-      marketingBudgetProMonat,
       managerDivId
     })));
 
@@ -15311,7 +15348,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Budgetkrise: Dispo mit Zinsen, danach greift der Vorstand ein (Zwangsverkauf, dann Entlassung) —
     // siehe verarbeiteBudgetKrise. Nutzt cs.bankrottWarnstufe/cs.budget aus dem vorherigen Zustand,
     // deshalb hier als eigener Funktionskörper statt einer reinen Objekt-Literal-Rückgabe.
-    const budgetRohLiga = budget + (einnahmen ? einnahmen.gesamt : 0) + laenderspielEinnahmen - trainergehaltGezahlt - managerlohnGezahlt - trainerPraemieGesamt - spielerloehneGezahlt - stabGehaltGezahlt - personalkostenGezahlt - sicherheitskostenGezahlt - betriebskostenGezahlt - schiedsrichterkostenGezahlt - stadionMieteGezahlt - marketingBudgetGezahlt - nachbestellKostenFanshop - nachbestellKostenImbiss + berechnePassiveWocheneinnahmen(division.stadien[profile.team]) + budgetDeltaEreignis;
+    const budgetRohLiga = budget + (einnahmen ? einnahmen.gesamt : 0) + laenderspielEinnahmen - trainergehaltGezahlt - managerlohnGezahlt - trainerPraemieGesamt - spielerloehneGezahlt - stabGehaltGezahlt - personalkostenGezahlt - sicherheitskostenGezahlt - betriebskostenGezahlt - schiedsrichterkostenGezahlt - stadionMieteGezahlt - nachbestellKostenFanshop - nachbestellKostenImbiss + berechnePassiveWocheneinnahmen(division.stadien[profile.team]) + budgetDeltaEreignis;
     const krise = verarbeiteBudgetKrise({
       budgetRoh: budgetRohLiga, managerDivId, squad: neueDivisions[managerDivId].squads[profile.team],
       warnstufeBisher: careerState.bankrottWarnstufe, profile, season, anzahlSaisonsImAmt, trophaeenAnzahl: trophaeen.length
@@ -15350,7 +15387,6 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       vermieterAusbauAngekuendigt: vermieterErgebnisErfolg?.ankuendigung || null,
       karriereEnde: krise.karriereEnde || cs.karriereEnde || null,
       naechsteSpielerLohnzahlung: spielerLohnObjekt.naechsteLohnzahlung,
-      naechsteMarketingZahlung: naechsteMarketingZahlungNeu,
       letzteSpielerloehne: spielerloehneGezahlt > 0 ? spielerloehneGezahlt : null,
       letzteEinnahmen: einnahmen ? { ...einnahmen, sicherheitskosten: sicherheitskostenGezahlt, schiedsrichterkosten: schiedsrichterkostenGezahlt } : einnahmen,
       jugend: { ...cs.jugend, termine: neueJugendTermine, sichtung: neueScoutingSichtung },
@@ -15361,6 +15397,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzteTrainerEntwicklung: null,
           letztesJugendligaErgebnis: null,
           letzteJugendbeforderung: null,
+          letzteMarketingAblauf: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
       letzterStabAblauf: null,
@@ -15836,7 +15873,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     }
 
     const neueVorschlaege = coachFuerNeueSaison
-      ? generiereTrainerVorschlaege(seasonEndInfo.divisions, neueManagerDivIdFuerVorschlaege, profile.team, budget, seasonEndInfo.season, trainingsmaterial, stab, coachFuerNeueSaison)
+      ? generiereTrainerVorschlaege(seasonEndInfo.divisions, neueManagerDivIdFuerVorschlaege, profile.team, budget, seasonEndInfo.season, trainingsmaterial, stab, coachFuerNeueSaison, [])
       : null;
 
     // Co-Trainerstab: nur Verträge übernehmen, die noch laufen — abgelaufene werden frei (müssen neu
@@ -15989,6 +16026,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       turnierTeilnahme: !!letztesTurnierErgebnis && !letztesTurnierErgebnis.sieger
     });
     const neueManagerReputation = Math.max(0, Math.min(100, managerReputation + reputationsDelta));
+    // Marketing-Kampagnen (inkl. Spielerauftritt) auf Ablauf prüfen — siehe verarbeiteMarketingAblaeufe.
+    const marketingAblaufErgebnis = verarbeiteMarketingAblaeufe(marketingKampagnen, markenwert, season, managerDivId);
 
     setCareerState({
       divisions: {
@@ -16052,6 +16091,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       philosophie,
       interimTrainer: coachFuerNeueSaison ? null : interimTrainer,
       trainerVorschlaege: neueVorschlaege,
+      // Ablehnungsschutz gilt nur für die laufende Saison — neue Saison, neue Chance für den Trainer,
+      // frühere Ablehnungen erneut anzusprechen.
+      abgelehnteVerkaufsvorschlaege: [],
       trainerZufriedenheit: coachFuerNeueSaison ? neueZufriedenheit : 70,
       pokal: initialerPokal(seasonEndInfo.divisions),
       trophaeen,
@@ -16142,13 +16184,15 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // Saisonwechsel jedes Mal auf ihren Startwert zurück, statt den tatsächlichen Stand
       // fortzuführen. Markenwert baut sich z.B. über Jahre durch Erfolg auf — dieser Aufbau ging
       // bisher bei jedem Saisonende komplett verloren.
-      markenwert,
+      markenwert: marketingAblaufErgebnis.markenwert,
       belastung,
       philosophiePaket,
       trainingsschwerpunkt,
       // Ohne diese Liste liessen sich alle Marketingkampagnen jede Saison erneut kaufen (echter
-      // Balance-Fehler, nicht nur kosmetisch) — jetzt bleibt bereits Gekauftes auch bereits gekauft.
-      marketingKampagnenGebucht,
+      // Balance-Fehler, nicht nur kosmetisch) — jetzt bleibt bereits Gekauftes auch bereits gekauft,
+      // bis die Reichweite nach MARKETING_LAUFZEIT_SAISONS Saisons nachlässt (siehe oben, markenwert).
+      marketingKampagnen: marketingAblaufErgebnis.marketingKampagnen,
+      letzteMarketingAblauf: marketingAblaufErgebnis.meldung,
       // Bei Entlassung durch die Vereinsversammlung: Zwangsangebote von drei anderen Vereinen statt
       // Karriereende — reduzierte Reputation (0) sorgt dafür, dass die Angebote realistisch eher aus
       // der eigenen oder einer tieferen Liga kommen, nicht aus einer höheren. Findet sich (im seltenen
@@ -16189,21 +16233,47 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const buchMarketingKampagne = (kampagne) => {
     setCareerState(cs => {
       const kosten = kampagne.kosten[managerDivId] || kampagne.kosten.OL;
-      if ((cs.marketingKampagnenGebucht || []).includes(kampagne.id) || kosten > cs.budget) return cs;
+      const laufende = cs.marketingKampagnen || {};
+      const bereitsAktiv = laufende[kampagne.id] && cs.season - laufende[kampagne.id].gebuchtSaison < MARKETING_LAUFZEIT_SAISONS;
+      if (bereitsAktiv || kosten > cs.budget) return cs;
       return {
         ...cs,
         budget: cs.budget - kosten,
         markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? 50) + kampagne.markenwertBonus)),
-        marketingKampagnenGebucht: [...(cs.marketingKampagnenGebucht || []), kampagne.id],
+        marketingKampagnen: { ...laufende, [kampagne.id]: { gebuchtSaison: cs.season, bonus: kampagne.markenwertBonus, name: kampagne.name } },
         saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandSonstiges: (cs.saisonFinanzen?.aufwandSonstiges || 0) + kosten }
       };
     });
   };
 
-  // Laufendes Marketingbudget: reiner Einstellungswechsel, keine sofortige Zahlung — die Abbuchung
-  // erfolgt monatlich beim nächsten Spieltag (siehe berechneMarketingBudgetZahlung).
-  const onMarketingBudgetSetzen = (betrag) => {
-    setCareerState(cs => ({ ...cs, marketingBudgetProMonat: betrag }));
+  // Spielerauftritt beim Sponsor: braucht zusätzlich die Wahl eines konkreten Spielers (siehe
+  // berechneSpielerauftrittKosten/-Bonus) — läuft technisch wie die vier festen Kampagnen (eigener
+  // Schlüssel "spielerauftritt" in marketingKampagnen, gleiche Laufzeit/Ablauf), zusätzlich mit einem
+  // kleinen Zufriedenheits-Malus für "ehrgeizige" Spieler, die den Termin nur widerwillig wahrnehmen.
+  const onSpielerauftrittBuchen = (spielerId) => {
+    setCareerState(cs => {
+      const laufende = cs.marketingKampagnen || {};
+      const bereitsAktiv = laufende.spielerauftritt && cs.season - laufende.spielerauftritt.gebuchtSaison < MARKETING_LAUFZEIT_SAISONS;
+      if (bereitsAktiv) return cs;
+      const squad = cs.divisions[managerDivId].squads[profile.team];
+      const spieler = squad.find(p => p.id === spielerId);
+      if (!spieler) return cs;
+      const kosten = berechneSpielerauftrittKosten(spieler, managerDivId);
+      if (kosten > cs.budget) return cs;
+      const bonus = berechneSpielerauftrittBonus(spieler);
+      const neuesSquad = squad.map(p => p.id === spielerId && p.persoenlichkeit === "ehrgeizig"
+        ? { ...p, zufriedenheit: Math.max(0, p.zufriedenheit - 5) }
+        : p
+      );
+      return {
+        ...cs,
+        budget: cs.budget - kosten,
+        markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? 50) + bonus)),
+        marketingKampagnen: { ...laufende, spielerauftritt: { gebuchtSaison: cs.season, bonus, name: `Spielerauftritt (${spieler.name})` } },
+        divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads, [profile.team]: neuesSquad } } },
+        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandSonstiges: (cs.saisonFinanzen?.aufwandSonstiges || 0) + kosten }
+      };
+    });
   };
 
   const onPhilosophieChange = (id) => {
@@ -17224,7 +17294,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       return {
         ...cs,
         trainerVorschlaege: { ...cs.trainerVorschlaege, verkaufen: neueListe },
-        trainerZufriedenheit: Math.max(0, Math.min(100, cs.trainerZufriedenheit + antwortOption.zufriedenheitDelta))
+        trainerZufriedenheit: Math.max(0, Math.min(100, cs.trainerZufriedenheit + antwortOption.zufriedenheitDelta)),
+        // "Er bleibt" schützt diesen Spieler für den Rest der Saison vor erneuten Verkaufsvorschlägen —
+        // sonst könnte derselbe Name trotz klarer Ablehnung wieder auftauchen (siehe
+        // generiereTrainerVorschlaege).
+        abgelehnteVerkaufsvorschlaege: antwortOption.ersetzen
+          ? [...(cs.abgelehnteVerkaufsvorschlaege || []), playerId]
+          : (cs.abgelehnteVerkaufsvorschlaege || [])
       };
     });
   };
@@ -17251,7 +17327,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         karriereSpiele: 0, karriereSiege: 0, karriereUnentschieden: 0, karriereNiederlagen: 0
       },
       interimTrainer: null,
-      trainerVorschlaege: generiereTrainerVorschlaege(cs.divisions, managerDivId, profile.team, cs.budget, cs.season, cs.trainingsmaterial, cs.stab, trainer),
+      trainerVorschlaege: generiereTrainerVorschlaege(cs.divisions, managerDivId, profile.team, cs.budget, cs.season, cs.trainingsmaterial, cs.stab, trainer, cs.abgelehnteVerkaufsvorschlaege),
       trainerZufriedenheit: 70,
       trainerZiele: null
     }));
@@ -18439,11 +18515,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onZielSetzen={onFanartikelZielSetzen}
               kapazitaet={division.stadien[profile.team]?.kapazitaet || 5000}
               markenwert={markenwert}
-              marketingKampagnenGebucht={marketingKampagnenGebucht}
+              marketingKampagnen={marketingKampagnen}
               managerDivId={managerDivId}
               onMarketingKampagneKaufen={buchMarketingKampagne}
-              marketingBudgetProMonat={marketingBudgetProMonat}
-              onMarketingBudgetSetzen={onMarketingBudgetSetzen}
+              squad={division.squads[profile.team]}
+              onSpielerauftrittBuchen={onSpielerauftrittBuchen}
               fanshopHistorie={fanshopHistorie}
               season={season}
             />
