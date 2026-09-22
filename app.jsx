@@ -2217,7 +2217,9 @@ function simuliereJugendligaSpieltag(jugendliga, jugendDivId, jugendKader, manag
     });
     if (eigenesSpielGehabt && neuerJugendKader.length) {
       const torProSpieler = {};
-      const gewichte = neuerJugendKader.map(p => Math.max(1, p.rating - 25));
+      // Positionsgewichtung wie beim Erstmannschafts-Torschützensystem (TORSCHUETZE_GEWICHT) — sonst
+      // könnte auch der Torwart plausibel als Vielschütze auftauchen, nur weil er ein hohes Rating hat.
+      const gewichte = neuerJugendKader.map(p => (TORSCHUETZE_GEWICHT[p.pos] ?? 0.1) * Math.max(1, p.rating - 25));
       const gesamtGewicht = gewichte.reduce((s, w) => s + w, 0);
       const rng = rngFor(`u19tore|${managerTeam}|${div.matchday}`);
       for (let i = 0; i < eigeneTore; i++) {
@@ -15531,6 +15533,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       rueckspiel: { heim: rs.rueckspielErgebnis.heim, gast: rs.rueckspielErgebnis.gast, tHeim: rs.rueckspielErgebnis.tHeim, tGast: rs.rueckspielErgebnis.tGast },
       aggregat: rs.aggregat
     };
+    // Die Saisonabschluss-Übersicht (weiter unten) erscheint erst, wenn seasonEndInfo UND
+    // saisonAbschliessenBestaetigt beide gesetzt sind — im normalen Ablauf setzt der "Saison
+    // abschliessen"-Knopf beides zusammen. Hier lief das bisher nur über seasonEndInfo, wodurch der
+    // "Weiter zur Saisonauswertung"-Knopf nach einer entschiedenen Relegation wirkungslos blieb.
+    setSaisonAbschliessenBestaetigt(true);
     try {
       const result = processSeasonTransition(divisions, season, profile.team, override);
       setSeasonEndInfo({ ...result, coachSnapshot: coach, vertragLaeuftAusSnapshot: coach && coach.vertragBisSaison <= season, managerVertragSnapshot: managerVertrag, managerVertragLaeuftAusSnapshot: managerVertrag && managerVertrag.vertragBisSaison <= season, finanzenSnapshot: saisonFinanzen });
@@ -15608,6 +15615,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   // ohne Team-Override — das Turnierergebnis selbst wird direkt aus careerState.turnierspiel gelesen
   // (siehe neueSaisonStarten), es beeinflusst keine Auf-/Abstiegs-Tabellen wie bei der Relegation.
   const onTurnierErgebnisUebernehmen = () => {
+    setSaisonAbschliessenBestaetigt(true);
     try {
       const result = processSeasonTransition(divisions, season, profile.team);
       setSeasonEndInfo({ ...result, coachSnapshot: coach, vertragLaeuftAusSnapshot: coach && coach.vertragBisSaison <= season, managerVertragSnapshot: managerVertrag, managerVertragLaeuftAusSnapshot: managerVertrag && managerVertrag.vertragBisSaison <= season, finanzenSnapshot: saisonFinanzen });
