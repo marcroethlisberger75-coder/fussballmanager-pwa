@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Component } from "react";
-import { Trophy, Users, CalendarDays, ArrowUp, ArrowDown, Shield, ChevronRight, Play, RotateCcw, Info, Repeat, Lock, Tent, ThumbsDown, Landmark, Bus, Sprout, ClipboardList, TrendingUp, UserCog, Medal, Award, XCircle, Megaphone, Shirt, UserPlus, Wallet, ShoppingBag, Building2, Dumbbell, Heart, Flag, Coffee, Package, BookOpen, Mic, Newspaper } from "lucide-react";
+import { Trophy, Users, CalendarDays, ArrowUp, ArrowDown, Shield, ChevronRight, Play, RotateCcw, Info, Repeat, Lock, Tent, ThumbsDown, Landmark, Bus, Sprout, ClipboardList, TrendingUp, UserCog, Medal, Award, XCircle, Megaphone, Shirt, UserPlus, Wallet, ShoppingBag, Building2, Dumbbell, Heart, Flag, Coffee, Package, BookOpen, Mic, Newspaper, Radio } from "lucide-react";
 
 /* =========================================================================
    STAMMDATEN — Saison 2026/27, reale Vereine
@@ -6318,7 +6318,8 @@ const TAB_GRUPPEN = [
     { id: "stadion", label: "Stadion", icon: Building2 },
     { id: "trainingsmaterial", label: "Material", icon: Package },
     { id: "verpflegung", label: "Verpflegung", icon: Coffee },
-    { id: "fanshop", label: "Fanshop", icon: ShoppingBag }
+    { id: "fanshop", label: "Fanshop", icon: ShoppingBag },
+    { id: "marketing", label: "Marketingabteilung", icon: Radio }
   ]},
   { id: "finanzen", label: "Finanzen", icon: Wallet, tabs: [
     { id: "sponsoring", label: "Sponsoring", icon: Megaphone },
@@ -12455,7 +12456,7 @@ function TrainingsmaterialEinkaufView({ trainingsmaterial, budget, managerDivId,
   );
 }
 
-function FanshopView({ fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, kapazitaet = 5000, markenwert = 50, marketingKampagnenGebucht = [], managerDivId, onMarketingKampagneKaufen, marketingBudgetProMonat = 0, onMarketingBudgetSetzen, fanshopHistorie = [], season }) {
+function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, kapazitaet = 5000, markenwert = 50, marketingKampagnenGebucht = [], managerDivId, onMarketingKampagneKaufen, marketingBudgetProMonat = 0, onMarketingBudgetSetzen, fanshopHistorie = [], season }) {
   const [gewaehlteSaison, setGewaehlteSaison] = useState(season);
   const istAktuelleSaison = gewaehlteSaison === season;
   const statistikSortiert = (istAktuelleSaison
@@ -12470,6 +12471,7 @@ function FanshopView({ fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, k
 
   return (
     <div>
+      {abschnitt === "marketing" && (<>
       <div className="border border-amber-400/40 rounded p-3 mb-4" style={{ backgroundColor: "rgba(251,191,36,0.05)" }}>
         <div className="flex items-center justify-between mb-1.5">
           <div className="text-[11px] uppercase tracking-wider text-amber-400/90">Marketingabteilung — Markenwert</div>
@@ -12533,7 +12535,9 @@ function FanshopView({ fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, k
           </div>
         </div>
       </div>
+      </>)}
 
+      {abschnitt === "fanshop" && (<>
       <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Fanshop</div>
       <p className="text-[11px] text-emerald-600 mb-3">
         Ziel-Bestand pro Artikel festlegen und Verkaufspreise setzen. Nach jedem Spiel wird automatisch bis zur eingestellten Menge nachbestellt — kein manuelles Nachkaufen mehr nötig. Das Maximum liegt immer deutlich über dem, was an einem einzigen Spieltag höchstens verkauft werden könnte, und wächst mit einem Stadionausbau automatisch mit.
@@ -12630,6 +12634,7 @@ function FanshopView({ fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, k
           </div>
         </div>
       )}
+      </>)}
     </div>
   );
 }
@@ -18424,8 +18429,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onTrainingsanzugsponsorWaehlen={onTrainingsanzugsponsorWaehlen}
             />
           )}
-          {tab === "fanshop" && (
+          {(tab === "fanshop" || tab === "marketing") && (
             <FanshopView
+              abschnitt={tab}
               fanshop={fanshop}
               budget={budget}
               onKaufen={onFanartikelKaufen}
