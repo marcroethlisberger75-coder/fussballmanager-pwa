@@ -7065,9 +7065,13 @@ function processSeasonTransitionInner(divisions_, season, managerTeam, relegatio
         const rngDev = rngFor(`${name}|dev|s${naechsteSaison}`);
         const rngJugend = rngFor(`${name}|jugend|${naechsteSaison}`);
         const platzInfo = alleAltenPlatzierungen[name];
-        // Nur KI-Vereine bekommen diesen Erfolgs-/Misserfolgsbonus — der Manager entwickelt sich bereits
-        // über eigene Mechanismen (Training, Transfers, Jugend) und soll hier nicht zusätzlich profitieren.
-        const vereinsBonus = (name !== managerTeam && platzInfo)
+        // Nur KI-Vereine bekommen diesen Erfolgs-/Misserfolgsbonus UND den zufälligen Grundausschlag —
+        // der Manager entwickelt sich bereits über eigene, steuerbare Mechanismen (Training, Transfers,
+        // Jugend) und soll hier nicht zusätzlich von reinem Würfelglück abhängen. Bisher bekam auch der
+        // eigene Kader den Zufallsausschlag ab, wodurch eine während der Saison hart ertrainierte
+        // Verbesserung (z.B. 50 → 53) beim Saisonübergang durch simples Pech wieder verloren gehen konnte.
+        const istManagerVerein = name === managerTeam;
+        const vereinsBonus = (!istManagerVerein && platzInfo)
           ? Math.round(((1 - (platzInfo.platz - 1) / Math.max(1, platzInfo.anzahlTeams - 1)) - 0.5) * 6)
           : 0;
         const gealtertesSquad = altesSquad
@@ -7075,7 +7079,8 @@ function processSeasonTransitionInner(divisions_, season, managerTeam, relegatio
             // Erfolgsbonus fliesst v.a. in jüngere Spieler (Investitionen, Nachwuchs) — bei älteren Spielern
             // gedämpft, damit ältere Spieler nicht künstlich über Jahre hinweg hochgepuscht werden
             const altersDaempfung = p.alter >= 32 ? 0.3 : p.alter >= 29 ? 0.7 : 1;
-            const neuesRating = Math.max(28, Math.min(99, p.rating + randInt(rngDev, -3, 3) + Math.round(vereinsBonus * altersDaempfung)));
+            const zufallsausschlag = istManagerVerein ? 0 : randInt(rngDev, -3, 3);
+            const neuesRating = Math.max(28, Math.min(99, p.rating + zufallsausschlag + Math.round(vereinsBonus * altersDaempfung)));
             const neuesAttribute = synchronisiereAttribute(p, neuesRating);
             return {
               ...p,
