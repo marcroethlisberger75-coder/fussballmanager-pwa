@@ -4003,6 +4003,78 @@ const PRESSEKONFERENZ_FRAGEN = [
     ]
   },
   {
+    id: "verein_aufstieg", bedingung: k => k.aufgestiegenDieseSaison, thema: "Verein", frage: "Der Aufstieg ist geschafft! Wie blicken Sie auf die kommende, höhere Liga?",
+    antworten: [
+      { text: "Ein grossartiger Erfolg — wir freuen uns riesig auf die neue Herausforderung!", ziel: "fans", delta: 6, nebenziel: "marke", nebendelta: 3 },
+      { text: "Verdient, aber jetzt beginnt die eigentliche Arbeit erst richtig.", ziel: "fans", delta: 3 },
+      { text: "Ich bin da eher nüchtern — wir müssen erstmal sehen, ob wir mithalten können.", ziel: "fans", delta: -1 },
+      { text: "Ehrlich gesagt hatten wir dabei auch etwas Glück.", ziel: "fans", delta: -3, nebenziel: "marke", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "verein_abstieg", bedingung: k => k.abgestiegenDieseSaison, thema: "Verein", frage: "Der Abstieg steht fest. Wie erklären Sie sich diese Saison?",
+    antworten: [
+      { text: "Bitter, aber wir analysieren die Fehler genau und werden gestärkt zurückkommen.", ziel: "fans", delta: 3 },
+      { text: "Solche Rückschläge gehören im Fussball manchmal einfach dazu.", ziel: "fans", delta: 0 },
+      { text: "Der Kader war für diese Liga schlicht nicht gut genug.", ziel: "fans", delta: -2, nebenziel: "trainer", nebendelta: -3 },
+      { text: "Darüber möchte ich jetzt nicht sprechen.", ziel: "fans", delta: -4 },
+    ]
+  },
+  {
+    id: "verein_wechsel_angebot", bedingung: k => k.vereinsWechselAngebot, thema: "Verein", frage: "Sie sind erst kürzlich hier angekommen, nachdem Sie ein besseres Angebot angenommen und Ihren vorherigen Verein verlassen haben. Was sagen Sie den enttäuschten Fans von damals?",
+    antworten: [
+      { text: "Diese Chance war einfach zu gut, um sie auszuschlagen — das verstehen hoffentlich auch die alten Fans.", ziel: "marke", delta: 2 },
+      { text: "Ich bin dem alten Verein sehr dankbar, aber jetzt gilt meine volle Konzentration hier.", ziel: "fans", delta: 3 },
+      { text: "Das ist Teil des Geschäfts — jeder hätte an meiner Stelle dasselbe getan.", ziel: "marke", delta: -2 },
+      { text: "Dazu sage ich lieber nichts.", ziel: "marke", delta: -1 },
+    ]
+  },
+  {
+    id: "verein_pokalsieg", bedingung: k => k.pokalSiegerDieseSaison, thema: "Verein", frage: "Der DFB-Pokal ist gewonnen! Was bedeutet dieser Titel für Sie persönlich?",
+    antworten: [
+      { text: "Ein Pokalsieg ist etwas ganz Besonderes — dieser Moment gehört den Fans!", ziel: "fans", delta: 6, nebenziel: "marke", nebendelta: 3 },
+      { text: "Ein schöner Erfolg, der die harte Arbeit der ganzen Saison krönt.", ziel: "fans", delta: 3 },
+      { text: "Im Pokal braucht es auch immer etwas Losglück.", ziel: "fans", delta: -1 },
+      { text: "Ehrlich gesagt zählt für mich die Liga deutlich mehr als der Pokal.", ziel: "fans", delta: -4, nebenziel: "marke", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "verein_europapokalsieg", bedingung: k => k.europapokalSiegerDieseSaison, thema: "Verein", frage: "Ein internationaler Titel! Wie ordnen Sie diesen Erfolg ein?",
+    antworten: [
+      { text: "Das ist der grösste Erfolg, den man sich als Verein vorstellen kann!", ziel: "fans", delta: 7, nebenziel: "marke", nebendelta: 5 },
+      { text: "International erfolgreich zu sein, war schon lange unser erklärtes Ziel.", ziel: "fans", delta: 4, nebenziel: "marke", nebendelta: 2 },
+      { text: "Schön, aber national bleibt für uns die höchste Priorität.", ziel: "fans", delta: -1 },
+      { text: "Ehrlich gesagt hatten wir dabei auch einiges Losglück.", ziel: "fans", delta: -3, nebenziel: "marke", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "verein_torschuetzenkoenig", bedingung: k => k.torschuetzenkoenigDieseSaison, thema: "Verein", frage: "Einer Ihrer Spieler ist Torschützenkönig geworden. Wie wichtig ist so ein Titel für den Verein?",
+    antworten: [
+      { text: "Eine verdiente Auszeichnung für eine überragende individuelle Saison!", ziel: "spieler", delta: 5, nebenziel: "marke", nebendelta: 2 },
+      { text: "Schön für ihn persönlich, aber der Mannschaftserfolg zählt bei uns mehr.", ziel: "spieler", delta: 1 },
+      { text: "Solche Einzeltitel überbewerte ich grundsätzlich nicht.", ziel: "spieler", delta: -2 },
+      { text: "Ohne seine Mitspieler hätte er diese Tore nie geschossen.", ziel: "spieler", delta: -1, nebenziel: "trainer", nebendelta: 1 },
+    ]
+  },
+  {
+    id: "verein_pokalfinale_verloren", bedingung: k => k.pokalFinaleVerlorenDieseSaison, thema: "Verein", frage: "Das Pokalfinale ist knapp verloren gegangen. Wie schwer wiegt diese Enttäuschung?",
+    antworten: [
+      { text: "Sehr bitter — so nah dran und dann doch mit leeren Händen dazustehen, tut weh.", ziel: "fans", delta: 2 },
+      { text: "Schade, aber allein das Erreichen des Finales war schon eine tolle Leistung.", ziel: "fans", delta: 4, nebenziel: "trainer", nebendelta: 2 },
+      { text: "Im Finale entscheiden Kleinigkeiten — daran ändert auch beste Vorbereitung nichts.", ziel: "fans", delta: -1 },
+      { text: "Eine Enttäuschung, über die ich jetzt nicht lange reden möchte.", ziel: "fans", delta: -3 },
+    ]
+  },
+  {
+    id: "verein_europapokalfinale_verloren", bedingung: k => k.europapokalFinaleVerlorenDieseSaison, thema: "Verein", frage: "Das internationale Finale ist verloren gegangen. Wie ordnen Sie diese Saison trotzdem ein?",
+    antworten: [
+      { text: "Der Weg ins Finale allein ist historisch für diesen Verein — darauf bauen wir auf.", ziel: "fans", delta: 5, nebenziel: "marke", nebendelta: 2 },
+      { text: "Enttäuschend, so kurz vor dem grössten Titel zu scheitern.", ziel: "fans", delta: 0 },
+      { text: "International mitzuhalten reicht uns auf Dauer nicht — wir wollen den Titel.", ziel: "fans", delta: -2 },
+      { text: "Diese Niederlage schmerzt sehr, mehr möchte ich dazu nicht sagen.", ziel: "fans", delta: -3 },
+    ]
+  },
+  {
     id: "verein_ausbildungsentschaedigung", bedingung: k => k.ausbildungsentschaedigungErhalten, thema: "Verein", frage: "Ein ehemaliges Eigengewächs von Ihnen wurde beim neuen Verein für viel Geld weiterverkauft, wodurch auch Sie finanziell profitieren. Macht Sie das stolz?",
     antworten: [
       { text: "Sehr sogar — das zeigt, wie gut unsere Jugendarbeit wirklich ist.", ziel: "marke", delta: 5 },
@@ -4602,6 +4674,24 @@ function berechneSpielerauftrittBonus(spieler) {
 // Bonus wieder ab, sobald die Reichweite nach 3 Saisons nachlässt. Gibt den neuen Markenwert, die
 // bereinigte Kampagnen-Liste sowie eine Meldung für Vereinsinfos zurück (nur die zuerst abgelaufene,
 // falls mehrere gleichzeitig ablaufen — selten, aber möglich).
+// Konsequenz beim Abgang eines Spielers (egal ob via eingehendem Angebot oder aktiver eigener
+// Verhandlung) — richtet sich nach seiner Rolle in der Kabine, nicht nach reiner Spielstärke: Ein
+// Kapitän oder Führungsspieler ist ein echter Rückhalt, sein Abgang schmerzt. Ein unzufriedener
+// Hitzkopf sorgt dagegen oft für schlechte Stimmung — sein Abgang wirkt eher befreiend. Die meisten
+// Abgänge lösen dagegen gar keine spürbare Reaktion in der Kabine aus.
+function berechneAbgangsEffekt(spieler, kapitaenId) {
+  const istKapitaen = spieler.id === kapitaenId;
+  const istFuehrungsspieler = spieler.persoenlichkeit === "fuehrungsspieler";
+  if (istKapitaen || istFuehrungsspieler) {
+    return { formEffekt: istKapitaen ? -10 : -6, zufriedenheitEffekt: istKapitaen ? -8 : -5, grund: istKapitaen ? "kapitaen" : "fuehrungsspieler" };
+  }
+  const istUnzufriedenerHitzkopf = spieler.persoenlichkeit === "hitzkoepfig" && (spieler.zufriedenheit ?? 70) < 40;
+  if (istUnzufriedenerHitzkopf) {
+    return { formEffekt: 4, zufriedenheitEffekt: 3, grund: "unruhestifter" };
+  }
+  return { formEffekt: 0, zufriedenheitEffekt: 0, grund: null };
+}
+
 function verarbeiteMarketingAblaeufe(marketingKampagnen, markenwert, season, managerDivId) {
   let neuerMarkenwert = markenwert;
   const neueKampagnen = {};
@@ -4612,6 +4702,23 @@ function verarbeiteMarketingAblaeufe(marketingKampagnen, markenwert, season, man
     if (!meldung) meldung = { name: eintrag.name };
   });
   return { markenwert: neuerMarkenwert, marketingKampagnen: neueKampagnen, meldung };
+}
+
+// Wird bei jedem Spielerverkauf (nicht bei einer Leihe — der Spieler kehrt ja zurück) aufgerufen: Ist
+// der verkaufte Spieler gerade das Gesicht eines laufenden Spielerauftritts, ist der Sponsor düpiert —
+// der komplette Bonus geht sofort verloren (nicht erst nach Ablauf der Laufzeit) PLUS ein zusätzlicher
+// kleiner Strafabzug für den gebrochenen Sponsoring-Auftritt, und die Massnahme wird sofort wieder
+// buchbar statt erst nach MARKETING_LAUFZEIT_SAISONS. Gibt unverändertes marketingKampagnen/markenwert
+// zurück (plus meldung: null), falls der verkaufte Spieler gar nicht betroffen ist.
+const SPIELERAUFTRITT_VERKAUF_STRAFE = 2;
+function verarbeiteSpielerauftrittVerkauf(marketingKampagnen, markenwert, verkaufterSpielerId) {
+  const eintrag = marketingKampagnen?.spielerauftritt;
+  if (!eintrag || eintrag.spielerId !== verkaufterSpielerId) {
+    return { marketingKampagnen: marketingKampagnen || {}, markenwert, meldung: null };
+  }
+  const { spielerauftritt, ...restKampagnen } = marketingKampagnen;
+  const neuerMarkenwert = Math.max(0, markenwert - eintrag.bonus - SPIELERAUFTRITT_VERKAUF_STRAFE);
+  return { marketingKampagnen: restKampagnen, markenwert: neuerMarkenwert, meldung: { spielerName: eintrag.spielerName || eintrag.name } };
 }
 
 
@@ -10228,7 +10335,8 @@ const SPIELREGELN_KATEGORIEN = [
       "Durchsucht werden auch die direkt benachbarten Ligen, nicht nur die eigene.",
       "Vertragsdauer bei einem Neuzugang frei wählbar (1–5 Jahre).",
       "Ein Kauf/Verkauf, den sich der Trainer gewünscht hat, macht ihn sofort zufriedener.",
-      "Ist der Neuzugang ein echter Ausreisser nach oben (mind. 15 Stärkepunkte über dem bisherigen Kaderschnitt), sorgt das für rund 6 Wochen für einen spürbaren Trikot-Verkaufsschub im Fanshop — bei einer normalen Verstärkung passiert das bewusst nicht."
+      "Ist der Neuzugang ein echter Ausreisser nach oben (mind. 15 Stärkepunkte über dem bisherigen Kaderschnitt), sorgt das für rund 6 Wochen für einen spürbaren Trikot-Verkaufsschub im Fanshop — bei einer normalen Verstärkung passiert das bewusst nicht.",
+      "Ein Verkauf löst je nach Rolle in der Kabine eine Reaktion aus, nicht nach reiner Spielstärke: Der Kapitän oder ein Führungsspieler zu gehen sorgt für Unruhe (Team-Form und Trainerzufriedenheit sinken), ein unzufriedener \"Hitzkopf\" wirkt beim Abgang eher befreiend (beides steigt leicht). Die meisten anderen Verkäufe lösen dagegen gar keine spürbare Reaktion aus. Gilt gleichermassen, egal ob über ein eingehendes Angebot oder eine eigene Verhandlung verkauft wird."
     ]
   },
   {
@@ -10369,6 +10477,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Fanclub-Grösse startet je nach Liga bei einer realistischen Basis (Oberliga ~180, Regionalliga ~590, 3. Liga ~1'000, 2. Liga ~3'500, Bundesliga ~12'000) und wächst/schrumpft normalerweise langsam mit der Fanzufriedenheit. Bei einem Liga-Wechsel springt die Grösse zusätzlich spürbar Richtung der neuen Liga-Basis — ein Aufstieg zieht sofort viele neue Fans an, ein Abstieg kostet nur einen kleineren Teil (die meisten bleiben loyal).",
       "Baut sich durch Marketing-Kampagnen, sportlichen Erfolg, digitale Stadion-Infrastruktur und Teamgeist auf — sinkt ohne Pflege langsam wieder.",
       "Fünf Marketingmassnahmen stehen zur Wahl: vier feste Kampagnen (Social-Media, Plakatwerbung, Merchandise-Launch, Kooperationen) sowie ein Spielerauftritt beim Sponsor, für den du gezielt einen Spieler aus deinem Kader auswählst — Kosten und Markenwert-Bonus richten sich nach seiner Spielstärke, \"ehrgeizige\" Spieler verlieren dabei etwas Zufriedenheit.",
+      "Wird der Spieler eines laufenden Spielerauftritts verkauft, ist der Sponsor düpiert: der komplette Bonus geht sofort verloren, dazu ein zusätzlicher kleiner Ansehensverlust — die Massnahme wird aber sofort wieder buchbar, statt erst nach Ablauf der regulären Laufzeit.",
       "Jede Massnahme wirkt 3 Saisons lang, danach lässt die Reichweite nach: der Bonus verschwindet automatisch wieder und die Massnahme wird erneut buchbar (mit eigener Vereinsinfos-Meldung, sobald das passiert). Es gibt kein zusätzliches laufendes Marketingbudget mehr — dieses eine System deckt alles ab.",
       "Der Markenwert ist pro Liga gedeckelt (siehe oben) — steht er schon auf dem Höchstwert, wirkt eine neu gebuchte Massnahme nur bis zu diesem Deckel.",
       "Nach oben gedeckelt je nach Liga-Niveau: Oberliga/Regionalliga/3. Liga erreichen realistischerweise nie \"national bekannt\" oder \"Weltmarke\" — das ist erst ab der 2. Bundesliga möglich.",
@@ -10694,6 +10803,15 @@ function VereinsinfosView({ careerState }) {
           </div>
         )}
 
+        {careerState.letzterSpielerauftrittVerkauf && (
+          <div className="flex items-center gap-2 border border-red-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#fbeeee" }}>
+            <Radio size={14} className="text-red-700 shrink-0" />
+            <span className="text-stone-800">
+              Der Sponsor ist verärgert: <span className="font-semibold text-red-800">{careerState.letzterSpielerauftrittVerkauf.spielerName}</span> wurde verkauft, kurz nachdem er beim Spielerauftritt für den Verein warb — der Markenwert-Bonus ist komplett verloren, dazu ein zusätzlicher Ansehensverlust. Die Massnahme ist sofort wieder buchbar.
+            </span>
+          </div>
+        )}
+
         {careerState.letzteTrainerEntwicklung && (
           <div className={`flex items-center gap-2 border rounded px-4 py-2 text-xs ${careerState.letzteTrainerEntwicklung.delta > 0 ? "border-amber-300" : "border-red-300"}`} style={{ backgroundColor: careerState.letzteTrainerEntwicklung.delta > 0 ? "#faf3df" : "#fbeeee" }}>
             <UserCog size={14} className={careerState.letzteTrainerEntwicklung.delta > 0 ? "text-amber-700 shrink-0" : "text-red-700 shrink-0"} />
@@ -10728,7 +10846,12 @@ function VereinsinfosView({ careerState }) {
           <div className={`flex items-center gap-2 border rounded px-4 py-2 text-xs ${careerState.letzterAbgangEffekt.formEffekt < 0 ? "border-red-300" : "border-emerald-300"}`} style={{ backgroundColor: careerState.letzterAbgangEffekt.formEffekt < 0 ? "#fbeeee" : "#eef4ec" }}>
             <UserPlus size={14} className={careerState.letzterAbgangEffekt.formEffekt < 0 ? "text-red-700 shrink-0" : "text-emerald-800 shrink-0"} />
             <span className={careerState.letzterAbgangEffekt.formEffekt < 0 ? "text-red-800" : "text-stone-800"}>
-              Der Abgang von <span className="font-semibold">{careerState.letzterAbgangEffekt.name}</span> {careerState.letzterAbgangEffekt.formEffekt < 0 ? "wirbelt die Kabine auf" : "schafft neue Chancen im Kader"} — Team-Form {careerState.letzterAbgangEffekt.formEffekt > 0 ? "+" : ""}{careerState.letzterAbgangEffekt.formEffekt}, Trainerzufriedenheit {careerState.letzterAbgangEffekt.zufriedenheitEffekt > 0 ? "+" : ""}{careerState.letzterAbgangEffekt.zufriedenheitEffekt}
+              Der Abgang von <span className="font-semibold">{careerState.letzterAbgangEffekt.name}</span> {
+                careerState.letzterAbgangEffekt.grund === "kapitaen" ? "— dem Kapitän! — wirbelt die Kabine gehörig auf"
+                : careerState.letzterAbgangEffekt.grund === "fuehrungsspieler" ? "verliert dem Team einen wichtigen Rückhalt"
+                : careerState.letzterAbgangEffekt.grund === "unruhestifter" ? "sorgt für spürbare Erleichterung in der Kabine"
+                : careerState.letzterAbgangEffekt.formEffekt < 0 ? "wirbelt die Kabine auf" : "schafft neue Chancen im Kader"
+              } — Team-Form {careerState.letzterAbgangEffekt.formEffekt > 0 ? "+" : ""}{careerState.letzterAbgangEffekt.formEffekt}, Trainerzufriedenheit {careerState.letzterAbgangEffekt.zufriedenheitEffekt > 0 ? "+" : ""}{careerState.letzterAbgangEffekt.zufriedenheitEffekt}
             </span>
           </div>
         )}
@@ -13183,7 +13306,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [] } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -13692,6 +13815,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
           letzteMarketingAblauf: null,
+          letzterAufstieg: false,
+          letzterAbstieg: false,
+          letzterVereinswechselAngebot: null,
+          letzterSpielerauftrittVerkauf: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           letzteVerletzungen: null,
@@ -13914,7 +14041,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             if (!sieger) { elfmeter = true; sieger = Math.random() < 0.5 + (sEigen - gegner.rating) / 100 ? profile.team : gegner.name; }
             const gewonnen = sieger === profile.team;
             geldZuwachs = preisgeld.finale + (gewonnen ? preisgeld.sieger : 0);
-            letzterEuroBericht = { wettbewerb: europapokal.wettbewerb, text: `Finale: ${profile.team} ${tHeim}:${tGast} ${gegner.name}${elfmeter ? " n.E." : ""} — ${gewonnen ? "GEWONNEN! 🏆" : "verloren"}`, geld: geldZuwachs, tore: letzteEuroEreignisse.torSpieler, vorlagen: letzteEuroEreignisse.vorlagenSpieler, gelb: letzteEuroEreignisse.gelbeSpieler, rot: letzteEuroEreignisse.rotSpieler };
+            letzterEuroBericht = { wettbewerb: europapokal.wettbewerb, phase: "finale", gewonnen, text: `Finale: ${profile.team} ${tHeim}:${tGast} ${gegner.name}${elfmeter ? " n.E." : ""} — ${gewonnen ? "GEWONNEN! 🏆" : "verloren"}`, geld: geldZuwachs, tore: letzteEuroEreignisse.torSpieler, vorlagen: letzteEuroEreignisse.vorlagenSpieler, gelb: letzteEuroEreignisse.gelbeSpieler, rot: letzteEuroEreignisse.rotSpieler };
           euroHistorienEintrag = {
             wettbewerb: `Europapokal (${europapokal.wettbewerb})`, spieltag: null,
             heim: gegner.heim ? gegner.name : profile.team, gast: gegner.heim ? profile.team : gegner.name,
@@ -14039,6 +14166,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
           letzteMarketingAblauf: null,
+          letzterAufstieg: false,
+          letzterAbstieg: false,
+          letzterVereinswechselAngebot: null,
+          letzterSpielerauftrittVerkauf: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           trophaeen: neuerEuropapokal.phase === "sieger" && neuerEuropapokal.finalSieg
@@ -14368,13 +14499,17 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
           letzteMarketingAblauf: null,
+          letzterAufstieg: false,
+          letzterAbstieg: false,
+          letzterVereinswechselAngebot: null,
+          letzterSpielerauftrittVerkauf: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           letzterEuroBericht: null,
           letzteVerletzungen: neueVerletztenPokal.length ? neueVerletztenPokal : null,
           letzterPokalBericht: managerErgebnis ? {
             heim: managerErgebnis.heim, gast: managerErgebnis.gast, tHeim: managerErgebnis.tHeim, tGast: managerErgebnis.tGast,
-            elfmeter: managerErgebnis.elfmeter,
+            elfmeter: managerErgebnis.elfmeter, gewinner: managerErgebnis.gewinner,
             tore: managerPokalEreignisse.torSpieler, vorlagen: managerPokalEreignisse.vorlagenSpieler,
             gelb: managerPokalEreignisse.gelbeSpieler, rot: managerPokalEreignisse.rotSpieler,
             einwechslungen: einwechslungenPokal, motm: spielerDesSpieltagesPokal,
@@ -14661,6 +14796,14 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           marketingBudgetHoch: Object.keys(marketingKampagnen || {}).length > 0,
           vermieterBautAus: !!careerState.vermieterAusbauAngekuendigt,
           titelDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season),
+          pokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "pokalsieg"),
+          europapokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "europapokal"),
+          torschuetzenkoenigDieseSaison: (vereinsHistorien[profile.team] || []).find(t => t.saison === season && t.typ === "torschuetzenkoenig") || null,
+          pokalFinaleVerlorenDieseSaison: letzterPokalBericht?.rundenLabel === "finale" && letzterPokalBericht?.gewinner !== profile.team,
+          europapokalFinaleVerlorenDieseSaison: letzterEuroBericht?.phase === "finale" && letzterEuroBericht?.gewonnen === false,
+          aufgestiegenDieseSaison: !!letzterAufstieg,
+          abgestiegenDieseSaison: !!letzterAbstieg,
+          vereinsWechselAngebot: !!letzterVereinswechselAngebot,
           ausbildungsentschaedigungErhalten: !!careerState.letzteAusbildungsentschaedigung,
           // U19-Jugendliga (siehe letztesJugendligaErgebnis/letzteJugendbeforderung) — beide nur kurz
           // nach dem eigentlichen Ereignis aktuell, wie bei den anderen Ein-Wochen-Meldungen auch.
@@ -15400,6 +15543,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letztesJugendligaErgebnis: null,
           letzteJugendbeforderung: null,
           letzteMarketingAblauf: null,
+          letzterAufstieg: false,
+          letzterAbstieg: false,
+          letzterVereinswechselAngebot: null,
+          letzterSpielerauftrittVerkauf: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
       letzterStabAblauf: null,
@@ -16062,6 +16209,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzterJahresbericht: jahresbericht,
       karriereAufstiege: karriereAufstiege + (managerAufgestiegen ? 1 : 0),
       karriereAbstiege: karriereAbstiege + (managerAbgestiegen ? 1 : 0),
+      // Für die Pressekonferenz-Kreuzverbindung (siehe pkKontext.aufgestiegenDieseSaison/
+      // abgestiegenDieseSaison) — wie bei den anderen Ein-Wochen-Meldungen nur kurz nach dem
+      // eigentlichen Ereignis aktuell, wird beim nächsten Spieltag wieder zurückgesetzt.
+      letzterAufstieg: managerAufgestiegen,
+      letzterAbstieg: managerAbgestiegen,
       akademie: akademieNachSaison,
       laenderspielPause: null,
       laenderspielFensterErledigt: [],
@@ -16277,7 +16429,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         ...cs,
         budget: cs.budget - kosten,
         markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? 50) + bonus)),
-        marketingKampagnen: { ...laufende, spielerauftritt: { gebuchtSaison: cs.season, bonus, name: `Spielerauftritt (${spieler.name})` } },
+        marketingKampagnen: { ...laufende, spielerauftritt: { gebuchtSaison: cs.season, bonus, name: `Spielerauftritt (${spieler.name})`, spielerId: spieler.id, spielerName: spieler.name } },
         divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads, [profile.team]: neuesSquad } } },
         saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandSonstiges: (cs.saisonFinanzen?.aufwandSonstiges || 0) + kosten }
       };
@@ -16833,12 +16985,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       if (!spieler) return { ...cs, eingehendeAngebote: cs.eingehendeAngebote.filter(a => a.id !== angebot.id) };
       const restSquad = squadVorher.filter(p => p.id !== angebot.spielerId);
 
-      // Ein wichtiger Abgang wirbelt die Kabine auf: überdurchschnittliche Spieler zu verlieren drückt
-      // die Form der Mitspieler und die Trainerzufriedenheit — ein Randspieler abzugeben schafft dagegen
-      // Platz und Einsatzchancen, wirkt leicht positiv.
-      const relativStaerke = spieler.rating - teamStrength(squadVorher);
-      const formEffekt = relativStaerke > 5 ? -8 : relativStaerke < -5 ? 3 : 0;
-      const zufriedenheitEffekt = relativStaerke > 5 ? -6 : relativStaerke < -5 ? 2 : 0;
+      // Der Abgang wirkt sich je nach Rolle in der Kabine aus (siehe berechneAbgangsEffekt), nicht
+      // mehr nur nach reiner Spielstärke.
+      const { formEffekt, zufriedenheitEffekt, grund } = berechneAbgangsEffekt(spieler, cs.kapitaenId);
       div.squads[profile.team] = formEffekt !== 0
         ? restSquad.map(p => ({ ...p, form: Math.max(0, Math.min(100, p.form + formEffekt)) }))
         : restSquad;
@@ -16850,6 +16999,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         ? { ...cs.trainerVorschlaege, verkaufen: cs.trainerVorschlaege.verkaufen.filter(v => v.playerId !== angebot.spielerId) }
         : cs.trainerVorschlaege;
       const zufriedenheitWunschBonus = erfuellterVerkaufswunsch && cs.coach ? 3 : 0;
+      const marketingFolge = verarbeiteSpielerauftrittVerkauf(cs.marketingKampagnen, cs.markenwert ?? 50, angebot.spielerId);
 
       return {
         ...cs,
@@ -16860,7 +17010,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         verkaufsliste: (cs.verkaufsliste || []).filter(id => id !== angebot.spielerId),
         trainerVorschlaege: neueVorschlaege,
         saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), ertragTransfers: (cs.saisonFinanzen?.ertragTransfers || 0) + angebot.summe },
-        letzterAbgangEffekt: formEffekt !== 0 ? { name: spieler.name, formEffekt, zufriedenheitEffekt } : null
+        letzterAbgangEffekt: formEffekt !== 0 ? { name: spieler.name, formEffekt, zufriedenheitEffekt, grund } : null,
+        marketingKampagnen: marketingFolge.marketingKampagnen,
+        markenwert: marketingFolge.markenwert,
+        letzterSpielerauftrittVerkauf: marketingFolge.meldung
       };
     });
   };
@@ -17206,7 +17359,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       verkaufsliste: [],
       laenderspielPause: null,
       laenderspielFensterErledigt: [],
-      akademie: { level: 0, umbau: null, absolventenGesamt: careerState.akademie?.absolventenGesamt || 0 }
+      akademie: { level: 0, umbau: null, absolventenGesamt: careerState.akademie?.absolventenGesamt || 0 },
+      // Für die Pressekonferenz-Kreuzverbindung beim NEUEN Verein (siehe pkKontext.vereinsWechselAngebot)
+      // — wie bei den anderen Ein-Wochen-Meldungen nur kurz nach dem Wechsel aktuell.
+      letzterVereinswechselAngebot: { alterVerein: profile.team }
     }));
     onProfileUpdate({ team: neuesTeam });
   };
@@ -17356,6 +17512,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       let zufriedenheitErfuellt = false;
       let sternTransferNeu = null;
       let neuesEigengewaechsTracking = null;
+      let abgangsEffektErgebnis = null;
 
       if (richtung === "kaufen") {
         const quellDivId = sourceDivId || managerDivId;
@@ -17402,8 +17559,15 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       } else {
         // Kein automatischer Ersatz: der Manager muss selbst über den Transfermarkt nachrüsten.
         const div = { ...neueDivisions[managerDivId], squads: { ...neueDivisions[managerDivId].squads } };
-        div.squads[profile.team] = div.squads[profile.team].filter(p => p.id !== spieler.id);
+        // Derselbe Kabinen-Effekt wie bei einem Verkauf über ein eingehendes Angebot (siehe
+        // berechneAbgangsEffekt) — bisher galt das nur für DIESEN anderen Verkaufsweg, jetzt einheitlich.
+        const { formEffekt, zufriedenheitEffekt, grund } = berechneAbgangsEffekt(spieler, cs.kapitaenId);
+        const restSquad = div.squads[profile.team].filter(p => p.id !== spieler.id);
+        div.squads[profile.team] = formEffekt !== 0
+          ? restSquad.map(p => ({ ...p, form: Math.max(0, Math.min(100, p.form + formEffekt)) }))
+          : restSquad;
         neueDivisions[managerDivId] = div;
+        abgangsEffektErgebnis = formEffekt !== 0 ? { name: spieler.name, formEffekt, zufriedenheitEffekt, grund } : null;
 
         // Eigengewächse bekommen beim Verkauf einen ECHTEN neuen Verein zugewiesen (statt einfach aus
         // der Welt zu verschwinden) — nur so entwickeln sie sich in der Liga normal weiter (Alterung,
@@ -17456,15 +17620,24 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const neueSaisonFinanzen = richtung === "kaufen"
         ? { ...sf, aufwandTransfers: sf.aufwandTransfers + summeMitRabatt, aufwandBerater: (sf.aufwandBerater || 0) + beraterprovision }
         : { ...sf, ertragTransfers: sf.ertragTransfers + summe };
+      // Wurde der verkaufte Spieler gerade als Gesicht eines Spielerauftritts beim Sponsor eingesetzt
+      // (siehe onSpielerauftrittBuchen), ist der Sponsor düpiert — siehe verarbeiteSpielerauftrittVerkauf.
+      const marketingFolge = richtung === "kaufen"
+        ? { marketingKampagnen: cs.marketingKampagnen || {}, markenwert: cs.markenwert ?? 50, meldung: null }
+        : verarbeiteSpielerauftrittVerkauf(cs.marketingKampagnen, cs.markenwert ?? 50, spieler.id);
       return {
         ...cs, divisions: neueDivisions, budget: neuesBudget, saisonFinanzen: neueSaisonFinanzen,
         trainerVorschlaege: neueVorschlaege,
-        trainerZufriedenheit: zufriedenheitErfuellt && cs.coach ? Math.max(0, Math.min(100, cs.trainerZufriedenheit + 3)) : cs.trainerZufriedenheit,
+        trainerZufriedenheit: Math.max(0, Math.min(100, cs.trainerZufriedenheit + (zufriedenheitErfuellt && cs.coach ? 3 : 0) + (abgangsEffektErgebnis?.zufriedenheitEffekt || 0))),
         sternTransferBoost: sternTransferNeu || cs.sternTransferBoost,
         letzterSternTransfer: sternTransferNeu,
+        letzterAbgangEffekt: abgangsEffektErgebnis,
         ehemaligeEigengewaechse: neuesEigengewaechsTracking
           ? [...(cs.ehemaligeEigengewaechse || []), neuesEigengewaechsTracking]
-          : (cs.ehemaligeEigengewaechse || []).filter(e => e.spielerId !== spieler.id)
+          : (cs.ehemaligeEigengewaechse || []).filter(e => e.spielerId !== spieler.id),
+        marketingKampagnen: marketingFolge.marketingKampagnen,
+        markenwert: marketingFolge.markenwert,
+        letzterSpielerauftrittVerkauf: marketingFolge.meldung
       };
     });
   };
