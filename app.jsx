@@ -1807,6 +1807,31 @@ function generiereSpielerberaterAngebot(alleDivisionen, managerDivId, managerTea
   };
 }
 
+// Der Berater eines EIGENEN Spielers kann ebenfalls proaktiv auf dich zukommen und eine Verlängerung
+// mit bereits ausgehandelten, festen Konditionen vorschlagen — anders als bei der eigenen Verhandlung
+// (VertragsKarte, mit Erfolgsunsicherheit) ist die Annahme hier garantiert, da der Berater die Konditionen
+// ja selbst vorschlägt und nur ansetzt, wenn sein Klient damit auch einverstanden wäre. Nur Spieler mit
+// noch mindestens 2 Jahren Restlaufzeit kommen infrage — bei einem auslaufenden Vertrag greift die
+// normale, dringendere Verlängerung.
+function generiereBeraterVerlaengerungsAngebot(squad, managerDivId, season, ausschlussIds) {
+  const kandidaten = squad.filter(p =>
+    !p.leihspieler && !p.u19 && !ausschlussIds.includes(p.id) &&
+    (p.vertragBisSaison ?? season + 9) - season >= 2 && p.rating >= 65
+  );
+  if (!kandidaten.length) return null;
+  const spieler = kandidaten[Math.floor(Math.random() * kandidaten.length)];
+  const marktLohn = berechneSpielerlohn(spieler, managerDivId);
+  // Faire, bereits ausgehandelte Konditionen (100-115% des Marktlohns) — kein Verhandlungsspielraum,
+  // dafür ohne Ablehnungsrisiko.
+  const gehalt = Math.round((marktLohn * (1 + Math.random() * 0.15)) / 100) * 100;
+  const laufzeit = 2 + Math.floor(Math.random() * 2); // 2 oder 3 Jahre
+  return {
+    id: `${spieler.id}-verl-${Date.now()}`,
+    spielerId: spieler.id, name: spieler.name, posName: spieler.posName, alter: spieler.alter, rating: spieler.rating,
+    laufzeit, gehalt
+  };
+}
+
 
 // KI-Vereine werden auf gute eigene Spieler aufmerksam und machen von sich aus Angebote — je stärker
 // der Spieler, desto häufiger. Kommt das Angebot von einer höheren Liga, will der Spieler öfter selbst
@@ -7613,7 +7638,7 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
 // bald aus, wie bisher) sowie neu die Möglichkeit, Spieler mit noch längerer Laufzeit frühzeitig zu
 // verlängern — realistisch günstiger, weil ein fest gebundener Spieler kaum Verhandlungsmacht hat
 // (siehe berechneVertragsAkzeptanz).
-function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, vertragGesperrt }) {
+function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, vertragGesperrt, beraterVerlaengerungsAngebote, onBeraterVerlaengerungAnnehmen, onBeraterVerlaengerungAblehnen }) {
   // vertragGesperrt speichert ein Datum ("gesperrt bis") statt eines einfachen true/false — eine
   // zeitlich begrenzte Abkühlphase (ca. 3 Wochen) statt einer kompletten Saisonsperre.
   const istAktuellGesperrt = spielerId => vertragGesperrt?.[spielerId] && vertragGesperrt[spielerId] > datum;
@@ -7629,6 +7654,25 @@ function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVer
 
   return (
     <div>
+      {beraterVerlaengerungsAngebote && beraterVerlaengerungsAngebote.length > 0 && (
+        <div className="mb-5">
+          <div className="text-[11px] uppercase tracking-wider text-amber-400/80 mb-1.5">Berater schlägt Verlängerung vor</div>
+          <p className="text-[11px] text-emerald-600 mb-2">Bereits ausgehandelte Konditionen — anders als bei einer eigenen Verhandlung garantiert erfolgreich, wenn du zustimmst.</p>
+          <div className="space-y-2">
+            {beraterVerlaengerungsAngebote.map(a => (
+              <div key={a.id} className="border border-amber-400/40 rounded p-3 text-xs space-y-2" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
+                <div className="text-amber-300 font-semibold">{a.name} <span className="text-emerald-600 font-normal">· {a.posName} · {a.alter}J · Stärke {a.rating}</span></div>
+                <div className="text-emerald-400">{a.laufzeit} Jahre · {a.gehalt.toLocaleString("de-CH")} €/Jahr</div>
+                <div className="flex gap-2">
+                  <button onClick={() => onBeraterVerlaengerungAnnehmen(a)} className="flex-1 bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold rounded py-1.5">Annehmen</button>
+                  <button onClick={() => onBeraterVerlaengerungAblehnen(a)} className="flex-1 border border-emerald-700 text-emerald-400 rounded py-1.5">Ablehnen</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {auslaufend.length > 0 && (
         <div className="mb-5">
           <div className="text-[11px] uppercase tracking-wider text-red-400/80 mb-1.5">Vertrag läuft aus — jetzt verlängern oder ablösefrei verlieren</div>
@@ -10424,6 +10468,7 @@ const SPIELREGELN_KATEGORIEN = [
     punkte: [
       "Eigene Unterseite unter \"Kader & Taktik\": Verträge mit unter zwei Jahren Restlaufzeit sowie die Möglichkeit, alle anderen Spieler frühzeitig zu verlängern.",
       "Frühzeitige Verlängerung (noch mind. 2 Jahre Vertrag): günstigere Gehaltsoptionen als bei einer dringenden Verlängerung — ein fest gebundener Spieler hat keine Alternative und lässt sich deshalb leichter zu moderaten Konditionen halten, genau wie im echten Fussball. Ein sehr zufriedener, starker Spieler lehnt trotzdem manchmal grundsätzlich ab, weil er erst abwarten will.",
+      "Gelegentlich schlägt stattdessen der Berater eines eigenen Spielers (mit noch mind. 2 Jahren Vertrag) von sich aus eine Verlängerung mit bereits fixen Konditionen vor — anders als bei der eigenen Verhandlung garantiert erfolgreich, sobald du zustimmst.",
       "Zu viele abgelehnte Angebote: Der Spieler ist für ein paar Wochen frustriert (keine Gespräche, leichter Formabzug) — danach normalisiert sich alles wieder.",
       "Ohne Verlängerung verlässt der Spieler den Verein nach Vertragsende ablösefrei.",
       "Klick auf einen Spielernamen öffnet sein Datenblatt mit Statistiken, Karriere, Titeln und sieben positionsabhängigen Fähigkeitswerten (Torhüter haben ein eigenes Set) — geht überall, wo Spieler aufgelistet werden: Kader, Taktik, Training und Transfermarkt.",
@@ -13400,7 +13445,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [] } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -13433,7 +13478,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       case "verpflegung": return (IMBISS_ARTIKEL_TYPEN.some(a => (imbiss[a.id]?.bestand ?? 0) <= 0 || (vereinsheim[a.id]?.bestand ?? 0) <= 0)) ? "red" : null;
       case "trainingsmaterial": return materialBrauchtAktion ? "red" : null;
       case "kader": return kaderBrauchtAktion ? "red" : null;
-      case "vertraege": return vertraegeBrauchenAktion ? "red" : null;
+      case "vertraege": return vertraegeBrauchenAktion ? "red" : (beraterVerlaengerungsAngebote?.length > 0 ? "amber" : null);
       case "taktik": return taktikBrauchtAktion ? "red" : null;
       case "vereinsinfos": return vereinsinfosUngelesen ? "red" : null;
       case "nationalmannschaft": return (bundestrainerAmt?.kaderIds || []).length < 11 ? "red" : null;
@@ -15082,6 +15127,19 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       }
     }
 
+    // Verlängerungsvorschlag durch den Berater eines EIGENEN Spielers (siehe
+    // generiereBeraterVerlaengerungsAngebot) — anders als bei neuen Klienten oben nicht ans offene
+    // Transferfenster gebunden, da eine Vertragsverlängerung jederzeit während der Saison Sinn ergibt.
+    let neueBeraterVerlaengerungsAngebote = beraterVerlaengerungsAngebote;
+    if (spieltHeute && beraterVerlaengerungsAngebote.length < 2) {
+      const chance = 0.08;
+      if (Math.random() < chance) {
+        const ausschluss = beraterVerlaengerungsAngebote.map(a => a.spielerId);
+        const neuesAngebot = generiereBeraterVerlaengerungsAngebot(neueDivisions[managerDivId].squads[profile.team], managerDivId, season, ausschluss);
+        if (neuesAngebot) neueBeraterVerlaengerungsAngebote = [...beraterVerlaengerungsAngebote, neuesAngebot];
+      }
+    }
+
     // Spieler, die der Manager selbst auf den Transfermarkt gesetzt hat (eigener Wunsch oder
     // Trainer-Empfehlung): deutlich höhere Chance auf Angebote, damit sich das aktive Verkaufen lohnt,
     // aber über mehrere Spieltage verteilt und mit schwankenden Geboten statt Sofortverkauf.
@@ -15683,6 +15741,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       jobAngebot: neuesJobAngebot,
       eingehendeAngebote: neueEingehendeAngebote,
       spielerberaterAngebote: neueSpielerberaterAngebote,
+      beraterVerlaengerungsAngebote: neueBeraterVerlaengerungsAngebote,
       verkaufsliste: neueVerkaufsliste,
       fanclub: fanclubDeltaEreignis ? { ...neuerFanclub, groesse: Math.max(50, neuerFanclub.groesse + fanclubDeltaEreignis) } : neuerFanclub,
       saisonFinanzen: neueSaisonFinanzenMitZinsen,
@@ -16459,6 +16518,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzteHeimspielKategorien: null,
       eingehendeAngebote: [],
       spielerberaterAngebote: [],
+      beraterVerlaengerungsAngebote: [],
       // Der Managervertrag wird jetzt sichtbar im Saisonabschluss-Screen verlängert (siehe
       // managerVertragLaeuftAusSnapshot oben) — hier wird nur noch der ggf. bereits aktualisierte
       // Vertrag übernommen, keine stille Hintergrund-Verlängerung mehr.
@@ -17179,6 +17239,31 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   };
   const onSpielerberaterAngebotAblehnen = (angebot) => {
     setCareerState(cs => ({ ...cs, spielerberaterAngebote: cs.spielerberaterAngebote.filter(a => a.id !== angebot.id) }));
+  };
+
+  // Verlängerungsvorschlag durch den Berater eines eigenen Spielers annehmen — anders als bei der
+  // eigenen Verhandlung (onSpielerVertragVerlaengern) garantiert erfolgreich, da der Berater die
+  // Konditionen ja selbst vorschlägt (siehe generiereBeraterVerlaengerungsAngebot).
+  const onBeraterVerlaengerungAnnehmen = (angebot) => {
+    setCareerState(cs => {
+      const squad = cs.divisions[managerDivId].squads[profile.team];
+      const spieler = squad.find(p => p.id === angebot.spielerId);
+      if (!spieler) return cs;
+      const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
+      div.squads[profile.team] = squad.map(p => p.id === angebot.spielerId ? { ...p, vertragBisSaison: cs.season + angebot.laufzeit, gehalt: angebot.gehalt } : p);
+      return {
+        ...cs,
+        divisions: { ...cs.divisions, [managerDivId]: div },
+        beraterVerlaengerungsAngebote: cs.beraterVerlaengerungsAngebote.filter(a => a.id !== angebot.id),
+        // Dieselbe Pressekonferenz-Kreuzverbindung wie bei einer selbst verhandelten Verlängerung
+        // (siehe pkKontext.topspielerVerlaengertDieseSaison) — ein Top-Spieler ist ein Top-Spieler,
+        // unabhängig davon, wer die Verlängerung initiiert hat.
+        letzteTopspielerVerlaengerung: spieler.rating >= 82 ? { name: spieler.name, rating: spieler.rating, laufzeit: angebot.laufzeit, gehalt: angebot.gehalt } : cs.letzteTopspielerVerlaengerung
+      };
+    });
+  };
+  const onBeraterVerlaengerungAblehnen = (angebot) => {
+    setCareerState(cs => ({ ...cs, beraterVerlaengerungsAngebote: cs.beraterVerlaengerungsAngebote.filter(a => a.id !== angebot.id) }));
   };
 
   const onSpielerAufMarktSetzen = (spielerId) => {
@@ -18659,7 +18744,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           {tab === "nationalmannschaft" && bundestrainerAmt && <NationalmannschaftView divisions={divisions} bundestrainerAmt={bundestrainerAmt} onNationalkaderSetzen={onNationalkaderSetzen} onNationalformationSetzen={onNationalformationSetzen} managerDivId={managerDivId} season={season} trophaeen={trophaeen} />}
           {tab === "spielplan" && <SpielplanView division={division} managerTeam={profile.team} testspiele={testspiele} season={season} pokal={pokal} europapokal={europapokal} aktuellesDatum={datum} trainingslager={trainingslager} spielHistorie={spielHistorie} />}
           {tab === "kader" && <KaderView squad={division.squads[profile.team]} kapitaenId={kapitaenId} elfmeterSchuetzeId={elfmeterSchuetzeId} freistossSchuetzeId={freistossSchuetzeId} managerDivId={managerDivId} season={season} datum={datum} stab={stab} trophaeen={trophaeen} teamName={profile.team} onJugendfoerderungUmschalten={onJugendfoerderungUmschalten} onLeihoptionKaufen={onLeihoptionKaufen} meineAusgeliehenenSpieler={meineAusgeliehenenSpieler} alleDivisionen={divisions} />}
-          {tab === "vertraege" && <SpielervertraegeView squad={division.squads[profile.team]} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} />}
+          {tab === "vertraege" && <SpielervertraegeView squad={division.squads[profile.team]} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} beraterVerlaengerungsAngebote={beraterVerlaengerungsAngebote} onBeraterVerlaengerungAnnehmen={onBeraterVerlaengerungAnnehmen} onBeraterVerlaengerungAblehnen={onBeraterVerlaengerungAblehnen} />}
           {tab === "taktik" && (
             <TaktikView
               squad={division.squads[profile.team]}
