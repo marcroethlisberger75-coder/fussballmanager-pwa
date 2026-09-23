@@ -14946,7 +14946,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           europapokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "europapokal"),
           torschuetzenkoenigDieseSaison: (vereinsHistorien[profile.team] || []).find(t => t.saison === season && t.typ === "torschuetzenkoenig") || null,
           topspielerVerlaengertDieseSaison: !!letzteTopspielerVerlaengerung,
-          pokalFinaleVerlorenDieseSaison: letzterPokalBericht?.rundenLabel === "finale" && letzterPokalBericht?.gewinner !== profile.team,
+          pokalFinaleVerlorenDieseSaison: careerState.letzterPokalBericht?.rundenLabel === "finale" && careerState.letzterPokalBericht?.gewinner !== profile.team,
           europapokalFinaleVerlorenDieseSaison: letzterEuroBericht?.phase === "finale" && letzterEuroBericht?.gewonnen === false,
           aufgestiegenDieseSaison: !!letzterAufstieg,
           abgestiegenDieseSaison: !!letzterAbstieg,
