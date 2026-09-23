@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Component } from "react";
-import { Trophy, Users, CalendarDays, ArrowUp, ArrowDown, Shield, ChevronRight, Play, RotateCcw, Info, Repeat, Lock, Tent, ThumbsDown, Landmark, Bus, Sprout, ClipboardList, TrendingUp, UserCog, Medal, Award, XCircle, Megaphone, Shirt, UserPlus, Wallet, ShoppingBag, Building2, Dumbbell, Heart, Flag, Coffee, Package, BookOpen, Mic, Newspaper, Radio } from "lucide-react";
+import { Trophy, Users, CalendarDays, ArrowUp, ArrowDown, Shield, ChevronRight, Play, RotateCcw, Info, Repeat, Lock, Tent, ThumbsDown, Landmark, Bus, Sprout, ClipboardList, TrendingUp, UserCog, Medal, Award, XCircle, Megaphone, Shirt, UserPlus, Wallet, ShoppingBag, Building2, Dumbbell, Heart, Flag, Coffee, Package, BookOpen, Mic, Newspaper, Radio, FileText } from "lucide-react";
 
 /* =========================================================================
    STAMMDATEN — Saison 2026/27, reale Vereine
@@ -1088,7 +1088,7 @@ function berechneGehaltsvorschlag(altesSalaer, platz, anzahlTeams, aufgestiegen,
 // Je grosszügiger das Angebot über dem Marktgehalt, je erfolgreicher der Verein und je älter
 // (sicherheitsbedürftiger) der Spieler, desto eher unterschreibt er. Topspieler sind schwerer zu
 // halten, sehr lange Laufzeiten unbeliebter.
-function berechneVertragsAkzeptanz(spieler, angebotsSalaer, marktSalaer, tabellenPlatz, anzahlTeams, laufzeit) {
+function berechneVertragsAkzeptanz(spieler, angebotsSalaer, marktSalaer, tabellenPlatz, anzahlTeams, laufzeit, jahreVerbleibendVorAngebot = 0) {
   const angebotsFaktor = angebotsSalaer / marktSalaer;
   let chance = 0.25 + (angebotsFaktor - 1) * 1.3;
   chance -= Math.max(0, spieler.rating - 75) * 0.012;
@@ -1100,6 +1100,11 @@ function berechneVertragsAkzeptanz(spieler, angebotsSalaer, marktSalaer, tabelle
   // Persönlichkeit: ein Loyaler ist deutlich leichter zu halten, ein Ehrgeiziger pokert härter
   const haertegrad = PERSOENLICHKEITEN[spieler.persoenlichkeit]?.vertragsHaertegrad || 0;
   chance -= haertegrad * 0.008;
+  // Verhandlungsmacht wie im echten Fussball: Ein Spieler mit auslaufendem Vertrag kann mit einem
+  // ablösefreien Wechsel drohen und pokert entsprechend hart. Läuft sein Vertrag dagegen noch lange,
+  // hat er keine Alternative und ist einem moderaten Angebot gegenüber deutlich aufgeschlossener —
+  // genau deshalb verlängern echte Vereine ja frühzeitig, nicht weil der Spieler "billiger" wäre.
+  chance += Math.min(3, jahreVerbleibendVorAngebot) * 0.05;
   return Math.max(0.05, Math.min(0.92, chance));
 }
 
@@ -2257,10 +2262,22 @@ function initialerU19Kader(teamName, baseRating) {
 // U19-Jahrgang), alle Verbleibenden werden ein Jahr älter, und der Kader wird mit frischen 17-Jährigen
 // wieder auf Zielgrösse aufgefüllt.
 function alterJugendKader(kader, teamName, baseRating, season) {
+  const ausgemustert = kader.filter(p => p.alter >= 18);
   const verbleibend = kader.filter(p => p.alter < 18).map(p => ({ ...p, alter: p.alter + 1 }));
   const fehlende = U19_KADERGROESSE - verbleibend.length;
   for (let i = 0; i < fehlende; i++) verbleibend.push(generiereU19Spieler(teamName, baseRating, season));
-  return verbleibend;
+  return { kader: verbleibend, ausgemustert };
+}
+
+// Ein U19-Spieler, der mit 19 nicht rechtzeitig hochgezogen wurde, verschwindet nicht mehr spurlos —
+// er wird stattdessen freigestellt und wechselt zu einem echten anderen Verein (siehe Aufrufstelle in
+// neueSaisonStarten), ähnlich wie ein verkauftes Eigengewächs. Nur ein sehr vielversprechender Spieler
+// (hohes Potenzial) bringt dabei noch eine kleine Ablöse ein — ein durchschnittlicher geht ablösefrei,
+// genau wie im echten Fussball bei einem auslaufenden Nachwuchsvertrag üblich.
+function berechneU19FreistellungAbloese(spieler, managerDivId) {
+  if ((spieler.potenzial || 0) < 80) return 0;
+  const basis = { BL: 400000, L2: 120000, L3: 25000, RL: 12000, OL: 3000 }[managerDivId] || 3000;
+  return Math.round(basis * (spieler.potenzial - 75) / 25);
 }
 
 // U19-Entwicklung: deutlich höhere Grundchance als im Erwachsenenkader (0.025 statt 0.014 für ≤20-
@@ -4054,6 +4071,15 @@ const PRESSEKONFERENZ_FRAGEN = [
       { text: "Schön für ihn persönlich, aber der Mannschaftserfolg zählt bei uns mehr.", ziel: "spieler", delta: 1 },
       { text: "Solche Einzeltitel überbewerte ich grundsätzlich nicht.", ziel: "spieler", delta: -2 },
       { text: "Ohne seine Mitspieler hätte er diese Tore nie geschossen.", ziel: "spieler", delta: -1, nebenziel: "trainer", nebendelta: 1 },
+    ]
+  },
+  {
+    id: "verein_topspieler_verlaengert", bedingung: k => k.topspielerVerlaengertDieseSaison, thema: "Verein", frage: "Ein absoluter Leistungsträger hat gerade seinen Vertrag verlängert. Wie wichtig ist dieses Signal?",
+    antworten: [
+      { text: "Ein riesiges Signal für den ganzen Verein — er bekennt sich klar zu unserem Weg!", ziel: "fans", delta: 5, nebenziel: "marke", nebendelta: 2 },
+      { text: "Eine erfreuliche Nachricht, die für Kontinuität im Kader sorgt.", ziel: "fans", delta: 3 },
+      { text: "Verträge sind Verträge — ich mache daraus keine grosse Geschichte.", ziel: "fans", delta: -1 },
+      { text: "Das war vor allem eine finanzielle Entscheidung unsererseits.", ziel: "spieler", delta: -3, nebenziel: "fans", nebendelta: -1 },
     ]
   },
   {
@@ -6422,6 +6448,7 @@ function TeamgeistRadar({ teamgeist }) {
 const TAB_GRUPPEN = [
   { id: "kadertaktik", label: "Kader & Taktik", icon: Users, tabs: [
     { id: "kader", label: "Kader", icon: Users },
+    { id: "vertraege", label: "Spielerverträge", icon: FileText },
     { id: "taktik", label: "Taktik", icon: ClipboardList },
     { id: "material", label: "Training", icon: Dumbbell },
     { id: "trainingslager", label: "Trainingslager", icon: Tent }
@@ -7369,22 +7396,29 @@ function TabelleView({ division, managerTeam, managerBonus = 0 }) {
   );
 }
 
-function VertragsKarte({ spieler, managerDivId, season, onVerlaengern, ergebnis, gesperrt }) {
+function VertragsKarte({ spieler, managerDivId, season, onVerlaengern, ergebnis, gesperrt, frueh = false }) {
   const [laufzeit, setLaufzeit] = useState(2);
-  const [gehaltsFaktor, setGehaltsFaktor] = useState(105);
+  const gehaltsOptionen = frueh ? [85, 95, 105, 120] : [95, 105, 120, 140];
+  const [gehaltsFaktor, setGehaltsFaktor] = useState(frueh ? 95 : 105);
   const marktLohn = berechneSpielerlohn(spieler, managerDivId);
   const angebot = Math.round((marktLohn * gehaltsFaktor) / 100 / 100) * 100;
   const jahreVerbleibend = (spieler.vertragBisSaison ?? season) - season;
+  const rahmenFarbe = frueh ? "border-sky-500/40" : "border-red-500/40";
+  const hintergrundFarbe = frueh ? "rgba(56,189,248,0.05)" : "rgba(239,68,68,0.05)";
+  const akzentFarbe = frueh ? "text-sky-300" : "text-red-300";
+  const statusFarbe = frueh ? "text-sky-400" : "text-red-400";
   return (
-    <div className="border border-red-500/40 rounded p-3 text-xs space-y-2" style={{ backgroundColor: "rgba(239,68,68,0.05)" }}>
+    <div className={`border ${rahmenFarbe} rounded p-3 text-xs space-y-2`} style={{ backgroundColor: hintergrundFarbe }}>
       <div className="flex items-center justify-between">
-        <span className="text-red-300 font-semibold">{spieler.name} <span className="text-emerald-600 font-normal">· {spieler.posName} · {spieler.alter}J · Stärke {spieler.rating}</span></span>
-        <span className="text-red-400">{jahreVerbleibend <= 0 ? "Vertrag abgelaufen" : "noch 1 Jahr"}</span>
+        <span className={`${akzentFarbe} font-semibold`}>{spieler.name} <span className="text-emerald-600 font-normal">· {spieler.posName} · {spieler.alter}J · Stärke {spieler.rating}</span></span>
+        <span className={statusFarbe}>{jahreVerbleibend <= 0 ? "läuft am Saisonende aus" : `noch ${jahreVerbleibend} Jahr${jahreVerbleibend > 1 ? "e" : ""}`}</span>
       </div>
       {ergebnis && (
         <div className={ergebnis.angenommen ? "text-emerald-400" : "text-red-400"}>
           {ergebnis.angenommen
             ? `✓ Verlängert um ${ergebnis.laufzeit} Jahre bei ${ergebnis.gehalt.toLocaleString("de-CH")} €/Jahr.`
+            : ergebnis.willAbwarten
+            ? "✗ Abgelehnt — er will erst abwarten, wie die Saison läuft, bevor er sich festlegt. Vielleicht klappt es später."
             : ergebnis.temporaerFrustriert
             ? "✗ Abgelehnt — er ist frustriert von den Gesprächen. Für ein paar Wochen will er nicht weiterverhandeln, und seine Form leidet vorübergehend etwas darunter."
             : "✗ Abgelehnt — versuch's mit einem besseren Angebot."}
@@ -7401,7 +7435,7 @@ function VertragsKarte({ spieler, managerDivId, season, onVerlaengern, ergebnis,
       </div>
       <div className="flex items-center gap-2">
         <span className="text-emerald-500">Gehalt:</span>
-        {[95, 105, 120, 140].map(f => (
+        {gehaltsOptionen.map(f => (
           <button key={f} disabled={gesperrt} onClick={() => setGehaltsFaktor(f)} className={`px-2 py-1 rounded border text-[11px] ${gehaltsFaktor === f ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-400"} ${gesperrt ? "opacity-50 cursor-not-allowed" : ""}`}>{f}%</button>
         ))}
         <span className="text-emerald-300 ml-auto">{angebot.toLocaleString("de-CH")} €/Jahr</span>
@@ -7574,20 +7608,81 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
   );
 }
 
-function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, stab, vertragGesperrt, trophaeen, teamName, onJugendfoerderungUmschalten, onLeihoptionKaufen, meineAusgeliehenenSpieler, alleDivisionen }) {
+// Eigene Seite für Spielerverträge (siehe TAB_GRUPPEN "kadertaktik") — trennt "wer spielt wie" (Kader)
+// von "wer bleibt wie lange" (Verträge). Zwei Abschnitte: dringender Handlungsbedarf (Vertrag läuft
+// bald aus, wie bisher) sowie neu die Möglichkeit, Spieler mit noch längerer Laufzeit frühzeitig zu
+// verlängern — realistisch günstiger, weil ein fest gebundener Spieler kaum Verhandlungsmacht hat
+// (siehe berechneVertragsAkzeptanz).
+function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, vertragGesperrt }) {
+  // vertragGesperrt speichert ein Datum ("gesperrt bis") statt eines einfachen true/false — eine
+  // zeitlich begrenzte Abkühlphase (ca. 3 Wochen) statt einer kompletten Saisonsperre.
+  const istAktuellGesperrt = spielerId => vertragGesperrt?.[spielerId] && vertragGesperrt[spielerId] > datum;
+  const onVerlaengernMitZaehler = (spielerId, laufzeit, gehaltsFaktor) => {
+    if (istAktuellGesperrt(spielerId)) return;
+    onVertragVerlaengern(spielerId, laufzeit, gehaltsFaktor);
+  };
+  const eigeneSpieler = squad.filter(p => !p.leihspieler);
+  const auslaufend = eigeneSpieler.filter(p => (p.vertragBisSaison ?? season + 9) - season <= 1);
+  const langfristig = eigeneSpieler
+    .filter(p => (p.vertragBisSaison ?? season + 9) - season >= 2)
+    .sort((a, b) => b.rating - a.rating);
+
+  return (
+    <div>
+      {auslaufend.length > 0 && (
+        <div className="mb-5">
+          <div className="text-[11px] uppercase tracking-wider text-red-400/80 mb-1.5">Vertrag läuft aus — jetzt verlängern oder ablösefrei verlieren</div>
+          <div className="space-y-2">
+            {auslaufend.map(p => (
+              <VertragsKarte
+                key={p.id}
+                spieler={p}
+                managerDivId={managerDivId}
+                season={season}
+                onVerlaengern={onVerlaengernMitZaehler}
+                ergebnis={letzteVertragsverhandlung?.name === p.name ? letzteVertragsverhandlung : null}
+                gesperrt={istAktuellGesperrt(p.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">Frühzeitig verlängern</div>
+        <p className="text-[11px] text-emerald-600 mb-2">
+          Wie im echten Fussball: Ein Spieler mit noch laufendem Vertrag hat keine Alternative und lässt sich deshalb günstiger binden als kurz vor Vertragsende, wenn er mit einem ablösefreien Wechsel drohen könnte. Ein sehr zufriedener, starker Spieler lehnt eine frühzeitige Verlängerung manchmal trotzdem ab — er will erst abwarten, wie die Saison läuft.
+        </p>
+        {langfristig.length ? (
+          <div className="space-y-2">
+            {langfristig.map(p => (
+              <VertragsKarte
+                key={p.id}
+                spieler={p}
+                managerDivId={managerDivId}
+                season={season}
+                onVerlaengern={onVerlaengernMitZaehler}
+                ergebnis={letzteVertragsverhandlung?.name === p.name ? letzteVertragsverhandlung : null}
+                gesperrt={istAktuellGesperrt(p.id)}
+                frueh
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-emerald-700">Kein Spieler mit längerer Vertragslaufzeit vorhanden.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId, managerDivId, season, datum, stab, trophaeen, teamName, onJugendfoerderungUmschalten, onLeihoptionKaufen, meineAusgeliehenenSpieler, alleDivisionen }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   // Kollisionsfrei PRO TEAM — kein Porträt kommt innerhalb dieses Kaders zweimal vor.
   const squadPortraits = useMemo(
     () => spielerPortraitsFuerTeam([...squad.map(p => p.id), ...(meineAusgeliehenenSpieler || []).map(e => e.spielerId)]),
     [squad, meineAusgeliehenenSpieler]
   );
-  // vertragGesperrt speichert jetzt ein Datum ("gesperrt bis") statt eines einfachen true/false —
-  // eine zeitlich begrenzte Abkühlphase (ca. 3 Wochen) statt einer kompletten Saisonsperre.
-  const istAktuellGesperrt = spielerId => vertragGesperrt?.[spielerId] && vertragGesperrt[spielerId] > datum;
-  const onVerlaengernMitZaehler = (spielerId, laufzeit, gehaltsFaktor) => {
-    if (istAktuellGesperrt(spielerId)) return;
-    onVertragVerlaengern(spielerId, laufzeit, gehaltsFaktor);
-  };
   const sortiertesSquad = [...squad].sort((a, b) => {
     const posA = POSITIONEN.findIndex(p => p.code === a.pos);
     const posB = POSITIONEN.findIndex(p => p.code === b.pos);
@@ -7597,7 +7692,6 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
   const teamgeist = berechneTeamgeist(squad, season, stab?.psychologe?.rating, kapitaenId);
   const teamgeistInfo = teamgeistEinordnung(teamgeist.gesamt);
   const lohnsumme = berechneSquadLohnsumme(squad, managerDivId);
-  const auslaufend = squad.filter(p => !p.leihspieler && (p.vertragBisSaison ?? season + 9) - season <= 1);
   return (
     <div className="overflow-x-auto">
       <div className="flex items-center justify-between border border-emerald-800 rounded px-3 py-2 mb-3 text-xs" style={{ backgroundColor: "#0b1f14" }}>
@@ -7641,25 +7735,6 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
           </div>
         </div>
       </div>
-
-      {auslaufend.length > 0 && (
-        <div className="mb-4">
-          <div className="text-[11px] uppercase tracking-wider text-red-400/80 mb-1.5">Vertrag läuft aus — jetzt verlängern oder ablösefrei verlieren</div>
-          <div className="space-y-2">
-            {auslaufend.map(p => (
-              <VertragsKarte
-                key={p.id}
-                spieler={p}
-                managerDivId={managerDivId}
-                season={season}
-                onVerlaengern={onVerlaengernMitZaehler}
-                ergebnis={letzteVertragsverhandlung?.name === p.name ? letzteVertragsverhandlung : null}
-                gesperrt={istAktuellGesperrt(p.id)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
 
       <p className="text-[11px] text-emerald-600 mb-1.5">💡 Auf einen Spielernamen tippen öffnet sein Spielerdatenblatt mit allen Details und Statistiken.</p>
       <table className="w-full text-xs sm:text-sm">
@@ -10345,9 +10420,10 @@ const SPIELREGELN_KATEGORIEN = [
     ]
   },
   {
-    icon: Users, farbe: "#fcd34d", titel: "Spielerverträge",
+    icon: FileText, farbe: "#fcd34d", titel: "Spielerverträge",
     punkte: [
-      "Verträge mit unter einem Jahr Restlaufzeit lassen sich jederzeit verlängern (Laufzeit und Gehalt frei wählbar).",
+      "Eigene Unterseite unter \"Kader & Taktik\": Verträge mit unter zwei Jahren Restlaufzeit sowie die Möglichkeit, alle anderen Spieler frühzeitig zu verlängern.",
+      "Frühzeitige Verlängerung (noch mind. 2 Jahre Vertrag): günstigere Gehaltsoptionen als bei einer dringenden Verlängerung — ein fest gebundener Spieler hat keine Alternative und lässt sich deshalb leichter zu moderaten Konditionen halten, genau wie im echten Fussball. Ein sehr zufriedener, starker Spieler lehnt trotzdem manchmal grundsätzlich ab, weil er erst abwarten will.",
       "Zu viele abgelehnte Angebote: Der Spieler ist für ein paar Wochen frustriert (keine Gespräche, leichter Formabzug) — danach normalisiert sich alles wieder.",
       "Ohne Verlängerung verlässt der Spieler den Verein nach Vertragsende ablösefrei.",
       "Klick auf einen Spielernamen öffnet sein Datenblatt mit Statistiken, Karriere, Titeln und sieben positionsabhängigen Fähigkeitswerten (Torhüter haben ein eigenes Set) — geht überall, wo Spieler aufgelistet werden: Kader, Taktik, Training und Transfermarkt.",
@@ -10441,7 +10517,7 @@ const SPIELREGELN_KATEGORIEN = [
     icon: Sprout, farbe: "#6ee7b7", titel: "U19-Jugendliga",
     punkte: [
       "Eigenes U19-Team in einer echten dreistufigen Liga (U19-Bundesliga, U19-Regionalliga, U19-Landesliga) mit echtem Auf- und Abstieg für ALLE Teams — der eigene Verein startet zu Karrierebeginn immer in der tiefsten Stufe.",
-      "Der Kader besteht durchgehend aus echten, dauerhaften Spielern zwischen 17 und 18 Jahren — 18-Jährige wachsen jede Saison automatisch heraus (werden entweder befördert oder verlassen den Verein), neue 17-Jährige rücken nach.",
+      "Der Kader besteht durchgehend aus echten, dauerhaften Spielern zwischen 17 und 18 Jahren. Wird ein 18-Jähriger nicht rechtzeitig hochgezogen, wird er beim nächsten Saisonübergang freigestellt und wechselt zu einem echten anderen Verein (wie ein verkauftes Eigengewächs) — ein sehr vielversprechender Spieler (hohes Potenzial) bringt dabei noch eine kleine Ablöse ein, ein durchschnittlicher geht ablösefrei. Neue 17-Jährige rücken automatisch nach.",
       "Spiele laufen automatisch im Hintergrund mit (ein Spieltag pro eigenem Spieltag) — kein zusätzliches Klicken nötig. Die eigene Stärke wird dabei jede Woche frisch aus dem aktuellen U19-Kader berechnet.",
       "Frisch gesichtete Eigengewächse aus der Jugendakademie (Sichtung im Jugend-Tab) landen jetzt im U19-Kader statt direkt in der ersten Mannschaft — von dort aus lässt sich jeder Spieler jederzeit (nicht nur am Saisonende) über \"Hochziehen\" in die erste Mannschaft befördern.",
       "Maximal 1-3 Beförderungen pro Saison: Basis 1, +1 ab Akademie-Level 3, +1 bei einem U19-Trainer mit Stärke 60 oder mehr — der Zähler wird bei jedem Saisonübergang wieder auf 0 zurückgesetzt.",
@@ -10795,6 +10871,19 @@ function VereinsinfosView({ careerState }) {
             <span className="text-stone-800">
               <span className="font-semibold text-sky-800">U19 in Form: </span>
               {careerState.letztesU19Highlight.name} ({careerState.letztesU19Highlight.posName}) erzielte {careerState.letztesU19Highlight.tore} Tore in den letzten {careerState.letztesU19Highlight.spiele} Spielen.
+            </span>
+          </div>
+        )}
+
+        {careerState.letzteU19Freistellung && (
+          <div className="flex items-center gap-2 border border-sky-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#e9f2f7" }}>
+            <Sprout size={14} className="text-sky-700 shrink-0" />
+            <span className="text-stone-800">
+              <span className="font-semibold text-sky-800">U19-Abgang: </span>
+              {careerState.letzteU19Freistellung.name} ({careerState.letzteU19Freistellung.posName}) war mit 19 zu alt für die U19 und wurde freigestellt — er wechselt zu {careerState.letzteU19Freistellung.verein}
+              {careerState.letzteU19Freistellung.abloese > 0
+                ? <> gegen eine Ablöse von <span className="font-semibold">{careerState.letzteU19Freistellung.abloese.toLocaleString("de-CH")} €</span>.</>
+                : <> ablösefrei.</>}
             </span>
           </div>
         )}
@@ -13311,7 +13400,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -13344,6 +13433,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       case "verpflegung": return (IMBISS_ARTIKEL_TYPEN.some(a => (imbiss[a.id]?.bestand ?? 0) <= 0 || (vereinsheim[a.id]?.bestand ?? 0) <= 0)) ? "red" : null;
       case "trainingsmaterial": return materialBrauchtAktion ? "red" : null;
       case "kader": return kaderBrauchtAktion ? "red" : null;
+      case "vertraege": return vertraegeBrauchenAktion ? "red" : null;
       case "taktik": return taktikBrauchtAktion ? "red" : null;
       case "vereinsinfos": return vereinsinfosUngelesen ? "red" : null;
       case "nationalmannschaft": return (bundestrainerAmt?.kaderIds || []).length < 11 ? "red" : null;
@@ -13409,8 +13499,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     if (item.startVerfuegbar === false && trainingsmaterial[item.id] == null) return false; // noch nicht angeschafft, kein Verschleiss-Fall
     return (trainingsmaterial[item.id] ?? 50) < 20;
   });
-  const kaderBrauchtAktion = division.squads[profile.team].filter(p => !p.verletzung && !p.laenderspielSperre && !p.kartenSperre).length < 11
-    || division.squads[profile.team].some(p => (p.vertragBisSaison ?? season + 9) - season <= 1);
+  const kaderBrauchtAktion = division.squads[profile.team].filter(p => !p.verletzung && !p.laenderspielSperre && !p.kartenSperre).length < 11;
+  const vertraegeBrauchenAktion = division.squads[profile.team].some(p => !p.leihspieler && (p.vertragBisSaison ?? season + 9) - season <= 1);
   const trainerBrauchtAktion = !!(trainerVorschlaege?.verkaufen || []).some(v => !v.antwort);
   const akademieMaxLevelLiga = AKADEMIE_MAX_LEVEL_PRO_LIGA[managerDivId] || AKADEMIE_MAX_LEVEL_PRO_LIGA.OL;
   const akademieAbklingzeitAktiv = akademie.letzteFertigstellungAmDatum && datum < addTage(akademie.letzteFertigstellungAmDatum, AKADEMIE_ABKLINGZEIT_TAGE);
@@ -13824,6 +13914,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
+          letzteU19Freistellung: null,
+          letzteTopspielerVerlaengerung: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           letzteVerletzungen: null,
@@ -14175,6 +14267,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
+          letzteU19Freistellung: null,
+          letzteTopspielerVerlaengerung: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           trophaeen: neuerEuropapokal.phase === "sieger" && neuerEuropapokal.finalSieg
@@ -14508,6 +14602,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
+          letzteU19Freistellung: null,
+          letzteTopspielerVerlaengerung: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
           letzterEuroBericht: null,
@@ -14804,6 +14900,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           pokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "pokalsieg"),
           europapokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "europapokal"),
           torschuetzenkoenigDieseSaison: (vereinsHistorien[profile.team] || []).find(t => t.saison === season && t.typ === "torschuetzenkoenig") || null,
+          topspielerVerlaengertDieseSaison: !!letzteTopspielerVerlaengerung,
           pokalFinaleVerlorenDieseSaison: letzterPokalBericht?.rundenLabel === "finale" && letzterPokalBericht?.gewinner !== profile.team,
           europapokalFinaleVerlorenDieseSaison: letzterEuroBericht?.phase === "finale" && letzterEuroBericht?.gewonnen === false,
           aufgestiegenDieseSaison: !!letzterAufstieg,
@@ -15552,6 +15649,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
+          letzteU19Freistellung: null,
+          letzteTopspielerVerlaengerung: null,
           letztesQualifikationsspiel: null,
           letztesNationalmannschaftsTurnier: null,
       letzterStabAblauf: null,
@@ -16189,6 +16288,39 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Marketing-Kampagnen (inkl. Spielerauftritt) auf Ablauf prüfen — siehe verarbeiteMarketingAblaeufe.
     const marketingAblaufErgebnis = verarbeiteMarketingAblaeufe(marketingKampagnen, markenwert, season, managerDivId);
 
+    // U19-Alterung MUSS hier (vor divisionenMitLaenderspielCaps' finaler Verwendung unten) berechnet
+    // werden, nicht erst im Rückgabeobjekt weiter unten — nur so landet ein zu alter, freigestellter
+    // U19-Spieler auch tatsächlich beim neuen Verein, statt dass die Änderung folgenlos verpufft.
+    const jugendligaBasisVorAlterung = jugendliga || initialeJugendliga(profile.team, rngFor(`jugendliga|${profile.team}|nachtraeglich`));
+    const jugendDivIdBasisVorAlterung = jugendliga ? jugendDivId : "U19T3";
+    const jugendKaderBasisVorAlterung = jugendliga && jugendKader.length ? jugendKader : initialerU19Kader(profile.team, JUGENDLIGA_DEFS.find(d => d.id === jugendDivIdBasisVorAlterung).baseRating);
+    const jugendErgebnisVorAlterung = verarbeiteJugendligaSaisonende(jugendligaBasisVorAlterung, jugendDivIdBasisVorAlterung, profile.team);
+    const jugendBaseRatingVorAlterung = JUGENDLIGA_DEFS.find(d => d.id === jugendErgebnisVorAlterung.jugendDivId).baseRating;
+    const { kader: u19KaderNachAlterung, ausgemustert: u19Ausgemustert } = alterJugendKader(jugendKaderBasisVorAlterung, profile.team, jugendBaseRatingVorAlterung, seasonEndInfo.season);
+    // Zu alt für die U19 (19 Jahre) und nicht rechtzeitig hochgezogen: statt spurlos zu verschwinden,
+    // wechselt der Spieler zu einem echten anderen Verein (wie ein verkauftes Eigengewächs) — ein sehr
+    // vielversprechender Spieler bringt dabei noch eine kleine Ablöse ein.
+    let u19FreistellungsMeldung = null;
+    let u19FreistellungsAbloeseGesamt = 0;
+    u19Ausgemustert.forEach(spieler => {
+      const kandidatenDivIds = [managerDivId, naechstNiedrigereDivision(managerDivId), naechstHoehereDivision(managerDivId)].filter(Boolean);
+      const kandidatenTeams = [];
+      kandidatenDivIds.forEach(dId => {
+        (divisionenMitLaenderspielCaps[dId]?.teams || []).forEach(t => { if (t !== profile.team) kandidatenTeams.push({ team: t, divId: dId }); });
+      });
+      if (!kandidatenTeams.length) return;
+      const gewaehlterVerein = kandidatenTeams[Math.floor(Math.random() * kandidatenTeams.length)];
+      const { u19, potenzial, ...basisSpieler } = spieler;
+      const zielDiv = { ...divisionenMitLaenderspielCaps[gewaehlterVerein.divId], squads: { ...divisionenMitLaenderspielCaps[gewaehlterVerein.divId].squads } };
+      zielDiv.squads[gewaehlterVerein.team] = [...zielDiv.squads[gewaehlterVerein.team], { ...basisSpieler, vertragBisSaison: seasonEndInfo.season + 2, gehalt: berechneSpielerlohn(basisSpieler, gewaehlterVerein.divId), beimVereinSeitSaison: seasonEndInfo.season }];
+      divisionenMitLaenderspielCaps = { ...divisionenMitLaenderspielCaps, [gewaehlterVerein.divId]: zielDiv };
+      const abloese = berechneU19FreistellungAbloese(spieler, managerDivId);
+      u19FreistellungsAbloeseGesamt += abloese;
+      if (!u19FreistellungsMeldung) {
+        u19FreistellungsMeldung = { name: spieler.name, posName: spieler.posName, verein: gewaehlterVerein.team, abloese };
+      }
+    });
+
     setCareerState({
       divisions: {
         ...divisionenMitLaenderspielCaps,
@@ -16224,7 +16356,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       laenderspielFensterErledigt: [],
       season: seasonEndInfo.season,
       coach: coachFuerNeueSaison,
-      budget: budget + sponsorZahlung + aermelZahlung + trainingsanzugZahlung + werbebannerZahlung + ausbildungsentschaedigungGesamt + namensSponsorZahlung + akademieNamensSponsorZahlung + (seasonEndInfo.vereinsversammlung?.provisionGesamt || 0),
+      budget: budget + sponsorZahlung + aermelZahlung + trainingsanzugZahlung + werbebannerZahlung + ausbildungsentschaedigungGesamt + namensSponsorZahlung + akademieNamensSponsorZahlung + (seasonEndInfo.vereinsversammlung?.provisionGesamt || 0) + u19FreistellungsAbloeseGesamt,
       datum: neuesDatum,
       winterpauseGenommen: false,
       trainingslager: { vorrunde: false, rueckrunde: false },
@@ -16314,27 +16446,16 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       meineAusgeliehenenSpieler: [],
       managerReputation: neueManagerReputation,
       turnierspiel: null,
-      ...(() => {
-        // Absicherung für Spielstände von vor diesem Feature: fehlt jugendliga, wird es genau wie zum
-        // Karrierestart frisch initialisiert (eigenes Team startet in der tiefsten Stufe), statt
-        // abzustürzen.
-        const jugendligaBasis = jugendliga || initialeJugendliga(profile.team, rngFor(`jugendliga|${profile.team}|nachtraeglich`));
-        const jugendDivIdBasis = jugendliga ? jugendDivId : "U19T3";
-        const jugendKaderBasis = jugendliga && jugendKader.length ? jugendKader : initialerU19Kader(profile.team, JUGENDLIGA_DEFS.find(d => d.id === jugendDivIdBasis).baseRating);
-        const jugendErgebnis = verarbeiteJugendligaSaisonende(jugendligaBasis, jugendDivIdBasis, profile.team);
-        const jugendBaseRating = JUGENDLIGA_DEFS.find(d => d.id === jugendErgebnis.jugendDivId).baseRating;
-        return {
-          jugendliga: jugendErgebnis.jugendliga,
-          jugendDivId: jugendErgebnis.jugendDivId,
-          jugendKader: alterJugendKader(jugendKaderBasis, profile.team, jugendBaseRating, seasonEndInfo.season),
-          letztesJugendligaErgebnis: {
-            aufgestiegen: jugendErgebnis.aufgestiegen, abgestiegen: jugendErgebnis.abgestiegen,
-            alteStufe: JUGENDLIGA_DEFS.find(d => d.id === jugendErgebnis.alteStufe).name,
-            neueStufe: JUGENDLIGA_DEFS.find(d => d.id === jugendErgebnis.jugendDivId).name,
-            platz: jugendErgebnis.platz, anzahlTeams: jugendErgebnis.anzahlTeams
-          }
-        };
-      })(),
+      jugendliga: jugendErgebnisVorAlterung.jugendliga,
+      jugendDivId: jugendErgebnisVorAlterung.jugendDivId,
+      jugendKader: u19KaderNachAlterung,
+      letztesJugendligaErgebnis: {
+        aufgestiegen: jugendErgebnisVorAlterung.aufgestiegen, abgestiegen: jugendErgebnisVorAlterung.abgestiegen,
+        alteStufe: JUGENDLIGA_DEFS.find(d => d.id === jugendErgebnisVorAlterung.alteStufe).name,
+        neueStufe: JUGENDLIGA_DEFS.find(d => d.id === jugendErgebnisVorAlterung.jugendDivId).name,
+        platz: jugendErgebnisVorAlterung.platz, anzahlTeams: jugendErgebnisVorAlterung.anzahlTeams
+      },
+      letzteU19Freistellung: u19FreistellungsMeldung,
       letzteHeimspielKategorien: null,
       eingehendeAngebote: [],
       spielerberaterAngebote: [],
@@ -17142,8 +17263,14 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const marktSalaer = berechneSpielerlohn(spieler, managerDivId);
       const angebotsSalaer = Math.round((marktSalaer * gehaltsFaktor) / 100 / 100) * 100;
       const platz = sortedTable(cs.divisions[managerDivId].table).findIndex(t => t.name === profile.team) + 1 || 1;
-      const chance = berechneVertragsAkzeptanz(spieler, angebotsSalaer, marktSalaer, platz, cs.divisions[managerDivId].teams.length, laufzeit);
-      const angenommen = Math.random() < chance;
+      const jahreVerbleibendVorAngebot = (spieler.vertragBisSaison ?? cs.season) - cs.season;
+      // Frühzeitige Verlängerung (noch mind. 2 Jahre Vertrag): Ein sehr zufriedener, starker Spieler
+      // lehnt unabhängig vom Angebot manchmal grundsätzlich ab — er will lieber erst abwarten, wie die
+      // Saison läuft, statt sich früh festzulegen. Rein bei einem auslaufenden Vertrag gäbe es dieses
+      // Zögern nicht, da er dann selbst ein Interesse an Klarheit hat.
+      const willAbwarten = jahreVerbleibendVorAngebot >= 2 && (spieler.zufriedenheit ?? 70) >= 75 && spieler.rating >= 78 && Math.random() < 0.15;
+      const chance = willAbwarten ? 0 : berechneVertragsAkzeptanz(spieler, angebotsSalaer, marktSalaer, platz, cs.divisions[managerDivId].teams.length, laufzeit, jahreVerbleibendVorAngebot);
+      const angenommen = !willAbwarten && Math.random() < chance;
       const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
       // Nach wiederholt abgelehnten Angeboten kann der Spieler frustriert reagieren — statt einer
       // kompletten Saisonsperre (das hätte bei einem auslaufenden Vertrag den ablösefreien Verlust
@@ -17178,7 +17305,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       return {
         ...cs,
         divisions: { ...cs.divisions, [managerDivId]: div },
-        letzteVertragsverhandlung: { name: spieler.name, angenommen, laufzeit, gehalt: angebotsSalaer, verlaesstAusFrust: false, temporaerFrustriert: wurdeFrustriert, forderungen: angenommen ? null : ermittleVertragsForderungen(angebotsSalaer, marktSalaer, laufzeit) },
+        letzteVertragsverhandlung: { name: spieler.name, angenommen, laufzeit, gehalt: angebotsSalaer, verlaesstAusFrust: false, temporaerFrustriert: wurdeFrustriert, willAbwarten, forderungen: angenommen || willAbwarten ? null : ermittleVertragsForderungen(angebotsSalaer, marktSalaer, laufzeit) },
+        // Für die Pressekonferenz-Kreuzverbindung (siehe pkKontext.topspielerVerlaengertDieseSaison) —
+        // nur bei einem wirklich starken Spieler (Rating ≥82) und nur kurz nach der eigentlichen
+        // Verlängerung aktuell, wie bei den anderen Ein-Wochen-Meldungen auch.
+        letzteTopspielerVerlaengerung: (angenommen && spieler.rating >= 82) ? { name: spieler.name, rating: spieler.rating, laufzeit, gehalt: angebotsSalaer } : null,
         vertragAblehnungen: neueAblehnungen,
         vertragGesperrt: neueGesperrtBis,
         vertragAblehnungenSaison: cs.season
@@ -18527,7 +18658,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           {tab === "vereinsinfos" && <VereinsinfosView careerState={careerState} />}
           {tab === "nationalmannschaft" && bundestrainerAmt && <NationalmannschaftView divisions={divisions} bundestrainerAmt={bundestrainerAmt} onNationalkaderSetzen={onNationalkaderSetzen} onNationalformationSetzen={onNationalformationSetzen} managerDivId={managerDivId} season={season} trophaeen={trophaeen} />}
           {tab === "spielplan" && <SpielplanView division={division} managerTeam={profile.team} testspiele={testspiele} season={season} pokal={pokal} europapokal={europapokal} aktuellesDatum={datum} trainingslager={trainingslager} spielHistorie={spielHistorie} />}
-          {tab === "kader" && <KaderView squad={division.squads[profile.team]} kapitaenId={kapitaenId} elfmeterSchuetzeId={elfmeterSchuetzeId} freistossSchuetzeId={freistossSchuetzeId} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} stab={stab} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} trophaeen={trophaeen} teamName={profile.team} onJugendfoerderungUmschalten={onJugendfoerderungUmschalten} onLeihoptionKaufen={onLeihoptionKaufen} meineAusgeliehenenSpieler={meineAusgeliehenenSpieler} alleDivisionen={divisions} />}
+          {tab === "kader" && <KaderView squad={division.squads[profile.team]} kapitaenId={kapitaenId} elfmeterSchuetzeId={elfmeterSchuetzeId} freistossSchuetzeId={freistossSchuetzeId} managerDivId={managerDivId} season={season} datum={datum} stab={stab} trophaeen={trophaeen} teamName={profile.team} onJugendfoerderungUmschalten={onJugendfoerderungUmschalten} onLeihoptionKaufen={onLeihoptionKaufen} meineAusgeliehenenSpieler={meineAusgeliehenenSpieler} alleDivisionen={divisions} />}
+          {tab === "vertraege" && <SpielervertraegeView squad={division.squads[profile.team]} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} />}
           {tab === "taktik" && (
             <TaktikView
               squad={division.squads[profile.team]}
