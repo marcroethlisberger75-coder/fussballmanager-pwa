@@ -12228,6 +12228,11 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
       </>)}
 
       {abschnitt === "u17" && (<>
+      {!jugendliga17 && (
+        <div className="border border-sky-800/50 rounded p-4 mt-4 text-xs text-emerald-500" style={{ backgroundColor: "#0b1f2a" }}>
+          Die U17 wird beim nächsten Saisonübergang automatisch eingerichtet — dieser Spielstand wurde zuletzt noch mit einer älteren Version berechnet, in der es die U17 noch nicht gab. Ab der nächsten Saison ist sie da.
+        </div>
+      )}
       {jugendliga17 && (
         <div className="border border-sky-800/50 rounded p-4 mt-4" style={{ backgroundColor: "#0b1f2a" }}>
           <div className="text-xs uppercase tracking-wider text-sky-400/80 mb-2">
