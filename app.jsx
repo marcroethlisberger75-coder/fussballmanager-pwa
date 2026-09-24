@@ -19695,6 +19695,11 @@ function App() {
       jugendliga: initialeJugendliga(profile.team, rngFor(`jugendliga|${profile.team}`)),
       jugendKader: initialerU19Kader(profile.team, JUGENDLIGA_DEFS.find(d => d.id === "U19T3").baseRating),
       jugendDivId: "U19T3",
+      // U17-Jugendliga: dasselbe Prinzip, eine Stufe darunter (15-16 Jahre) — siehe
+      // initialeJugendliga17/initialerU17Kader.
+      jugendliga17: initialeJugendliga17(profile.team, rngFor(`jugendliga17|${profile.team}`)),
+      jugendKader17: initialerU17Kader(profile.team, JUGENDLIGA17_DEFS.find(d => d.id === "U17T3").baseRating),
+      jugendDivId17: "U17T3",
       ziele: null,
       trainerZiele: null,
       anzahlSaisonsImAmt: 1,
