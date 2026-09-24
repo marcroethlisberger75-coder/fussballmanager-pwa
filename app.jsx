@@ -9267,6 +9267,13 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   const formation = useMemo(() => waehleFormation(philosophie, coach?.stil), [philosophie, coach]);
   const { elf, bank, staerke } = useMemo(() => waehleStartelf(squad, formation), [squad, formation]);
+  // Nur für die Bank-Anzeige nach Position sortiert (Torwart → Innenverteidiger → Aussenverteidiger →
+  // Zentrales Mittelfeld → Offensives Mittelfeld → Stürmer, je Position nach Stärke) — die eigentliche
+  // Einwechsel-Logik (waehleEinwechslungen) bleibt unverändert weiterhin rein nach Stärke sortiert.
+  const POSITION_REIHENFOLGE = { TW: 0, IV: 1, AV: 2, ZM: 3, OM: 4, ST: 5 };
+  const bankNachPosition = [...bank].sort((a, b) =>
+    (POSITION_REIHENFOLGE[a.pos] ?? 9) - (POSITION_REIHENFOLGE[b.pos] ?? 9) || b.rating - a.rating
+  );
   const managerOption = PHILOSOPHIE_OPTIONEN.find(p => p.id === philosophie);
   const coachBias = TRAINER_STIL_BIAS[coach?.stil] ?? 0;
   const folgtManager = Math.sign(coachBias) === Math.sign(managerOption?.score || 0) || managerOption?.score === 0;
@@ -9405,7 +9412,7 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
 
       <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-1.5">Bank</div>
       <div className="space-y-1">
-        {bank.map(sp => (
+        {bankNachPosition.map(sp => (
           <div key={sp.id} onClick={() => setAusgewaehlterSpieler(sp)} className={`flex items-center justify-between text-xs px-3 py-1 rounded border cursor-pointer hover:bg-emerald-900/20 ${(sp.verletzung || sp.kartenSperre) ? "border-red-500/40 opacity-70" : "border-emerald-900 opacity-60"}`} style={{ backgroundColor: "#0b1f14" }}>
             <span className="text-emerald-200">
               {sp.name} <span className="text-emerald-600">· {sp.posName} · {sp.alter}J</span>
@@ -11109,16 +11116,21 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
   const [spielerFuerDetail, setSpielerFuerDetail] = useState(null);
   const pool = useMemo(() => ermittleDeutscheSpielerPool(divisions).sort((a, b) => b.rating - a.rating), [divisions]);
   const kaderIds = bundestrainerAmt.kaderIds || [];
+  // Über viele Saisons hinweg können gespeicherte Spieler-IDs ungültig werden (z.B. Karriereende) —
+  // ohne Bereinigung blieb die Anzeige "23/23" bestehen und der Schnitt wurde fälschlich durch 23
+  // geteilt, obwohl real immer weniger Spieler dahinter standen (der Schnitt sank so künstlich, je
+  // mehr Spieler im Laufe der Zeit ungültig wurden).
+  const kaderIdsGueltig = kaderIds.filter(id => pool.some(p => p.id === id));
   const gefiltert = pool.filter(p =>
     (positionsFilter === "ALLE" || p.pos === positionsFilter) &&
     (!suchbegriff || p.name.toLowerCase().includes(suchbegriff.toLowerCase()))
   );
   const toggle = (id) => {
     if (kaderIds.includes(id)) onNationalkaderSetzen(kaderIds.filter(x => x !== id));
-    else if (kaderIds.length < 23) onNationalkaderSetzen([...kaderIds, id]);
+    else if (kaderIdsGueltig.length < 23) onNationalkaderSetzen([...kaderIdsGueltig, id]);
   };
-  const kaderDurchschnitt = kaderIds.length
-    ? Math.round(pool.filter(p => kaderIds.includes(p.id)).reduce((s, p) => s + p.rating, 0) / kaderIds.length)
+  const kaderDurchschnitt = kaderIdsGueltig.length
+    ? Math.round(pool.filter(p => kaderIdsGueltig.includes(p.id)).reduce((s, p) => s + p.rating, 0) / kaderIdsGueltig.length)
     : 0;
   // Echte 5er-Gruppentabelle statt der früheren reinen Eigenbilanz.
   const quali = bundestrainerAmt.qualifikation;
@@ -11213,8 +11225,8 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
       </div>
 
       <div className="flex items-center justify-between mb-3">
-        <div className="text-xs uppercase tracking-wider text-emerald-400/80">Kaderauswahl ({kaderIds.length}/23)</div>
-        {kaderIds.length > 0 && <div className="text-xs text-emerald-400">Ø Stärke <span className="text-amber-400 font-semibold">{kaderDurchschnitt}</span></div>}
+        <div className="text-xs uppercase tracking-wider text-emerald-400/80">Kaderauswahl ({kaderIdsGueltig.length}/23)</div>
+        {kaderIdsGueltig.length > 0 && <div className="text-xs text-emerald-400">Ø Stärke <span className="text-amber-400 font-semibold">{kaderDurchschnitt}</span></div>}
       </div>
       <div className="flex gap-2 mb-3">
         <input
@@ -11288,18 +11300,18 @@ function SpielregelnView() {
 
 function KarriereView({ trophaeen, saisonHistorie, teamName, profileVorname, profileNachname, anzahlSaisonsImAmt, karriereAufstiege = 0, karriereAbstiege = 0, karriereEntlassungen = [], managerReputation = 25 }) {
   const ICON = {
-    meisterschaft: Trophy, meisterschaft_l2: Trophy, meisterschaft_l3: Trophy, meisterschaft_ol: Trophy,
+    meisterschaft: Trophy, meisterschaft_l2: Trophy, meisterschaft_l3: Trophy, meisterschaft_rl: Trophy, meisterschaft_ol: Trophy,
     aufstieg_meister: Medal, torschuetzenkoenig: TorjaegerkanoneIcon, pokalsieg: Trophy, europapokal: Trophy,
     wm_sieg: Trophy, em_sieg: Trophy
   };
   const FARBE = {
     meisterschaft: "text-amber-400", meisterschaft_l2: "text-slate-300", meisterschaft_l3: "text-slate-300",
-    meisterschaft_ol: "text-slate-300", aufstieg_meister: "text-emerald-400", torschuetzenkoenig: "text-sky-400",
+    meisterschaft_rl: "text-slate-300", meisterschaft_ol: "text-slate-300", aufstieg_meister: "text-emerald-400", torschuetzenkoenig: "text-sky-400",
     pokalsieg: "text-amber-400", europapokal: "text-sky-400", wm_sieg: "text-amber-400", em_sieg: "text-amber-400"
   };
   const TYP_NAMEN = {
     meisterschaft: "Deutscher Meister", meisterschaft_l2: "2.-Liga-Meister", meisterschaft_l3: "3.-Liga-Meister",
-    meisterschaft_ol: "Oberliga-Meister", aufstieg_meister: "Aufstieg als Meister", torschuetzenkoenig: "Torschützenkönig",
+    meisterschaft_rl: "Regionalliga-Meister", meisterschaft_ol: "Oberliga-Meister", aufstieg_meister: "Aufstieg als Meister", torschuetzenkoenig: "Torschützenkönig",
     pokalsieg: "DFB-Pokal-Sieger", europapokal: "Europapokal-Sieger", wm_sieg: "WM-Titel (Bundestrainer)", em_sieg: "EM-Titel (Bundestrainer)"
   };
 
@@ -13481,7 +13493,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       case "vertraege": return vertraegeBrauchenAktion ? "red" : (beraterVerlaengerungsAngebote?.length > 0 ? "amber" : null);
       case "taktik": return taktikBrauchtAktion ? "red" : null;
       case "vereinsinfos": return vereinsinfosUngelesen ? "red" : null;
-      case "nationalmannschaft": return (bundestrainerAmt?.kaderIds || []).length < 11 ? "red" : null;
+      case "nationalmannschaft": {
+        // Wie bei der Kaderauswahl selbst: gespeicherte IDs können über die Zeit ungültig werden
+        // (z.B. Karriereende) — nur noch tatsächlich existierende Spieler zählen für die Warnung.
+        const dfbPool = ermittleDeutscheSpielerPool(divisions);
+        const gueltigeAnzahl = (bundestrainerAmt?.kaderIds || []).filter(id => dfbPool.some(p => p.id === id)).length;
+        return gueltigeAnzahl < 11 ? "red" : null;
+      }
       default: return null;
     }
   };
