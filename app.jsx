@@ -10811,7 +10811,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Durchsucht werden auch die direkt benachbarten Ligen, nicht nur die eigene.",
       "Vertragsdauer bei einem Neuzugang frei wählbar (1–5 Jahre).",
       "Ein Kauf/Verkauf, den sich der Trainer gewünscht hat, macht ihn sofort zufriedener.",
-      "Ist der Neuzugang ein echter Ausreisser nach oben (mind. 15 Stärkepunkte über dem bisherigen Kaderschnitt), sorgt das für rund 6 Wochen für einen spürbaren Trikot-Verkaufsschub im Fanshop — bei einer normalen Verstärkung passiert das bewusst nicht.",
+      "Gilt als echter Star-Transfer (rund 6 Wochen spürbarer Trikot-Verkaufsschub im Fanshop), wenn der Neuzugang entweder mind. 15 Stärkepunkte über dem bisherigen Kaderschnitt liegt, oder selbst eine Stärke von mindestens 92 erreicht — Letzteres greift gezielt bei bereits starken Kadern, wo ein Weltklasse-Transfer sonst die relative Schwelle knapp verfehlen könnte. Bei einer normalen Verstärkung passiert das bewusst nicht.",
       "Ein Verkauf löst je nach Rolle in der Kabine eine Reaktion aus, nicht nach reiner Spielstärke: Der Kapitän oder ein Führungsspieler zu gehen sorgt für Unruhe (Team-Form und Trainerzufriedenheit sinken), ein unzufriedener \"Hitzkopf\" wirkt beim Abgang eher befreiend (beides steigt leicht). Die meisten anderen Verkäufe lösen dagegen gar keine spürbare Reaktion aus. Gilt gleichermassen, egal ob über ein eingehendes Angebot oder eine eigene Verhandlung verkauft wird."
     ]
   },
@@ -18418,15 +18418,18 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         // Laufzeit-Angabe erfolgt). Karrierewerte des ALTEN Vereins werden bewusst nicht mitgenommen —
         // "seit er im Verein ist" beginnt beim neuen Klub wieder bei null.
         const spielerMitNeuemVertrag = { ...spieler, vertragBisSaison: cs.season + (laufzeit || 3), gehalt: berechneSpielerlohn(spieler, managerDivId), beimVereinSeitSaison: cs.season, karriereTore: 0, karriereVorlagen: 0, karriereGelb: 0, karriereRot: 0, karriereSpiele: 0, motmAnzahl: 0, elfDesTagesAnzahl: 0, junior: false };
-        // Star-Transfer-Erkennung: NUR wenn der Neuzugang deutlich (mind. 15 Punkte) über dem
-        // bisherigen Kaderschnitt liegt, gilt er als echter Star — löst dann einen befristeten
-        // Trikot-Ansturm im Fanshop aus (siehe trikotBoostFaktor in naechsterSpieltag). Passiert
-        // bewusst NICHT bei jedem Transfer, nur bei einem klaren Ausreisser nach oben.
+        // Star-Transfer-Erkennung: gilt als echter Star, wenn ENTWEDER der Neuzugang deutlich (mind.
+        // 15 Punkte) über dem bisherigen Kaderschnitt liegt (gut bei kleineren Vereinen, wo das eine
+        // echte Verwandlung bedeutet) ODER er selbst eine sehr hohe absolute Stärke erreicht (≥92) —
+        // Letzteres greift gezielt bei bereits starken Kadern (z.B. Bundesliga-Topclubs mit Schnitt
+        // 80+), wo ein waschechter Weltklasse-Transfer sonst die relative Schwelle knapp verfehlen
+        // könnte, obwohl er objektiv eine Sensation ist. Löst dann einen befristeten Trikot-Ansturm im
+        // Fanshop aus (siehe trikotBoostFaktor in naechsterSpieltag).
         const bisherigesSquadVorZugang = zielDiv.squads[profile.team];
         const bisherigerSchnitt = bisherigesSquadVorZugang.length
           ? bisherigesSquadVorZugang.reduce((s, p) => s + p.rating, 0) / bisherigesSquadVorZugang.length
           : 0;
-        const istStarTransfer = bisherigesSquadVorZugang.length >= 5 && (spieler.rating - bisherigerSchnitt) >= 15;
+        const istStarTransfer = bisherigesSquadVorZugang.length >= 5 && ((spieler.rating - bisherigerSchnitt) >= 15 || spieler.rating >= 92);
         // Rückkehrer-Erkennung: kommt der Neuzugang aus der eigenen ehemaligen Eigengewächse-Liste
         // zurück, ist das werbetechnisch mindestens so wertvoll wie ein waschechter Star-Transfer — die
         // "Sohn kehrt heim"-Geschichte zieht unabhängig vom Rating einen Trikot-Ansturm nach sich.
