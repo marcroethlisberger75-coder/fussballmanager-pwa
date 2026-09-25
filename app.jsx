@@ -1248,6 +1248,29 @@ function waehleStartelf(squad, formation) {
   return { elf, bank, staerke };
 }
 
+// Rotationsprinzip (Taktik-Tab, Schalter): Bewusst nicht immer die statistisch stärkste Elf aufstellen,
+// sondern gelegentlich einem jüngeren Spieler (≤23) an derselben Position den Vorzug vor einem älteren
+// Stammspieler (>23) geben — ein echter Trade-off (leicht schwächer an diesem Spieltag), der über die
+// Zeit hinweg mehr jungen Spielern Einsatzzeit gibt und so von selbst einer zu eng gedrängten
+// Kaderpyramide (siehe KaderView) entgegenwirkt. Bewusst nur unter bereits im Erwachsenenkader
+// vorhandenen Spielern — kein Zugriff auf den U19-Kader.
+function wendeRotationsprinzipAn({ elf, bank, staerke }, aktiv, datum) {
+  if (!aktiv) return { elf, bank, staerke };
+  const rng = rngFor(`rotation|${datum}`);
+  if (rng() > 0.18) return { elf, bank, staerke }; // ca. 18% Chance pro Spieltag
+  const kandidaten = elf.map((p, i) => ({ p, i })).filter(({ p }) => p.alter > 23 && p.pos !== "TW");
+  if (!kandidaten.length) return { elf, bank, staerke };
+  const { p: alterSpieler, i: idx } = kandidaten[Math.floor(rng() * kandidaten.length)];
+  const juengereAlternativen = bank.filter(p => p.pos === alterSpieler.pos && p.alter <= 23 && !p.verletzung && !p.laenderspielSperre && !p.kartenSperre);
+  if (!juengereAlternativen.length) return { elf, bank, staerke };
+  const juengerer = juengereAlternativen[Math.floor(rng() * juengereAlternativen.length)];
+  const neueElf = [...elf];
+  neueElf[idx] = { ...juengerer, gespielterPos: alterSpieler.gespielterPos, effektivesRating: juengerer.rating, rotiert: true };
+  const neueBank = bank.map(p => p.id === juengerer.id ? alterSpieler : p);
+  const neueStaerke = neueElf.reduce((s, p) => s + (p.effektivesRating ?? p.rating), 0) / 11;
+  return { elf: neueElf, bank: neueBank, staerke: neueStaerke };
+}
+
 // Individuelle Spieler-Zufriedenheit (0-100, separat von der teambezogenen Teamgeist-Zahl): reagiert
 // auf tatsächliche Einsatzzeit — moderiert durch die eigene Persönlichkeit (bankToleranz, siehe
 // PERSOENLICHKEITEN) — und auf eine ungeklärte Vertragssituation. Wirkt sich über einen Abzug auf
@@ -2758,7 +2781,8 @@ const ZIEL_KATALOG = [
   { id: "eingespielt", text: "Eine eingespielte Startelf über mindestens 4 Spieltage halten" },
   { id: "markenwert_ziel", text: "Markenwert um mindestens 6 Punkte steigern" },
   { id: "lagerhaltung", text: "Für mindestens 5 Fanartikel einen Ziel-Bestand festlegen" },
-  { id: "spielerberater", text: "Einen von einem Spielerberater angebotenen Spieler verpflichten" }
+  { id: "spielerberater", text: "Einen von einem Spielerberater angebotenen Spieler verpflichten" },
+  { id: "titel_verteidigen", text: "Die Meisterschaft erfolgreich verteidigen (erneut Meister werden)" }
 ];
 
 const PROVISION_BEREICH = { BL: [50000, 150000], L2: [15000, 40000], L3: [5000, 15000], RL: [2750, 8500], OL: [500, 2000] };
@@ -2771,7 +2795,7 @@ const PROVISION_BEREICH = { BL: [50000, 150000], L2: [15000, 40000], L3: [5000, 
 // kommt "Klassenerhalt" in den Pool. Ohne diese Sonderregel konnte der Vorstand z.B. direkt nach dem
 // Sprung von der 3. in die 2. Liga schon in der Folgesaison den Aufstieg in die Bundesliga fordern,
 // oder einen frisch übernommenen Verein schon in der allerersten eigenen Saison zum Aufstieg zwingen.
-function generiereVorstandsZiele(managerDivId, season, salt = 0, frischeSituation = false, hatJunior = true) {
+function generiereVorstandsZiele(managerDivId, season, salt = 0, frischeSituation = false, hatJunior = true, wurdeMeisterLetzteSaison = false) {
   const rng = rngFor(`vorstandsziele|${managerDivId}|s${season}|${salt}`);
   const bereich = PROVISION_BEREICH[managerDivId] || PROVISION_BEREICH.OL;
   // "Junior etablieren" fällt aus dem Pool, wenn der Kader gerade gar keinen Junior enthält — sonst
@@ -2790,10 +2814,23 @@ function generiereVorstandsZiele(managerDivId, season, salt = 0, frischeSituatio
     if (frischeSituation ? z.id === "aufstieg" : z.id === "klassenerhalt") return false;
     if (z.id === "junioren" && !hatJunior) return false;
     if (z.id === "spielerberater" && frischeSituation) return false;
+    // "Titel verteidigen" ist nur ein Thema, wenn die Meisterschaft gerade tatsächlich gewonnen wurde —
+    // sonst würde es nie im Pool auftauchen (nur relevant, wenn es überhaupt etwas zu verteidigen gibt).
+    if (z.id === "titel_verteidigen" && !wurdeMeisterLetzteSaison) return false;
     return true;
   });
   const gewaehlt = [];
-  const anzahl = Math.min(2, pool.length);
+  // Nach einer gewonnenen Meisterschaft gibt der Vorstand IMMER die Titelverteidigung als eines der
+  // beiden Ziele vor — echte Ambition statt Zufall, der Manager wählt hier nicht mit.
+  if (wurdeMeisterLetzteSaison) {
+    const idx = pool.findIndex(z => z.id === "titel_verteidigen");
+    if (idx >= 0) {
+      const z = pool.splice(idx, 1)[0];
+      const provision = Math.round((bereich[0] + rng() * (bereich[1] - bereich[0])) / 100) * 100;
+      gewaehlt.push({ id: z.id, text: z.text, provision });
+    }
+  }
+  const anzahl = Math.min(2 - gewaehlt.length, pool.length);
   for (let i = 0; i < anzahl; i++) {
     const idx = Math.floor(rng() * pool.length);
     const z = pool.splice(idx, 1)[0];
@@ -2808,6 +2845,7 @@ function bewerteZiel(zielId, kontext) {
   switch (zielId) {
     case "obere_haelfte": return platz <= Math.ceil(anzahlTeams / 2);
     case "aufstieg": return platz <= aufsteigerPlaetze;
+    case "titel_verteidigen": return platz === 1;
     case "klassenerhalt": return platz <= anzahlTeams - (abstiegsPlaetze ?? 3);
     case "bilanz": return reingewinn > 0;
     case "junioren": return squad.some(p => p.junior && (p.spiele || 0) >= 5);
@@ -9260,8 +9298,8 @@ function TrainerZieleScreen({ trainerName, managerDivId, season, saisonLabel, on
   );
 }
 
-function ZieleScreen({ managerDivId, season, saisonLabel, onConfirm, geradeAufgestiegen = false, hatJunior = true }) {
-  const [ziele] = useState(() => generiereVorstandsZiele(managerDivId, season, 0, geradeAufgestiegen, hatJunior));
+function ZieleScreen({ managerDivId, season, saisonLabel, onConfirm, geradeAufgestiegen = false, hatJunior = true, wurdeMeisterLetzteSaison = false }) {
+  const [ziele] = useState(() => generiereVorstandsZiele(managerDivId, season, 0, geradeAufgestiegen, hatJunior, wurdeMeisterLetzteSaison));
 
   return (
     <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
@@ -9509,7 +9547,7 @@ function ElfDesTagesSpielfeld({ elfDesTages, titel, managerTeam }) {
   );
 }
 
-function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophiePaket, onPhilosophiePaketChange, philosophiePaketSeitSaison, results, managerTeam, managerDivId, season, trophaeen, eingespieltheitStreak = 0 }) {
+function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophiePaket, onPhilosophiePaketChange, results, managerTeam, managerDivId, season, trophaeen, eingespieltheitStreak = 0 }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   const formation = useMemo(() => waehleFormation(philosophie, coach?.stil), [philosophie, coach]);
   const { elf, bank, staerke } = useMemo(() => waehleStartelf(squad, formation), [squad, formation]);
@@ -9856,7 +9894,7 @@ function TrainerDetailModal({ coach, teamName, season, trophaeen, onClose }) {
   );
 }
 
-function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, matchday, managerDivId, onFeuern, onVerpflichten, onInterim, vorschlaege, zufriedenheit: zufriedenheitRoh, onAntwort, trainerZiele, ziele, philosophiePaket, trophaeen }) {
+function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, matchday, managerDivId, onFeuern, onVerpflichten, onInterim, vorschlaege, zufriedenheit: zufriedenheitRoh, onAntwort, trainerZiele, ziele, philosophiePaket, philosophiePaketSeitSaison, rotationsprinzipAktiv, onRotationsprinzipUmschalten, trophaeen }) {
   // trainerZufriedenheit wird intern als Fliesskommazahl geführt (viele kleine Deltas pro Ereignis) —
   // angezeigt wird sie aber immer als ganze Zahl, wie alle anderen %-/von-100-Werte im Spiel auch.
   const zufriedenheit = Math.round(zufriedenheitRoh ?? 70);
@@ -9915,6 +9953,24 @@ function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, m
           );
         })()}
       </div>
+
+      <div className="border border-emerald-700/50 rounded p-3 mb-4" style={{ backgroundColor: "rgba(16,185,129,0.05)" }}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">Rotationsprinzip</div>
+            <p className="text-[11px] text-emerald-600 leading-relaxed">
+              Aktiv: Gelegentlich (~1 von 5 Spieltagen) spielt bewusst ein jüngerer Spieler (≤23) anstelle eines älteren (&gt;23) an derselben Position — leicht schwächer an diesem Spieltag, dafür mehr Einsatzzeit für den Nachwuchs und über die Zeit eine ausgeglichenere Alterspyramide im Kader. Nur unter bereits im Kader vorhandenen Spielern, nicht aus der U19.
+            </p>
+          </div>
+          <button
+            onClick={onRotationsprinzipUmschalten}
+            className={`shrink-0 px-3 py-1.5 rounded text-xs font-semibold border ${rotationsprinzipAktiv ? "bg-emerald-600 border-emerald-500 text-white" : "border-emerald-700 text-emerald-500"}`}
+          >
+            {rotationsprinzipAktiv ? "Aktiv" : "Inaktiv"}
+          </button>
+        </div>
+      </div>
+
       {coach ? (
         <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
           <div className="flex items-center justify-between">
@@ -10736,8 +10792,8 @@ const SPIELREGELN_KATEGORIEN = [
       "Zu viele abgelehnte Angebote: Der Spieler ist für ein paar Wochen frustriert (keine Gespräche, leichter Formabzug) — danach normalisiert sich alles wieder.",
       "Ohne Verlängerung verlässt der Spieler den Verein nach Vertragsende ablösefrei.",
       "Klick auf einen Spielernamen öffnet sein Datenblatt mit Statistiken, Karriere, Titeln und sieben positionsabhängigen Fähigkeitswerten (Torhüter haben ein eigenes Set) — geht überall, wo Spieler aufgelistet werden: Kader, Taktik, Training und Transfermarkt.",
-      "Kaderpyramide-Warnung im Kader-Tab: Erscheint, sobald 3 oder mehr deiner wichtigsten Spieler gleichzeitig in derselben Altersgruppe ab 30 stehen — Vorwarnung vor einem gemeinsamen Leistungseinbruch, bevor er tatsächlich eintritt.",
-      "Titelverteidiger-Malus: Wird die Meisterschaft gewonnen und während dieser Saison kaum aktiv nachgerüstet (unter 2 Neuzugänge), startet die Mannschaft mit spürbar gedämpfter Form in die neue Saison — baut sich über die ersten Wochen von selbst wieder ab.",
+      "Kaderpyramide-Warnung im Kader-Tab: Erscheint, sobald 3 oder mehr deiner wichtigsten Spieler gleichzeitig in derselben Altersgruppe ab 30 stehen — Vorwarnung vor einem gemeinsamen Leistungseinbruch, bevor er tatsächlich eintritt. Das Rotationsprinzip (Taktik-Tab, Schalter) wirkt dem aktiv entgegen: gibt jüngeren Spielern (≤23) regelmässig statt eines älteren Stammspielers (>23) an derselben Position den Vorzug — an diesem Spieltag leicht schwächer, dafür mehr Einsatzzeit für den Nachwuchs. Nur unter bereits im Kader vorhandenen Spielern, nicht aus der U19.",
+      "Titelverteidiger-Malus: Wird die Meisterschaft gewonnen und während dieser Saison kaum aktiv nachgerüstet (unter 2 Neuzugänge), startet die Mannschaft mit spürbar gedämpfter Form in die neue Saison — baut sich über die ersten Wochen von selbst wieder ab. Unabhängig davon gibt der Vorstand nach einem Titelgewinn in der neuen Saison zusätzlich immer \"Titel verteidigen\" als eines der beiden Saisonziele vor.",
       "Jede Entwicklung eines Spielers fördert gezielt EIN Attribut — der passende Co-Trainer bestimmt, welches: Torwarttrainer stärkt die Reflexe der Torhüter, Defensivtrainer die Defensive von Verteidigern, Stürmertrainer die Offensive von Offensivspielern, Assistenztrainer das Passspiel der zentralen Mittelfeldspieler."
     ]
   },
@@ -13856,7 +13912,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -14018,7 +14074,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     : (interimTrainer && interimTrainer.verbleibend > 0 ? -4 : -8);
   const zufriedenheitsBonus = coach ? (trainerZufriedenheit - 70) / 15 : 0;
   const aktuelleFormation = useMemo(() => waehleFormation(philosophie, coach?.stil), [philosophie, coach]);
-  const aktuelleStartelf = useMemo(() => waehleStartelf(division.squads[profile.team], aktuelleFormation), [division.squads, profile.team, aktuelleFormation]);
+  const aktuelleStartelf = useMemo(
+    () => wendeRotationsprinzipAn(waehleStartelf(division.squads[profile.team], aktuelleFormation), rotationsprinzipAktiv, datum),
+    [division.squads, profile.team, aktuelleFormation, rotationsprinzipAktiv, datum]
+  );
   const taktikBrauchtAktion = aktuelleStartelf.elf.some(sp => sp.gespielterPos && sp.gespielterPos !== sp.pos);
   const formationsBonus = (aktuelleStartelf.staerke - teamStrength(division.squads[profile.team])) * 0.6;
   const formDurchschnitt = aktuelleStartelf.elf.length
@@ -17143,6 +17202,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     setCareerState(cs => cs.philosophiePaket === id ? cs : { ...cs, philosophiePaket: id, philosophiePaketSeitSaison: cs.season });
   };
 
+  const onRotationsprinzipUmschalten = () => {
+    setCareerState(cs => ({ ...cs, rotationsprinzipAktiv: !cs.rotationsprinzipAktiv }));
+  };
+
   const onBannerAnnehmen = (angebot) => {
     setCareerState(cs => {
       const belegt = cs.werbebanner.vertraege.reduce((s, v) => s + (v.anzahl || 1), 0);
@@ -19317,7 +19380,6 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onPhilosophieChange={onPhilosophieChange}
               philosophiePaket={philosophiePaket}
               onPhilosophiePaketChange={onPhilosophiePaketChange}
-              philosophiePaketSeitSaison={philosophiePaketSeitSaison}
               results={division.results}
               managerTeam={profile.team}
               managerDivId={managerDivId}
@@ -19345,6 +19407,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               trainerZiele={trainerZiele}
               ziele={ziele}
               philosophiePaket={philosophiePaket}
+              philosophiePaketSeitSaison={philosophiePaketSeitSaison}
+              rotationsprinzipAktiv={rotationsprinzipAktiv}
+              onRotationsprinzipUmschalten={onRotationsprinzipUmschalten}
               trophaeen={trophaeen}
             />
           )}
@@ -19956,6 +20021,7 @@ function App() {
     const geradeVereinGewechselt = !!(letzteHistorie?.verein && letzteHistorie.verein !== profile.team);
     const nochGanzNeueKarriere = (careerState.anzahlSaisonsImAmt || 1) <= 2;
     const hatJunior = (careerState.divisions[managerDivId]?.squads[profile.team] || []).some(p => p.junior);
+    const wurdeMeisterLetzteSaison = (careerState.vereinsHistorien?.[profile.team] || []).some(t => t.saison === careerState.season - 1 && t.typ === "meisterschaft");
     return (
       <ZieleScreen
         managerDivId={managerDivId}
@@ -19964,6 +20030,7 @@ function App() {
         onConfirm={onZieleGewaehlt}
         geradeAufgestiegen={geradeAufgestiegen || geradeVereinGewechselt || nochGanzNeueKarriere}
         hatJunior={hatJunior}
+        wurdeMeisterLetzteSaison={wurdeMeisterLetzteSaison}
       />
     );
   }
