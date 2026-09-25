@@ -1248,7 +1248,7 @@ function waehleStartelf(squad, formation) {
   return { elf, bank, staerke };
 }
 
-// Rotationsprinzip (Taktik-Tab, Schalter): Bewusst nicht immer die statistisch stärkste Elf aufstellen,
+// Rotationsprinzip (Schalter im Trainer-Tab, bei der Vereinsphilosophie): Bewusst nicht immer die statistisch stärkste Elf aufstellen,
 // sondern gelegentlich einem jüngeren Spieler (≤23) an derselben Position den Vorzug vor einem älteren
 // Stammspieler (>23) geben — ein echter Trade-off (leicht schwächer an diesem Spieltag), der über die
 // Zeit hinweg mehr jungen Spielern Einsatzzeit gibt und so von selbst einer zu eng gedrängten
@@ -10792,7 +10792,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Zu viele abgelehnte Angebote: Der Spieler ist für ein paar Wochen frustriert (keine Gespräche, leichter Formabzug) — danach normalisiert sich alles wieder.",
       "Ohne Verlängerung verlässt der Spieler den Verein nach Vertragsende ablösefrei.",
       "Klick auf einen Spielernamen öffnet sein Datenblatt mit Statistiken, Karriere, Titeln und sieben positionsabhängigen Fähigkeitswerten (Torhüter haben ein eigenes Set) — geht überall, wo Spieler aufgelistet werden: Kader, Taktik, Training und Transfermarkt.",
-      "Kaderpyramide-Warnung im Kader-Tab: Erscheint, sobald 3 oder mehr deiner wichtigsten Spieler gleichzeitig in derselben Altersgruppe ab 30 stehen — Vorwarnung vor einem gemeinsamen Leistungseinbruch, bevor er tatsächlich eintritt. Das Rotationsprinzip (Taktik-Tab, Schalter) wirkt dem aktiv entgegen: gibt jüngeren Spielern (≤23) regelmässig statt eines älteren Stammspielers (>23) an derselben Position den Vorzug — an diesem Spieltag leicht schwächer, dafür mehr Einsatzzeit für den Nachwuchs. Nur unter bereits im Kader vorhandenen Spielern, nicht aus der U19.",
+      "Kaderpyramide-Warnung im Kader-Tab: Erscheint, sobald 3 oder mehr deiner wichtigsten Spieler gleichzeitig in derselben Altersgruppe ab 30 stehen — Vorwarnung vor einem gemeinsamen Leistungseinbruch, bevor er tatsächlich eintritt. Das Rotationsprinzip (Schalter im Trainer-Tab, bei der Vereinsphilosophie) wirkt dem aktiv entgegen: gibt jüngeren Spielern (≤23) regelmässig statt eines älteren Stammspielers (>23) an derselben Position den Vorzug — an diesem Spieltag leicht schwächer, dafür mehr Einsatzzeit für den Nachwuchs. Nur unter bereits im Kader vorhandenen Spielern, nicht aus der U19.",
       "Titelverteidiger-Malus: Wird die Meisterschaft gewonnen und während dieser Saison kaum aktiv nachgerüstet (unter 2 Neuzugänge), startet die Mannschaft mit spürbar gedämpfter Form in die neue Saison — baut sich über die ersten Wochen von selbst wieder ab. Unabhängig davon gibt der Vorstand nach einem Titelgewinn in der neuen Saison zusätzlich immer \"Titel verteidigen\" als eines der beiden Saisonziele vor.",
       "Jede Entwicklung eines Spielers fördert gezielt EIN Attribut — der passende Co-Trainer bestimmt, welches: Torwarttrainer stärkt die Reflexe der Torhüter, Defensivtrainer die Defensive von Verteidigern, Stürmertrainer die Offensive von Offensivspielern, Assistenztrainer das Passspiel der zentralen Mittelfeldspieler."
     ]
