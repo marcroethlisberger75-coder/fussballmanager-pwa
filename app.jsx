@@ -8053,12 +8053,34 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
     altersGruppen[gruppe] = (altersGruppen[gruppe] || 0) + 1;
   });
   const kritischeGruppe = Object.entries(altersGruppen).find(([, anzahl]) => anzahl >= 3);
+  const kaderDurchschnitte = squad.length ? {
+    alter: squad.reduce((s, p) => s + p.alter, 0) / squad.length,
+    form: squad.reduce((s, p) => s + (p.form ?? 60), 0) / squad.length,
+    staerke: squad.reduce((s, p) => s + p.rating, 0) / squad.length
+  } : null;
   return (
     <div className="overflow-x-auto">
       <div className="flex items-center justify-between border border-emerald-800 rounded px-3 py-2 mb-3 text-xs" style={{ backgroundColor: "#0b1f14" }}>
         <span className="text-emerald-500 uppercase tracking-wider text-[10px]">Gesamte Lohnsumme (jährlich)</span>
         <span className="text-amber-400 font-semibold">{lohnsumme.toLocaleString("de-CH")} €</span>
       </div>
+
+      {kaderDurchschnitte && (
+        <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
+          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "#0b1f14" }}>
+            <div className="text-emerald-500 uppercase tracking-wider text-[10px] mb-0.5">Ø Alter</div>
+            <div className="text-amber-400 font-semibold">{kaderDurchschnitte.alter.toFixed(1)}</div>
+          </div>
+          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "#0b1f14" }}>
+            <div className="text-emerald-500 uppercase tracking-wider text-[10px] mb-0.5">Ø Form</div>
+            <div className="text-amber-400 font-semibold">{Math.round(kaderDurchschnitte.form)}</div>
+          </div>
+          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "#0b1f14" }}>
+            <div className="text-emerald-500 uppercase tracking-wider text-[10px] mb-0.5">Ø Stärke</div>
+            <div className="text-amber-400 font-semibold">{Math.round(kaderDurchschnitte.staerke)}</div>
+          </div>
+        </div>
+      )}
 
       {kritischeGruppe && (
         <div className="border border-amber-500/40 rounded px-3 py-2 mb-3 text-xs" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
