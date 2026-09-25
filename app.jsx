@@ -967,6 +967,8 @@ const STAB_ROLLEN = [
   { id: "akademieleiter", name: "Akademieleiter", beschreibung: "Beschleunigt den Akademie-Ausbau und hebt die Stärke aufrückender Talente — die perfekte Ergänzung zum Chefscout." },
   { id: "jugendtrainer", name: "U19-Trainer", beschreibung: "Beschleunigt gezielt die Entwicklung der Spieler im eigenen U19-Team — die perfekte Ergänzung zum Akademieleiter, der eher für die Qualität der Neuzugänge sorgt." },
   { id: "jugendtrainer17", name: "U17-Trainer", beschreibung: "Beschleunigt gezielt die Entwicklung der Spieler im eigenen U17-Team — unabhängig vom U19-Trainer, der sich nur um die ältere Jugendmannschaft kümmert." },
+  { id: "jugendtrainer15", name: "U15-Trainer", beschreibung: "Beschleunigt gezielt die Entwicklung der Spieler im eigenen U15-Team — unabhängig von den Trainern der älteren Jugendmannschaften." },
+  { id: "jugendtrainer13", name: "U13-Trainer", beschreibung: "Beschleunigt gezielt die Entwicklung der Spieler im eigenen U13-Team — unabhängig von den Trainern der älteren Jugendmannschaften." },
   { id: "ernaehrung", name: "Ernährungsberater", beschreibung: "Eine dritte, unabhängige Säule neben Arzt und Trainingszentrum — senkt zusätzlich das Verletzungsrisiko und hält ältere Spieler länger auf Topniveau." }
 ];
 
@@ -2050,6 +2052,15 @@ function generiereScoutingKandidaten(teamName, baseRating, investition, scoutRat
     kandidaten.push({ typ: "neu17", spieler: spieler17, spanneVon: spanneVon17, spanneBis: spanneBis17, wunderkind: false });
   }
 
+  // Dasselbe nochmals eine Stufe tiefer für die U15 (13-14) und U13 (11-12) — je 1 Kandidat, unabhängig
+  // von der Investitionshöhe (sonst würde die Sichtung bei hoher Investition mit bis zu 6+ Kandidaten
+  // überladen). Landet beim Auswählen im jeweiligen Jugendkader (siehe onTalentWaehlen).
+  const spieler15 = generiereU15Spieler(teamName, baseRating + scoutBonus + akademieBonus + akademieleiterBonus, 0);
+  kandidaten.push({ typ: "neu15", spieler: spieler15, spanneVon: Math.max(13, spieler15.rating - spannenBreite), spanneBis: Math.min(99, spieler15.rating + spannenBreite), wunderkind: false });
+
+  const spieler13 = generiereU13Spieler(teamName, baseRating + scoutBonus + akademieBonus + akademieleiterBonus, 0);
+  kandidaten.push({ typ: "neu13", spieler: spieler13, spanneVon: Math.max(11, spieler13.rating - spannenBreite), spanneBis: Math.min(99, spieler13.rating + spannenBreite), wunderkind: false });
+
   // Mit Chefscout: zusätzlich 1 echter, junger Spieler (≤21) eines anderen Vereins, der abgeworben
   // werden kann — sichtbar mit Herkunftsverein und Ablösesumme, statt kostenlos aufzurücken.
   if (scoutRating && alleDivisionen && managerDivId) {
@@ -2639,6 +2650,382 @@ function verarbeiteJugendliga17Saisonende(jugendliga, jugendDivId, managerTeam) 
     teams.forEach(t => {
       if (t === managerTeam) { staerken[t] = null; return; }
       const vorherigeStaerke = neueStaerken.U17T1[t] ?? neueStaerken.U17T2[t] ?? neueStaerken.U17T3[t];
+      staerken[t] = vorherigeStaerke ?? Math.round(def.baseRating + (Math.random() * 16 - 8));
+    });
+    neueLiga[divId] = { teams, table, staerken, fixtures: generateFixtures(teams), matchday: 0 };
+  });
+
+  return { jugendliga: neueLiga, jugendDivId: jugendDivIdNeu, aufgestiegen: ergebnisse[jugendDivId]?.aufsteiger.includes(managerTeam) || false, abgestiegen: ergebnisse[jugendDivId]?.absteiger.includes(managerTeam) || false, alteStufe: jugendDivId, platz: platzVorher, anzahlTeams: jugendliga[jugendDivId].teams.length };
+}
+
+// ==========================================================================
+// U15-JUGENDLIGA — spiegelt das U17-System eins zu eins, nur für 13-14-Jährige. Wird ein U15-Spieler
+// 15, wandert er automatisch in den U17-Kader (komplette Durchlässigkeit wie U17→U19). Anders als bei
+// U17 gibt es HIER kein vorzeitiges direktes Hochziehen in die erste Mannschaft — mit 13/14 ist das
+// selbst für ein Wunderkind unrealistisch, der einzige Weg nach oben führt über die U17.
+// ==========================================================================
+const JUGENDLIGA15_DEFS = [
+  { id: "U15T1", name: "U15-Bundesliga", anzahlTeams: 16, aufsteiger: 0, absteiger: 3, baseRating: 42 },
+  { id: "U15T2", name: "U15-Regionalliga", anzahlTeams: 16, aufsteiger: 3, absteiger: 3, baseRating: 33 },
+  { id: "U15T3", name: "U15-Landesliga", anzahlTeams: 16, aufsteiger: 3, absteiger: 0, baseRating: 24 }
+];
+
+function initialeJugendliga15(managerTeam, rng) {
+  const pool = alleVereinsNamenPool().sort(() => rng() - 0.5);
+  let poolIndex = 0;
+  const naechsterName = (ausschluss) => {
+    while (pool[poolIndex % pool.length] === ausschluss) poolIndex++;
+    return pool[poolIndex++ % pool.length];
+  };
+  const liga = {};
+  JUGENDLIGA15_DEFS.forEach(def => {
+    const teams = [];
+    for (let i = 0; i < def.anzahlTeams; i++) {
+      if (def.id === "U15T3" && i === 0) { teams.push(managerTeam); continue; }
+      teams.push(naechsterName(managerTeam));
+    }
+    const table = {};
+    teams.forEach(t => { table[t] = { sp: 0, s: 0, u: 0, n: 0, tore: 0, gegentore: 0, pkt: 0 }; });
+    const staerken = {};
+    teams.forEach(t => { staerken[t] = t === managerTeam ? null : Math.round(def.baseRating + (rng() * 16 - 8)); });
+    liga[def.id] = { teams, table, staerken, fixtures: generateFixtures(teams), matchday: 0 };
+  });
+  return liga;
+}
+
+// U15-Spieler: strikt 13 oder 14 Jahre — 14-Jährige entstehen nur durch natürliches Altern.
+function generiereU15Spieler(teamName, baseRating, season, alter = 13) {
+  const rating = Math.max(15, Math.min(55, Math.round(baseRating + (Math.random() * 14 - 7))));
+  const potenzial = Math.min(99, rating + 10 + Math.floor(Math.random() * 34));
+  const pos = POSITIONEN[Math.floor(Math.random() * POSITIONEN.length)];
+  const vorname = VORNAMEN[Math.floor(Math.random() * VORNAMEN.length)];
+  const nachname = NACHNAMEN[Math.floor(Math.random() * NACHNAMEN.length)];
+  const neueId = `${teamName}-u15-${season}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  return {
+    id: neueId, name: `${vorname} ${nachname}`, pos: pos.code, posName: pos.name,
+    alter, nr: 30 + Math.floor(Math.random() * 10), rating, potenzial,
+    nationalitaet: NATIONALITAETEN_POOL[Math.floor(Math.random() * NATIONALITAETEN_POOL.length)],
+    persoenlichkeit: zufallsPersoenlichkeit(),
+    zufriedenheit: 70, junior: true, u15: true,
+    attribute: berechneSpielerAttribute({ id: neueId, pos: pos.code, rating }),
+    attributeSaisonStart: berechneSpielerAttribute({ id: neueId, pos: pos.code, rating }),
+    tore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0, form: 60, verletzung: null
+  };
+}
+
+const U15_KADERGROESSE = U19_KADERGROESSE; // alle U-Stufen müssen dieselbe Kadergrösse haben
+
+function alterJugendKader15(kader, teamName, baseRating, season) {
+  const aufgestiegen = kader.filter(p => p.alter >= 14).map(p => {
+    const { u15, ...basisSpieler } = p;
+    return { ...basisSpieler, alter: 15, u17: true };
+  });
+  const verbleibend = kader.filter(p => p.alter < 14).map(p => ({ ...p, alter: p.alter + 1 }));
+  const fehlende = U15_KADERGROESSE - verbleibend.length;
+  for (let i = 0; i < fehlende; i++) verbleibend.push(generiereU15Spieler(teamName, baseRating, season));
+  return { kader: verbleibend, aufgestiegen };
+}
+
+function simuliereJugendliga15Spieltag(jugendliga, jugendDivId, jugendKader, managerTeam) {
+  const eigeneStaerke = jugendKader.length ? jugendKader.reduce((s, p) => s + p.rating, 0) / jugendKader.length : 24;
+  const neueLiga = {};
+  let neuerJugendKader = jugendKader;
+  Object.entries(jugendliga).forEach(([divId, div]) => {
+    if (div.matchday >= div.fixtures.length) { neueLiga[divId] = div; return; }
+    const staerkeVon = (team) => (divId === jugendDivId && team === managerTeam) ? eigeneStaerke : div.staerken[team];
+    const runde = div.fixtures[div.matchday];
+    let tabelle = div.table;
+    let eigenesSpielGehabt = false;
+    let eigeneTore = 0;
+    runde.forEach(([heim, gast]) => {
+      const ergebnis = simulateMatch(staerkeVon(heim), staerkeVon(gast));
+      tabelle = aktualisiereGruppentabelle(tabelle, heim, gast, ergebnis.heim, ergebnis.gast);
+      if (divId === jugendDivId && (heim === managerTeam || gast === managerTeam)) {
+        eigenesSpielGehabt = true;
+        eigeneTore = heim === managerTeam ? ergebnis.heim : ergebnis.gast;
+      }
+    });
+    if (eigenesSpielGehabt && neuerJugendKader.length) {
+      const torProSpieler = {};
+      const gewichte = neuerJugendKader.map(p => (TORSCHUETZE_GEWICHT[p.pos] ?? 0.1) * Math.max(1, p.rating - 15));
+      const gesamtGewicht = gewichte.reduce((s, w) => s + w, 0);
+      const rng = rngFor(`u15tore|${managerTeam}|${div.matchday}`);
+      for (let i = 0; i < eigeneTore; i++) {
+        let r = rng() * gesamtGewicht, idx = 0;
+        while (r > gewichte[idx] && idx < gewichte.length - 1) { r -= gewichte[idx]; idx++; }
+        const id = neuerJugendKader[idx].id;
+        torProSpieler[id] = (torProSpieler[id] || 0) + 1;
+      }
+      neuerJugendKader = neuerJugendKader.map(p => {
+        const toreDiesesSpiel = torProSpieler[p.id] || 0;
+        return {
+          ...p,
+          u15ToreSaison: (p.u15ToreSaison || 0) + toreDiesesSpiel,
+          u15FormFenster: [...(p.u15FormFenster || []), toreDiesesSpiel].slice(-5)
+        };
+      });
+    }
+    neueLiga[divId] = { ...div, table: tabelle, matchday: div.matchday + 1 };
+  });
+  return { neueLiga, neuerJugendKader };
+}
+
+// Je zur Hälfte 13- und 14-Jährige von Anfang an.
+function initialerU15Kader(teamName, baseRating) {
+  const kader = [];
+  const haelfte = U15_KADERGROESSE / 2;
+  for (let i = 0; i < U15_KADERGROESSE; i++) kader.push(generiereU15Spieler(teamName, baseRating, 0, i < haelfte ? 13 : 14));
+  return kader;
+}
+
+function entwickleU15Kader(kader, jugendtrainer15Rating) {
+  const trainerBonus = jugendtrainer15Rating ? Math.max(0, (jugendtrainer15Rating - 30) / 500) : 0;
+  const veraenderungen = [];
+  const neuesKader = kader.map(p => {
+    if (p.verletzung) return p;
+    const obergrenze = p.potenzial || 99;
+    if (p.rating >= obergrenze) return p;
+    const chance = 0.03 + trainerBonus;
+    if (Math.random() < chance) {
+      const neuesRating = Math.min(obergrenze, p.rating + 1);
+      veraenderungen.push({ name: p.name, delta: 1, rating: neuesRating });
+      const zielAttribut = ATTRIBUT_SPEZIALIST_ZIEL[p.pos] || "mentalitaet";
+      return { ...p, rating: neuesRating, attribute: trainiereAttributGezielt(p, zielAttribut, neuesRating) };
+    }
+    return p;
+  });
+  return { neuesKader, veraenderungen };
+}
+
+function verarbeiteJugendliga15Saisonende(jugendliga, jugendDivId, managerTeam) {
+  const ordnung = ["U15T1", "U15T2", "U15T3"];
+  const ergebnisse = {};
+  let platzVorher = null;
+  ordnung.forEach(divId => {
+    const def = JUGENDLIGA15_DEFS.find(d => d.id === divId);
+    const div = jugendliga[divId];
+    const mitNamen = Object.entries(div.table)
+      .map(([name, z]) => ({ name, ...z, diff: z.tore - z.gegentore }))
+      .sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore);
+    if (divId === jugendDivId) platzVorher = mitNamen.findIndex(t => t.name === managerTeam) + 1;
+    ergebnisse[divId] = {
+      aufsteiger: def.aufsteiger > 0 ? mitNamen.slice(0, def.aufsteiger).map(t => t.name) : [],
+      absteiger: def.absteiger > 0 ? mitNamen.slice(-def.absteiger).map(t => t.name) : [],
+      staerken: div.staerken
+    };
+  });
+
+  const neueTeams = { U15T1: [...jugendliga.U15T1.teams], U15T2: [...jugendliga.U15T2.teams], U15T3: [...jugendliga.U15T3.teams] };
+  const neueStaerken = { U15T1: { ...jugendliga.U15T1.staerken }, U15T2: { ...jugendliga.U15T2.staerken }, U15T3: { ...jugendliga.U15T3.staerken } };
+  neueTeams.U15T1 = neueTeams.U15T1.filter(t => !ergebnisse.U15T1.absteiger.includes(t)).concat(ergebnisse.U15T2.aufsteiger);
+  neueTeams.U15T2 = neueTeams.U15T2.filter(t => !ergebnisse.U15T2.absteiger.includes(t) && !ergebnisse.U15T2.aufsteiger.includes(t))
+    .concat(ergebnisse.U15T1.absteiger, ergebnisse.U15T3.aufsteiger);
+  neueTeams.U15T3 = neueTeams.U15T3.filter(t => !ergebnisse.U15T3.aufsteiger.includes(t)).concat(ergebnisse.U15T2.absteiger);
+
+  let jugendDivIdNeu = jugendDivId;
+  if (ergebnisse[jugendDivId]?.aufsteiger.includes(managerTeam)) {
+    jugendDivIdNeu = jugendDivId === "U15T3" ? "U15T2" : jugendDivId === "U15T2" ? "U15T1" : "U15T1";
+  } else if (ergebnisse[jugendDivId]?.absteiger.includes(managerTeam)) {
+    jugendDivIdNeu = jugendDivId === "U15T1" ? "U15T2" : jugendDivId === "U15T2" ? "U15T3" : "U15T3";
+  }
+
+  const neueLiga = {};
+  ordnung.forEach(divId => {
+    const teams = neueTeams[divId];
+    const table = {};
+    teams.forEach(t => { table[t] = { sp: 0, s: 0, u: 0, n: 0, tore: 0, gegentore: 0, pkt: 0 }; });
+    const def = JUGENDLIGA15_DEFS.find(d => d.id === divId);
+    const staerken = {};
+    teams.forEach(t => {
+      if (t === managerTeam) { staerken[t] = null; return; }
+      const vorherigeStaerke = neueStaerken.U15T1[t] ?? neueStaerken.U15T2[t] ?? neueStaerken.U15T3[t];
+      staerken[t] = vorherigeStaerke ?? Math.round(def.baseRating + (Math.random() * 16 - 8));
+    });
+    neueLiga[divId] = { teams, table, staerken, fixtures: generateFixtures(teams), matchday: 0 };
+  });
+
+  return { jugendliga: neueLiga, jugendDivId: jugendDivIdNeu, aufgestiegen: ergebnisse[jugendDivId]?.aufsteiger.includes(managerTeam) || false, abgestiegen: ergebnisse[jugendDivId]?.absteiger.includes(managerTeam) || false, alteStufe: jugendDivId, platz: platzVorher, anzahlTeams: jugendliga[jugendDivId].teams.length };
+}
+
+// ==========================================================================
+// U13-JUGENDLIGA — spiegelt U15 eins zu eins, für 11-12-Jährige. Wird ein U13-Spieler 13, wandert er
+// automatisch in den U15-Kader. Ebenfalls kein direktes Hochziehen in die erste Mannschaft.
+// ==========================================================================
+const JUGENDLIGA13_DEFS = [
+  { id: "U13T1", name: "U13-Bundesliga", anzahlTeams: 16, aufsteiger: 0, absteiger: 3, baseRating: 36 },
+  { id: "U13T2", name: "U13-Regionalliga", anzahlTeams: 16, aufsteiger: 3, absteiger: 3, baseRating: 28 },
+  { id: "U13T3", name: "U13-Landesliga", anzahlTeams: 16, aufsteiger: 3, absteiger: 0, baseRating: 20 }
+];
+
+function initialeJugendliga13(managerTeam, rng) {
+  const pool = alleVereinsNamenPool().sort(() => rng() - 0.5);
+  let poolIndex = 0;
+  const naechsterName = (ausschluss) => {
+    while (pool[poolIndex % pool.length] === ausschluss) poolIndex++;
+    return pool[poolIndex++ % pool.length];
+  };
+  const liga = {};
+  JUGENDLIGA13_DEFS.forEach(def => {
+    const teams = [];
+    for (let i = 0; i < def.anzahlTeams; i++) {
+      if (def.id === "U13T3" && i === 0) { teams.push(managerTeam); continue; }
+      teams.push(naechsterName(managerTeam));
+    }
+    const table = {};
+    teams.forEach(t => { table[t] = { sp: 0, s: 0, u: 0, n: 0, tore: 0, gegentore: 0, pkt: 0 }; });
+    const staerken = {};
+    teams.forEach(t => { staerken[t] = t === managerTeam ? null : Math.round(def.baseRating + (rng() * 16 - 8)); });
+    liga[def.id] = { teams, table, staerken, fixtures: generateFixtures(teams), matchday: 0 };
+  });
+  return liga;
+}
+
+// U13-Spieler: strikt 11 oder 12 Jahre — 12-Jährige entstehen nur durch natürliches Altern.
+function generiereU13Spieler(teamName, baseRating, season, alter = 11) {
+  const rating = Math.max(12, Math.min(48, Math.round(baseRating + (Math.random() * 14 - 7))));
+  const potenzial = Math.min(99, rating + 12 + Math.floor(Math.random() * 36));
+  const pos = POSITIONEN[Math.floor(Math.random() * POSITIONEN.length)];
+  const vorname = VORNAMEN[Math.floor(Math.random() * VORNAMEN.length)];
+  const nachname = NACHNAMEN[Math.floor(Math.random() * NACHNAMEN.length)];
+  const neueId = `${teamName}-u13-${season}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  return {
+    id: neueId, name: `${vorname} ${nachname}`, pos: pos.code, posName: pos.name,
+    alter, nr: 30 + Math.floor(Math.random() * 10), rating, potenzial,
+    nationalitaet: NATIONALITAETEN_POOL[Math.floor(Math.random() * NATIONALITAETEN_POOL.length)],
+    persoenlichkeit: zufallsPersoenlichkeit(),
+    zufriedenheit: 70, junior: true, u13: true,
+    attribute: berechneSpielerAttribute({ id: neueId, pos: pos.code, rating }),
+    attributeSaisonStart: berechneSpielerAttribute({ id: neueId, pos: pos.code, rating }),
+    tore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0, form: 60, verletzung: null
+  };
+}
+
+const U13_KADERGROESSE = U19_KADERGROESSE;
+
+function alterJugendKader13(kader, teamName, baseRating, season) {
+  const aufgestiegen = kader.filter(p => p.alter >= 12).map(p => {
+    const { u13, ...basisSpieler } = p;
+    return { ...basisSpieler, alter: 13, u15: true };
+  });
+  const verbleibend = kader.filter(p => p.alter < 12).map(p => ({ ...p, alter: p.alter + 1 }));
+  const fehlende = U13_KADERGROESSE - verbleibend.length;
+  for (let i = 0; i < fehlende; i++) verbleibend.push(generiereU13Spieler(teamName, baseRating, season));
+  return { kader: verbleibend, aufgestiegen };
+}
+
+function simuliereJugendliga13Spieltag(jugendliga, jugendDivId, jugendKader, managerTeam) {
+  const eigeneStaerke = jugendKader.length ? jugendKader.reduce((s, p) => s + p.rating, 0) / jugendKader.length : 20;
+  const neueLiga = {};
+  let neuerJugendKader = jugendKader;
+  Object.entries(jugendliga).forEach(([divId, div]) => {
+    if (div.matchday >= div.fixtures.length) { neueLiga[divId] = div; return; }
+    const staerkeVon = (team) => (divId === jugendDivId && team === managerTeam) ? eigeneStaerke : div.staerken[team];
+    const runde = div.fixtures[div.matchday];
+    let tabelle = div.table;
+    let eigenesSpielGehabt = false;
+    let eigeneTore = 0;
+    runde.forEach(([heim, gast]) => {
+      const ergebnis = simulateMatch(staerkeVon(heim), staerkeVon(gast));
+      tabelle = aktualisiereGruppentabelle(tabelle, heim, gast, ergebnis.heim, ergebnis.gast);
+      if (divId === jugendDivId && (heim === managerTeam || gast === managerTeam)) {
+        eigenesSpielGehabt = true;
+        eigeneTore = heim === managerTeam ? ergebnis.heim : ergebnis.gast;
+      }
+    });
+    if (eigenesSpielGehabt && neuerJugendKader.length) {
+      const torProSpieler = {};
+      const gewichte = neuerJugendKader.map(p => (TORSCHUETZE_GEWICHT[p.pos] ?? 0.1) * Math.max(1, p.rating - 15));
+      const gesamtGewicht = gewichte.reduce((s, w) => s + w, 0);
+      const rng = rngFor(`u13tore|${managerTeam}|${div.matchday}`);
+      for (let i = 0; i < eigeneTore; i++) {
+        let r = rng() * gesamtGewicht, idx = 0;
+        while (r > gewichte[idx] && idx < gewichte.length - 1) { r -= gewichte[idx]; idx++; }
+        const id = neuerJugendKader[idx].id;
+        torProSpieler[id] = (torProSpieler[id] || 0) + 1;
+      }
+      neuerJugendKader = neuerJugendKader.map(p => {
+        const toreDiesesSpiel = torProSpieler[p.id] || 0;
+        return {
+          ...p,
+          u13ToreSaison: (p.u13ToreSaison || 0) + toreDiesesSpiel,
+          u13FormFenster: [...(p.u13FormFenster || []), toreDiesesSpiel].slice(-5)
+        };
+      });
+    }
+    neueLiga[divId] = { ...div, table: tabelle, matchday: div.matchday + 1 };
+  });
+  return { neueLiga, neuerJugendKader };
+}
+
+// Je zur Hälfte 11- und 12-Jährige von Anfang an.
+function initialerU13Kader(teamName, baseRating) {
+  const kader = [];
+  const haelfte = U13_KADERGROESSE / 2;
+  for (let i = 0; i < U13_KADERGROESSE; i++) kader.push(generiereU13Spieler(teamName, baseRating, 0, i < haelfte ? 11 : 12));
+  return kader;
+}
+
+function entwickleU13Kader(kader, jugendtrainer13Rating) {
+  const trainerBonus = jugendtrainer13Rating ? Math.max(0, (jugendtrainer13Rating - 30) / 500) : 0;
+  const veraenderungen = [];
+  const neuesKader = kader.map(p => {
+    if (p.verletzung) return p;
+    const obergrenze = p.potenzial || 99;
+    if (p.rating >= obergrenze) return p;
+    const chance = 0.03 + trainerBonus;
+    if (Math.random() < chance) {
+      const neuesRating = Math.min(obergrenze, p.rating + 1);
+      veraenderungen.push({ name: p.name, delta: 1, rating: neuesRating });
+      const zielAttribut = ATTRIBUT_SPEZIALIST_ZIEL[p.pos] || "mentalitaet";
+      return { ...p, rating: neuesRating, attribute: trainiereAttributGezielt(p, zielAttribut, neuesRating) };
+    }
+    return p;
+  });
+  return { neuesKader, veraenderungen };
+}
+
+function verarbeiteJugendliga13Saisonende(jugendliga, jugendDivId, managerTeam) {
+  const ordnung = ["U13T1", "U13T2", "U13T3"];
+  const ergebnisse = {};
+  let platzVorher = null;
+  ordnung.forEach(divId => {
+    const def = JUGENDLIGA13_DEFS.find(d => d.id === divId);
+    const div = jugendliga[divId];
+    const mitNamen = Object.entries(div.table)
+      .map(([name, z]) => ({ name, ...z, diff: z.tore - z.gegentore }))
+      .sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore);
+    if (divId === jugendDivId) platzVorher = mitNamen.findIndex(t => t.name === managerTeam) + 1;
+    ergebnisse[divId] = {
+      aufsteiger: def.aufsteiger > 0 ? mitNamen.slice(0, def.aufsteiger).map(t => t.name) : [],
+      absteiger: def.absteiger > 0 ? mitNamen.slice(-def.absteiger).map(t => t.name) : [],
+      staerken: div.staerken
+    };
+  });
+
+  const neueTeams = { U13T1: [...jugendliga.U13T1.teams], U13T2: [...jugendliga.U13T2.teams], U13T3: [...jugendliga.U13T3.teams] };
+  const neueStaerken = { U13T1: { ...jugendliga.U13T1.staerken }, U13T2: { ...jugendliga.U13T2.staerken }, U13T3: { ...jugendliga.U13T3.staerken } };
+  neueTeams.U13T1 = neueTeams.U13T1.filter(t => !ergebnisse.U13T1.absteiger.includes(t)).concat(ergebnisse.U13T2.aufsteiger);
+  neueTeams.U13T2 = neueTeams.U13T2.filter(t => !ergebnisse.U13T2.absteiger.includes(t) && !ergebnisse.U13T2.aufsteiger.includes(t))
+    .concat(ergebnisse.U13T1.absteiger, ergebnisse.U13T3.aufsteiger);
+  neueTeams.U13T3 = neueTeams.U13T3.filter(t => !ergebnisse.U13T3.aufsteiger.includes(t)).concat(ergebnisse.U13T2.absteiger);
+
+  let jugendDivIdNeu = jugendDivId;
+  if (ergebnisse[jugendDivId]?.aufsteiger.includes(managerTeam)) {
+    jugendDivIdNeu = jugendDivId === "U13T3" ? "U13T2" : jugendDivId === "U13T2" ? "U13T1" : "U13T1";
+  } else if (ergebnisse[jugendDivId]?.absteiger.includes(managerTeam)) {
+    jugendDivIdNeu = jugendDivId === "U13T1" ? "U13T2" : jugendDivId === "U13T2" ? "U13T3" : "U13T3";
+  }
+
+  const neueLiga = {};
+  ordnung.forEach(divId => {
+    const teams = neueTeams[divId];
+    const table = {};
+    teams.forEach(t => { table[t] = { sp: 0, s: 0, u: 0, n: 0, tore: 0, gegentore: 0, pkt: 0 }; });
+    const def = JUGENDLIGA13_DEFS.find(d => d.id === divId);
+    const staerken = {};
+    teams.forEach(t => {
+      if (t === managerTeam) { staerken[t] = null; return; }
+      const vorherigeStaerke = neueStaerken.U13T1[t] ?? neueStaerken.U13T2[t] ?? neueStaerken.U13T3[t];
       staerken[t] = vorherigeStaerke ?? Math.round(def.baseRating + (Math.random() * 16 - 8));
     });
     neueLiga[divId] = { teams, table, staerken, fixtures: generateFixtures(teams), matchday: 0 };
@@ -4571,7 +4958,7 @@ function waehlePressekonferenzFragen(rng, kontext, bereitsGestelltIds = []) {
   const fragenPool = PRESSEKONFERENZ_FRAGEN.filter(f => (!f.bedingung || f.bedingung(kontext)) && !bereitsGestelltIds.includes(f.id));
   const journalistenPool = [...JOURNALISTEN_POOL];
   const gewaehlt = [];
-  for (let i = 0; i < 2 && fragenPool.length; i++) {
+  for (let i = 0; i < 1 && fragenPool.length; i++) {
     const fIdx = Math.floor(rng() * fragenPool.length);
     // Jede Frage kommt sichtbar von einer ANDEREN Person — dieselbe Ohne-Zurücklegen-Logik wie bei
     // den Fragen selbst, damit sich Journalisten nicht innerhalb derselben Pressekonferenz wiederholen.
@@ -6807,6 +7194,8 @@ const TAB_GRUPPEN = [
   { id: "jugendabteilung", label: "Jugendabteilung", icon: Sprout, tabs: [
     { id: "jugend-investition", label: "Investition", icon: Sprout },
     { id: "jugend-akademie", label: "Jugendakademie", icon: Building2 },
+    { id: "jugend-u13", label: "U13 Team", icon: Users },
+    { id: "jugend-u15", label: "U15 Team", icon: Users },
     { id: "jugend-u17", label: "U17 Team", icon: Users },
     { id: "jugend-u19", label: "U19 Team", icon: Users }
   ]},
@@ -10970,6 +11359,16 @@ const SPIELREGELN_KATEGORIEN = [
     ]
   },
   {
+    icon: Sprout, farbe: "#6ee7b7", titel: "U15- und U13-Jugendliga",
+    punkte: [
+      "Zwei weitere Jugendstufen unterhalb der U17, nach demselben Prinzip: eigene dreistufige Liga (Bundesliga/Regionalliga/Landesliga), automatische Hintergrund-Simulation, eigene Vereinsinfos-Meldungen. Die U15 besteht aus 13- und 14-Jährigen, die U13 aus 11- und 12-Jährigen — beide genau gleich gross wie U19/U17 und ebenfalls von Karrierestart an je zur Hälfte beider Jahrgänge.",
+      "Volle Durchlässigkeit die ganze Kette hinauf: U13 → U15 → U17 → U19, jeweils automatisch beim Erreichen des nächsten Altersjahrgangs, ohne jedes Zutun.",
+      "Anders als ab der U17 (dort ab 16 möglich) gibt es aus der U15 oder U13 KEIN vorzeitiges direktes Hochziehen in die erste Mannschaft — mit 11-14 Jahren realistischerweise nicht sinnvoll. Der einzige Weg nach oben führt über die nächste Jugendstufe.",
+      "Die Talentsichtung findet jetzt zusätzlich je einen Kandidaten für die U15 und die U13 — dieselbe Sichtung, dasselbe Prinzip wie bei U17. Ist der jeweilige Kader bereits voll, macht auch hier automatisch der schwächste Spieler desselben Jahrgangs Platz.",
+      "Zwei weitere eigene Mitarbeiterrollen: \"U15-Trainer\" und \"U13-Trainer\", unabhängig von den Trainern der älteren Jugendstufen."
+    ]
+  },
+  {
     icon: Building2, farbe: "#6ee7b7", titel: "Stadion",
     punkte: [
       "Drei Bereiche (Stehplätze, Sitzplätze, Logen), jeweils mit eigener Kapazität und eigenem Ticketpreis.",
@@ -11064,7 +11463,7 @@ const SPIELREGELN_KATEGORIEN = [
   {
     icon: Mic, farbe: "#fcd34d", titel: "Pressekonferenz",
     punkte: [
-      "Erscheint gelegentlich nach einem Spieltag, höchstens 4 Mal pro Saison: 2 Fragen, je 4 Antwortmöglichkeiten.",
+      "Erscheint gelegentlich nach einem Spieltag (ca. 45% Chance, keine Obergrenze pro Saison): 1 Frage mit 4 Antwortmöglichkeiten.",
       "Die Fragen passen zum tatsächlichen Spielgeschehen (z.B. Verletzungsfragen nur bei echten Verletzungen).",
       "Jede Frage kommt pro Saison höchstens einmal vor — bereits gestellte Fragen fallen für den Rest der Saison aus dem möglichen Pool, unabhängig davon, wie sie beantwortet wurden.",
       "Antworten wirken sich auf Fan-Unterstützung, Kaderform, Trainerzufriedenheit und Markenwert aus — auch auf mehrere Bereiche gleichzeitig."
@@ -11492,6 +11891,10 @@ function VereinsinfosView({ careerState }) {
                 ? <>Aus der Jugendabteilung rückt in die erste Mannschaft auf: </>
                 : careerState.letzterJunior.ziel === "u17"
                 ? <>Neuer Junior im eigenen U17-Kader: </>
+                : careerState.letzterJunior.ziel === "u15"
+                ? <>Neuer Junior im eigenen U15-Kader: </>
+                : careerState.letzterJunior.ziel === "u13"
+                ? <>Neuer Junior im eigenen U13-Kader: </>
                 : <>Neuer Junior im eigenen U19-Kader: </>}
               <span className="text-amber-800 font-semibold">{careerState.letzterJunior.name}</span>
               <span className="text-stone-500"> · {careerState.letzterJunior.posName} · {careerState.letzterJunior.alter}J · Stärke {careerState.letzterJunior.rating}</span>
@@ -12168,7 +12571,7 @@ function ZuschauerChart({ historie, kapazitaet }) {
   );
 }
 
-function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen, jugendliga17, jugendDivId17, jugendKader17, onJugendspieler17Hochziehen }) {
+function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen, jugendliga17, jugendDivId17, jugendKader17, onJugendspieler17Hochziehen, jugendliga15, jugendDivId15, jugendKader15, jugendliga13, jugendDivId13, jugendKader13 }) {
   const [betrag, setBetrag] = useState(0);
   const level = akademie?.level || 0;
   const umbau = akademie?.umbau || null;
@@ -12467,6 +12870,122 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
                       Hochziehen
                     </button>
                   )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      </>)}
+
+      {abschnitt === "u15" && (<>
+      {!jugendliga15 && (
+        <div className="border border-sky-800/50 rounded p-4 mt-4 text-xs text-emerald-500" style={{ backgroundColor: "#0b1f2a" }}>
+          Die U15 wird beim nächsten Saisonübergang automatisch eingerichtet — dieser Spielstand wurde zuletzt noch mit einer älteren Version berechnet, in der es die U15 noch nicht gab. Ab der nächsten Saison ist sie da.
+        </div>
+      )}
+      {jugendliga15 && (
+        <div className="border border-sky-800/50 rounded p-4 mt-4" style={{ backgroundColor: "#0b1f2a" }}>
+          <div className="text-xs uppercase tracking-wider text-sky-400/80 mb-2">
+            U15-Team — {JUGENDLIGA15_DEFS.find(d => d.id === jugendDivId15)?.name}
+          </div>
+          <table className="w-full text-[11px] mb-3">
+            <thead>
+              <tr className="text-emerald-600 border-b border-emerald-900">
+                <th className="text-left font-normal pb-1">#</th>
+                <th className="text-left font-normal pb-1">Team</th>
+                <th className="text-center font-normal pb-1">Sp</th>
+                <th className="text-center font-normal pb-1">Diff</th>
+                <th className="text-center font-normal pb-1">Pkt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(jugendliga15[jugendDivId15].table)
+                .map(([name, z]) => ({ name, ...z, diff: z.tore - z.gegentore }))
+                .sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore)
+                .map((t, i) => (
+                  <tr key={t.name} className={t.name === teamName ? "text-amber-300 font-semibold" : "text-emerald-200"}>
+                    <td className="py-0.5">{i + 1}.</td>
+                    <td className="py-0.5">{t.name}</td>
+                    <td className="text-center">{t.sp}</td>
+                    <td className="text-center">{t.diff > 0 ? "+" : ""}{t.diff}</td>
+                    <td className="text-center font-semibold">{t.pkt}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          <div className="text-[10px] text-emerald-600 mb-3">
+            Läuft automatisch im Hintergrund mit, ein Spieltag pro eigenem Spieltag. Auf-/Abstieg zwischen den drei Stufen am Saisonende. Wird ein Spieler 15, wechselt er automatisch und ohne dein Zutun in den U17-Kader. Anders als ab der U17 gibt es hier kein vorzeitiges Hochziehen in die erste Mannschaft.
+          </div>
+          <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U15-Kader ({(jugendKader15 || []).length})</div>
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {(jugendKader15 || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+              const potenzial = p.potenzial || p.rating;
+              const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
+              return (
+                <div key={p.id} className="flex items-center text-xs border border-emerald-900 rounded px-2 py-1.5">
+                  <span className="text-emerald-100">
+                    {p.name} <span className="text-emerald-600">· {p.posName} · {p.alter}J · Stärke {p.rating}</span>
+                    <span className="text-amber-400 ml-1" title={`Potenzial: ${potenzial}`}>{"★".repeat(sterne)}<span className="text-emerald-900">{"★".repeat(5 - sterne)}</span></span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      </>)}
+
+      {abschnitt === "u13" && (<>
+      {!jugendliga13 && (
+        <div className="border border-sky-800/50 rounded p-4 mt-4 text-xs text-emerald-500" style={{ backgroundColor: "#0b1f2a" }}>
+          Die U13 wird beim nächsten Saisonübergang automatisch eingerichtet — dieser Spielstand wurde zuletzt noch mit einer älteren Version berechnet, in der es die U13 noch nicht gab. Ab der nächsten Saison ist sie da.
+        </div>
+      )}
+      {jugendliga13 && (
+        <div className="border border-sky-800/50 rounded p-4 mt-4" style={{ backgroundColor: "#0b1f2a" }}>
+          <div className="text-xs uppercase tracking-wider text-sky-400/80 mb-2">
+            U13-Team — {JUGENDLIGA13_DEFS.find(d => d.id === jugendDivId13)?.name}
+          </div>
+          <table className="w-full text-[11px] mb-3">
+            <thead>
+              <tr className="text-emerald-600 border-b border-emerald-900">
+                <th className="text-left font-normal pb-1">#</th>
+                <th className="text-left font-normal pb-1">Team</th>
+                <th className="text-center font-normal pb-1">Sp</th>
+                <th className="text-center font-normal pb-1">Diff</th>
+                <th className="text-center font-normal pb-1">Pkt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(jugendliga13[jugendDivId13].table)
+                .map(([name, z]) => ({ name, ...z, diff: z.tore - z.gegentore }))
+                .sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore)
+                .map((t, i) => (
+                  <tr key={t.name} className={t.name === teamName ? "text-amber-300 font-semibold" : "text-emerald-200"}>
+                    <td className="py-0.5">{i + 1}.</td>
+                    <td className="py-0.5">{t.name}</td>
+                    <td className="text-center">{t.sp}</td>
+                    <td className="text-center">{t.diff > 0 ? "+" : ""}{t.diff}</td>
+                    <td className="text-center font-semibold">{t.pkt}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          <div className="text-[10px] text-emerald-600 mb-3">
+            Läuft automatisch im Hintergrund mit, ein Spieltag pro eigenem Spieltag. Auf-/Abstieg zwischen den drei Stufen am Saisonende. Wird ein Spieler 13, wechselt er automatisch und ohne dein Zutun in den U15-Kader. Kein vorzeitiges Hochziehen möglich.
+          </div>
+          <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U13-Kader ({(jugendKader13 || []).length})</div>
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {(jugendKader13 || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+              const potenzial = p.potenzial || p.rating;
+              const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
+              return (
+                <div key={p.id} className="flex items-center text-xs border border-emerald-900 rounded px-2 py-1.5">
+                  <span className="text-emerald-100">
+                    {p.name} <span className="text-emerald-600">· {p.posName} · {p.alter}J · Stärke {p.rating}</span>
+                    <span className="text-amber-400 ml-1" title={`Potenzial: ${potenzial}`}>{"★".repeat(sterne)}<span className="text-emerald-900">{"★".repeat(5 - sterne)}</span></span>
+                  </span>
                 </div>
               );
             })}
@@ -13775,6 +14294,8 @@ function TalentSichtungBanner({ sichtung, budget, onWaehlen, onAblehnen }) {
                 {international && <span title={k.spieler.nationalitaet}>{NATIONALITAETEN[k.spieler.nationalitaet] || "🌍"} </span>}
                 {k.spieler.name} <span className="text-emerald-600">· {k.spieler.posName} · {k.spieler.alter}J</span>
                 {k.typ === "neu17" && <span className="text-emerald-500 text-[10px] block mt-0.5">Für die U17</span>}
+                {k.typ === "neu15" && <span className="text-emerald-500 text-[10px] block mt-0.5">Für die U15</span>}
+                {k.typ === "neu13" && <span className="text-emerald-500 text-[10px] block mt-0.5">Für die U13</span>}
                 {abwerbung && <span className="text-amber-400 text-[10px] block mt-0.5">von {k.herkunftsverein} — Ablöse {k.summe.toLocaleString("de-CH")} €</span>}
                 {international && <span className="text-sky-400 text-[10px] block mt-0.5">Internationales Scouting — Vermittlungsgebühr {k.summe.toLocaleString("de-CH")} €</span>}
               </span>
@@ -13977,7 +14498,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -14001,6 +14522,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       case "jugend-akademie": return akademie?.namensSponsorAngebot ? "red" : jugendKannAusbauen ? "amber" : null;
       case "jugend-u19": return null;
       case "jugend-u17": return null;
+      case "jugend-u15": return null;
+      case "jugend-u13": return null;
       case "trainer": return (!coach || (coach && trainerBrauchtAktion)) ? "red" : null;
       case "sponsoring": return (werbebanner.angebote.length > 0 || stadionBrauchtAktion || !trikotsponsor || !aermelsponsor || !trainingsanzugsponsor) ? "red" : null;
       case "stab": return null;
@@ -14496,13 +15019,21 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letztesJugendligaErgebnis: null,
           letztesJugendliga17Ergebnis: null,
           letzteU17NachU19Befoerderung: null,
+          letztesJugendliga15Ergebnis: null,
+          letzteU15NachU17Befoerderung: null,
+          letztesJugendliga13Ergebnis: null,
+          letzteU13NachU15Befoerderung: null,
           letzterTitelverteidigerMalus: null,
           letzteTrainerEingewoehnung: null,
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
           letztesU17Highlight: null,
+          letztesU15Highlight: null,
+          letztesU13Highlight: null,
           letzteMarketingAblauf: null,
           letzterAufstieg: false,
+          letzterMeistertitelPK: null,
+          letzterTorschuetzenkoenigPK: null,
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
@@ -14854,13 +15385,21 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letztesJugendligaErgebnis: null,
           letztesJugendliga17Ergebnis: null,
           letzteU17NachU19Befoerderung: null,
+          letztesJugendliga15Ergebnis: null,
+          letzteU15NachU17Befoerderung: null,
+          letztesJugendliga13Ergebnis: null,
+          letzteU13NachU15Befoerderung: null,
           letzterTitelverteidigerMalus: null,
           letzteTrainerEingewoehnung: null,
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
           letztesU17Highlight: null,
+          letztesU15Highlight: null,
+          letztesU13Highlight: null,
           letzteMarketingAblauf: null,
           letzterAufstieg: false,
+          letzterMeistertitelPK: null,
+          letzterTorschuetzenkoenigPK: null,
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
@@ -15194,13 +15733,21 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letztesJugendligaErgebnis: null,
           letztesJugendliga17Ergebnis: null,
           letzteU17NachU19Befoerderung: null,
+          letztesJugendliga15Ergebnis: null,
+          letzteU15NachU17Befoerderung: null,
+          letztesJugendliga13Ergebnis: null,
+          letzteU13NachU15Befoerderung: null,
           letzterTitelverteidigerMalus: null,
           letzteTrainerEingewoehnung: null,
           letzteJugendbeforderung: null,
           letztesU19Highlight: null,
           letztesU17Highlight: null,
+          letztesU15Highlight: null,
+          letztesU13Highlight: null,
           letzteMarketingAblauf: null,
           letzterAufstieg: false,
+          letzterMeistertitelPK: null,
+          letzterTorschuetzenkoenigPK: null,
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
@@ -15407,6 +15954,28 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       datum
     } : null;
     const alleFertig = Object.values(neueDivisions).every(d => d.matchday >= d.fixtures.length);
+    // Für die Pressekonferenz-Kreuzverbindung (siehe pkKontext weiter unten): Meisterschaft UND
+    // Torschützenkönig stehen erst am allerletzten Spieltag der Saison fest — anders als z.B. ein
+    // Pokalsieg (mitten in der Saison) gibt es DANACH keinen weiteren Spieltag mehr in DERSELBEN
+    // Saison, an dem eine Frage dazu noch den (dann schon weitergezählten) season-Wert träfe. Werden
+    // deshalb HIER, VOR pkKontext, berechnet — nicht erst im eigentlichen Trophäen-Block weiter unten,
+    // sonst würde pkKontext noch den alten Stand vor dem Titelgewinn sehen. ermittleTorschuetzenkoenig
+    // ist rein deterministisch (nur Auswertung bereits feststehender Tore-Zahlen), die doppelte
+    // Berechnung liefert also garantiert dasselbe Ergebnis wie im Trophäen-Block weiter unten.
+    let letzterMeistertitelPK = null;
+    let letzterTorschuetzenkoenigPK = null;
+    if (alleFertig) {
+      const managerDivFuerTitelPK = neueDivisions[managerDivId] || {};
+      const finaleTabellePK = sortedTable(managerDivFuerTitelPK.table || {});
+      if (finaleTabellePK[0]?.name === profile.team) {
+        letzterMeistertitelPK = { typ: managerDivId === "BL" ? "meisterschaft" : "aufstieg_meister" };
+      }
+      let koenigPK = null;
+      try { koenigPK = ermittleTorschuetzenkoenig(managerDivFuerTitelPK); } catch (err) { /* wird im Haupt-Trophäen-Block unten ebenfalls versucht und dort korrekt behandelt */ }
+      if (koenigPK && koenigPK.team === profile.team) {
+        letzterTorschuetzenkoenigPK = { typ: "torschuetzenkoenig", text: `Torschützenkönig: ${koenigPK.name} (${koenigPK.tore} Tore)` };
+      }
+    }
 
     // Relegation: prüfen, ob der Manager selbst betroffen ist (BL-16. gegen L2-3., oder L2-16. gegen
     // L3-3.) — falls ja, wird daraus jetzt ein echtes, spielbares Hin-/Rückspiel (siehe
@@ -15474,9 +16043,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const torschuetzenliste = ermittleAktuelleTorschuetzenliste(neueDivisions[managerDivId]);
       setSpieltagPopup({ spieltag: gespielterSpieltag, ligaName: division.name, ergebnisse: ergebnisseDiesesSpieltags, elfDesTages: neueElfDesTages, torschuetzenliste });
       // Nicht nach jedem Spieltag eine Pressekonferenz — sonst würde es schnell repetitiv. Ca. 45%
-      // Wahrscheinlichkeit hält es frisch, ohne zur festen Routine zu werden. Zusätzlich maximal 4
-      // Pressekonferenzen pro Saison, damit es insgesamt nicht überhandnimmt.
-      if ((pressekonferenzenDieseSaison || 0) < 4 && Math.random() < 0.45) {
+      // Wahrscheinlichkeit hält es frisch, ohne zur festen Routine zu werden. Keine Obergrenze pro
+      // Saison mehr — dafür jetzt nur noch 1 Frage pro Pressekonferenz (siehe waehlePressekonferenzFragen).
+      if (Math.random() < 0.45) {
         const rng = rngFor(`pressekonferenz|${profile.team}|${season}|${gespielterSpieltag}`);
         // Echter Spielkontext — nur Fragen, deren Bedingung gerade tatsächlich zutrifft, kommen in
         // die engere Auswahl (siehe bedingung-Feld je Frage). Verhindert z.B. Verletzungsfragen, wenn
@@ -15504,10 +16073,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           bundestrainerAktiv: !!bundestrainerAmt,
           marketingBudgetHoch: Object.keys(marketingKampagnen || {}).length > 0,
           vermieterBautAus: !!careerState.vermieterAusbauAngekuendigt,
-          titelDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season),
+          titelDieseSaison: !!letzterMeistertitelPK || !!letzterTorschuetzenkoenigPK || (vereinsHistorien[profile.team] || []).some(t => t.saison === season && (t.typ === "pokalsieg" || t.typ === "europapokal")),
           pokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "pokalsieg"),
           europapokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "europapokal"),
-          torschuetzenkoenigDieseSaison: (vereinsHistorien[profile.team] || []).find(t => t.saison === season && t.typ === "torschuetzenkoenig") || null,
+          torschuetzenkoenigDieseSaison: letzterTorschuetzenkoenigPK,
           topspielerVerlaengertDieseSaison: !!letzteTopspielerVerlaengerung,
           pokalFinaleVerlorenDieseSaison: careerState.letzterPokalBericht?.rundenLabel === "finale" && careerState.letzterPokalBericht?.gewinner !== profile.team,
           europapokalFinaleVerlorenDieseSaison: careerState.letzterEuroBericht?.phase === "finale" && careerState.letzterEuroBericht?.gewonnen === false,
@@ -15599,6 +16168,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // ermittelten Spieler. Grundlage für die "gesamte Karriere" in der Spieler-Detailansicht.
       const mannschaftsTitel = neueTrophaeenSaisonende.filter(t => t.typ !== "torschuetzenkoenig");
       const persoenlicherTitel = neueTrophaeenSaisonende.filter(t => t.typ === "torschuetzenkoenig");
+      letzterMeistertitelPK = mannschaftsTitel[0] || null;
+      letzterTorschuetzenkoenigPK = persoenlicherTitel[0] || null;
       if (mannschaftsTitel.length || persoenlicherTitel.length) {
         let squadMitTiteln = neueDivisions[managerDivId].squads[profile.team];
         if (mannschaftsTitel.length) squadMitTiteln = stempleTitelAufSquad(squadMitTiteln, mannschaftsTitel);
@@ -16058,6 +16629,42 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       }
     }
 
+    // U15-Pendant zum Block oben — identisches Prinzip.
+    const jugendliga15Ergebnis = jugendliga15 ? simuliereJugendliga15Spieltag(jugendliga15, jugendDivId15, jugendKader15, profile.team) : null;
+    const neueJugendliga15 = jugendliga15Ergebnis ? jugendliga15Ergebnis.neueLiga : jugendliga15;
+    const { neuesKader: neuerJugendKader15 } = jugendliga15
+      ? entwickleU15Kader(jugendliga15Ergebnis.neuerJugendKader, stab.jugendtrainer15?.rating)
+      : { neuesKader: jugendKader15 };
+    let neuesU15Highlight = null;
+    if (jugendliga15Ergebnis) {
+      const kandidat15 = jugendliga15Ergebnis.neuerJugendKader
+        .filter(p => (p.u15FormFenster || []).slice(-1)[0] > 0)
+        .map(p => ({ p, summe: (p.u15FormFenster || []).reduce((s, t) => s + t, 0), spiele: (p.u15FormFenster || []).length }))
+        .filter(e => e.summe >= 3)
+        .sort((a, b) => b.summe - a.summe)[0];
+      if (kandidat15) {
+        neuesU15Highlight = { name: kandidat15.p.name, posName: kandidat15.p.posName, tore: kandidat15.summe, spiele: kandidat15.spiele };
+      }
+    }
+
+    // U13-Pendant zum Block oben — identisches Prinzip.
+    const jugendliga13Ergebnis = jugendliga13 ? simuliereJugendliga13Spieltag(jugendliga13, jugendDivId13, jugendKader13, profile.team) : null;
+    const neueJugendliga13 = jugendliga13Ergebnis ? jugendliga13Ergebnis.neueLiga : jugendliga13;
+    const { neuesKader: neuerJugendKader13 } = jugendliga13
+      ? entwickleU13Kader(jugendliga13Ergebnis.neuerJugendKader, stab.jugendtrainer13?.rating)
+      : { neuesKader: jugendKader13 };
+    let neuesU13Highlight = null;
+    if (jugendliga13Ergebnis) {
+      const kandidat13 = jugendliga13Ergebnis.neuerJugendKader
+        .filter(p => (p.u13FormFenster || []).slice(-1)[0] > 0)
+        .map(p => ({ p, summe: (p.u13FormFenster || []).reduce((s, t) => s + t, 0), spiele: (p.u13FormFenster || []).length }))
+        .filter(e => e.summe >= 3)
+        .sort((a, b) => b.summe - a.summe)[0];
+      if (kandidat13) {
+        neuesU13Highlight = { name: kandidat13.p.name, posName: kandidat13.p.posName, tore: kandidat13.summe, spiele: kandidat13.spiele };
+      }
+    }
+
     const { neuesSquad: squadNachVerletzungen, neueVerletzten } = verarbeiteVerletzungen(
       entwickeltesSquad, spielendeIdsHeute, stab.arzt, 7,
       p => schwerpunktFuerSpieler(p.id, spielerSchwerpunkt, trainingsschwerpunkt).verletzungsFaktor * belastungDaten.verletzungsFaktor * trainingszentrumRisikoFaktor * ernaehrungsRisikoFaktor * materialRisikoFaktor * philosophiePaketDaten.verletzungsFaktor,
@@ -16265,9 +16872,17 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       jugendliga: neueJugendliga,
       jugendKader: neuerJugendKader,
       letztesU19Highlight: neuesU19Highlight,
+      letzterMeistertitelPK,
+      letzterTorschuetzenkoenigPK,
       jugendliga17: neueJugendliga17,
       jugendKader17: neuerJugendKader17,
       letztesU17Highlight: neuesU17Highlight,
+      jugendliga15: neueJugendliga15,
+      jugendKader15: neuerJugendKader15,
+      letztesU15Highlight: neuesU15Highlight,
+      jugendliga13: neueJugendliga13,
+      jugendKader13: neuerJugendKader13,
+      letztesU13Highlight: neuesU13Highlight,
       letzteStartelfIds: neueLetzteStartelfIds,
       letzterSpielbericht,
       spielHistorie: neuerHistorienEintrag ? [...(spielHistorie || []), neuerHistorienEintrag] : (spielHistorie || []),
@@ -16290,11 +16905,17 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letztesJugendligaErgebnis: null,
           letztesJugendliga17Ergebnis: null,
           letzteU17NachU19Befoerderung: null,
+          letztesJugendliga15Ergebnis: null,
+          letzteU15NachU17Befoerderung: null,
+          letztesJugendliga13Ergebnis: null,
+          letzteU13NachU15Befoerderung: null,
           letzterTitelverteidigerMalus: null,
           letzteTrainerEingewoehnung: null,
           letzteJugendbeforderung: null,
           letzteMarketingAblauf: null,
           letzterAufstieg: false,
+          letzterMeistertitelPK: null,
+          letzterTorschuetzenkoenigPK: null,
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
@@ -16987,6 +17608,32 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       ? { anzahl: u17NachU19Aufgestiegen.length, namen: u17NachU19Aufgestiegen.map(p => p.name) }
       : null;
 
+    // U15-Pendant: Alterung inkl. Auf-/Abstieg, dann werden die 15 gewordenen Absolventen in den
+    // (bereits gealterten) U17-Kader eingemischt — dieselbe kaskadierende Durchlässigkeit wie U17→U19.
+    const jugendliga15BasisVorAlterung = jugendliga15 || initialeJugendliga15(profile.team, rngFor(`jugendliga15|${profile.team}|nachtraeglich`));
+    const jugendDivId15BasisVorAlterung = jugendliga15 ? jugendDivId15 : "U15T3";
+    const jugendKader15BasisVorAlterung = jugendliga15 && jugendKader15.length ? jugendKader15 : initialerU15Kader(profile.team, JUGENDLIGA15_DEFS.find(d => d.id === jugendDivId15BasisVorAlterung).baseRating);
+    const jugendliga15ErgebnisVorAlterung = verarbeiteJugendliga15Saisonende(jugendliga15BasisVorAlterung, jugendDivId15BasisVorAlterung, profile.team);
+    const jugend15BaseRatingVorAlterung = JUGENDLIGA15_DEFS.find(d => d.id === jugendliga15ErgebnisVorAlterung.jugendDivId).baseRating;
+    const { kader: u15KaderNachAlterung, aufgestiegen: u15NachU17Aufgestiegen } = alterJugendKader15(jugendKader15BasisVorAlterung, profile.team, jugend15BaseRatingVorAlterung, seasonEndInfo.season);
+    const u17KaderMitU15Zugaengen = [...u17KaderNachAlterung, ...u15NachU17Aufgestiegen];
+    let u15AufstiegsMeldung = u15NachU17Aufgestiegen.length
+      ? { anzahl: u15NachU17Aufgestiegen.length, namen: u15NachU17Aufgestiegen.map(p => p.name) }
+      : null;
+
+    // U13-Pendant: dieselbe Kaskade eine Stufe weiter unten — die 13 gewordenen U13-Absolventen mischen
+    // sich in den bereits gealterten U15-Kader (u15KaderNachAlterung) ein, genau wie oben U15→U17.
+    const jugendliga13BasisVorAlterung = jugendliga13 || initialeJugendliga13(profile.team, rngFor(`jugendliga13|${profile.team}|nachtraeglich`));
+    const jugendDivId13BasisVorAlterung = jugendliga13 ? jugendDivId13 : "U13T3";
+    const jugendKader13BasisVorAlterung = jugendliga13 && jugendKader13.length ? jugendKader13 : initialerU13Kader(profile.team, JUGENDLIGA13_DEFS.find(d => d.id === jugendDivId13BasisVorAlterung).baseRating);
+    const jugendliga13ErgebnisVorAlterung = verarbeiteJugendliga13Saisonende(jugendliga13BasisVorAlterung, jugendDivId13BasisVorAlterung, profile.team);
+    const jugend13BaseRatingVorAlterung = JUGENDLIGA13_DEFS.find(d => d.id === jugendliga13ErgebnisVorAlterung.jugendDivId).baseRating;
+    const { kader: u13KaderNachAlterung, aufgestiegen: u13NachU15Aufgestiegen } = alterJugendKader13(jugendKader13BasisVorAlterung, profile.team, jugend13BaseRatingVorAlterung, seasonEndInfo.season);
+    const u15KaderMitU13Zugaengen = [...u15KaderNachAlterung, ...u13NachU15Aufgestiegen];
+    let u13AufstiegsMeldung = u13NachU15Aufgestiegen.length
+      ? { anzahl: u13NachU15Aufgestiegen.length, namen: u13NachU15Aufgestiegen.map(p => p.name) }
+      : null;
+
     // Titelverteidiger-Malus: Wurde die Meisterschaft gerade gewonnen UND kaum aktiv nachgerüstet
     // (weniger als 2 Neuzugänge WÄHREND der Meister-Saison selbst — Transfers NACH dem Titel würden
     // erst im neuen Transferfenster stattfinden, zu spät für diese Prüfung), lässt der Hunger etwas
@@ -17142,7 +17789,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzterTitelverteidigerMalus,
       jugendliga17: jugendliga17ErgebnisVorAlterung.jugendliga,
       jugendDivId17: jugendliga17ErgebnisVorAlterung.jugendDivId,
-      jugendKader17: u17KaderNachAlterung,
+      jugendKader17: u17KaderMitU15Zugaengen,
       letztesJugendliga17Ergebnis: {
         aufgestiegen: jugendliga17ErgebnisVorAlterung.aufgestiegen, abgestiegen: jugendliga17ErgebnisVorAlterung.abgestiegen,
         alteStufe: JUGENDLIGA17_DEFS.find(d => d.id === jugendliga17ErgebnisVorAlterung.alteStufe).name,
@@ -17150,6 +17797,26 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         platz: jugendliga17ErgebnisVorAlterung.platz, anzahlTeams: jugendliga17ErgebnisVorAlterung.anzahlTeams
       },
       letzteU17NachU19Befoerderung: u17AufstiegsMeldung,
+      jugendliga15: jugendliga15ErgebnisVorAlterung.jugendliga,
+      jugendDivId15: jugendliga15ErgebnisVorAlterung.jugendDivId,
+      jugendKader15: u15KaderMitU13Zugaengen,
+      letztesJugendliga15Ergebnis: {
+        aufgestiegen: jugendliga15ErgebnisVorAlterung.aufgestiegen, abgestiegen: jugendliga15ErgebnisVorAlterung.abgestiegen,
+        alteStufe: JUGENDLIGA15_DEFS.find(d => d.id === jugendliga15ErgebnisVorAlterung.alteStufe).name,
+        neueStufe: JUGENDLIGA15_DEFS.find(d => d.id === jugendliga15ErgebnisVorAlterung.jugendDivId).name,
+        platz: jugendliga15ErgebnisVorAlterung.platz, anzahlTeams: jugendliga15ErgebnisVorAlterung.anzahlTeams
+      },
+      letzteU15NachU17Befoerderung: u15AufstiegsMeldung,
+      jugendliga13: jugendliga13ErgebnisVorAlterung.jugendliga,
+      jugendDivId13: jugendliga13ErgebnisVorAlterung.jugendDivId,
+      jugendKader13: u13KaderNachAlterung,
+      letztesJugendliga13Ergebnis: {
+        aufgestiegen: jugendliga13ErgebnisVorAlterung.aufgestiegen, abgestiegen: jugendliga13ErgebnisVorAlterung.abgestiegen,
+        alteStufe: JUGENDLIGA13_DEFS.find(d => d.id === jugendliga13ErgebnisVorAlterung.alteStufe).name,
+        neueStufe: JUGENDLIGA13_DEFS.find(d => d.id === jugendliga13ErgebnisVorAlterung.jugendDivId).name,
+        platz: jugendliga13ErgebnisVorAlterung.platz, anzahlTeams: jugendliga13ErgebnisVorAlterung.anzahlTeams
+      },
+      letzteU13NachU15Befoerderung: u13AufstiegsMeldung,
       letzteHeimspielKategorien: null,
       eingehendeAngebote: [],
       spielerberaterAngebote: [],
@@ -18080,6 +18747,27 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterJunior: { ...kandidat.spieler, ziel: "u17", ersetzt }
         };
       }
+      // Dasselbe eine Stufe tiefer für U15 und U13.
+      if (kandidat.typ === "neu15") {
+        const { kader: jugendKader15MitPlatz, ersetzt } = fuegeJuniorMitPlatzHinzu(cs.jugendKader15 || [], kandidat.spieler, U15_KADERGROESSE);
+        return {
+          ...cs,
+          jugendKader15: [...jugendKader15MitPlatz, { ...kandidat.spieler, u15: true, akademieProdukt: true, ausgebildetVon: profile.team }],
+          akademie: { ...(cs.akademie || { level: 0, umbau: null, absolventenGesamt: 0 }), absolventenGesamt: (cs.akademie?.absolventenGesamt || 0) + 1 },
+          jugend: { ...cs.jugend, sichtung: null },
+          letzterJunior: { ...kandidat.spieler, ziel: "u15", ersetzt }
+        };
+      }
+      if (kandidat.typ === "neu13") {
+        const { kader: jugendKader13MitPlatz, ersetzt } = fuegeJuniorMitPlatzHinzu(cs.jugendKader13 || [], kandidat.spieler, U13_KADERGROESSE);
+        return {
+          ...cs,
+          jugendKader13: [...jugendKader13MitPlatz, { ...kandidat.spieler, u13: true, akademieProdukt: true, ausgebildetVon: profile.team }],
+          akademie: { ...(cs.akademie || { level: 0, umbau: null, absolventenGesamt: 0 }), absolventenGesamt: (cs.akademie?.absolventenGesamt || 0) + 1 },
+          jugend: { ...cs.jugend, sichtung: null },
+          letzterJunior: { ...kandidat.spieler, ziel: "u13", ersetzt }
+        };
+      }
 
       const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
       if (kandidat.typ === "abwerbung") {
@@ -18239,7 +18927,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // Trainer und Co-Trainerstab bleiben beim alten Verein — sie sind dort angestellt, nicht beim Manager
       coach: null,
       interimTrainer: null,
-      stab: { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, ernaehrung: null },
+      stab: { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, ernaehrung: null },
       trainerVorschlaege: null,
       trainerZiele: null,
       trainerZufriedenheit: 70,
@@ -18295,7 +18983,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       budget: neuesBudget,
       coach: null,
       interimTrainer: null,
-      stab: { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, ernaehrung: null },
+      stab: { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, ernaehrung: null },
       trainerVorschlaege: null,
       trainerZiele: null,
       trainerZufriedenheit: 70,
@@ -19500,9 +20188,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onPersonalstufeSetzen={onPersonalstufeSetzen}
             />
           )}
-          {(tab === "jugend-investition" || tab === "jugend-akademie" || tab === "jugend-u17" || tab === "jugend-u19") && (
+          {(tab === "jugend-investition" || tab === "jugend-akademie" || tab === "jugend-u13" || tab === "jugend-u15" || tab === "jugend-u17" || tab === "jugend-u19") && (
             <JugendAkademieView
-              abschnitt={tab === "jugend-investition" ? "investition" : tab === "jugend-akademie" ? "akademie" : tab === "jugend-u17" ? "u17" : "u19"}
+              abschnitt={tab === "jugend-investition" ? "investition" : tab === "jugend-akademie" ? "akademie" : tab === "jugend-u13" ? "u13" : tab === "jugend-u15" ? "u15" : tab === "jugend-u17" ? "u17" : "u19"}
               akademie={akademie}
               budget={budget}
               managerDivId={managerDivId}
@@ -19529,6 +20217,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               jugendDivId17={jugendDivId17}
               jugendKader17={jugendKader17}
               onJugendspieler17Hochziehen={onJugendspieler17Hochziehen}
+              jugendliga15={jugendliga15}
+              jugendDivId15={jugendDivId15}
+              jugendKader15={jugendKader15}
+              jugendliga13={jugendliga13}
+              jugendDivId13={jugendDivId13}
+              jugendKader13={jugendKader13}
             />
           )}
           {tab === "transfermarkt" && (
@@ -19939,7 +20633,7 @@ function App() {
       trikotsponsor: null,
       werbebanner: { vertraege: [], angebote: [] },
       saisonFinanzen: leereSaisonFinanzen(),
-      stab: { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, ernaehrung: null },
+      stab: { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, ernaehrung: null },
       kapitaenId: bestimmeKapitaen(divisions[managerDivId].squads[profile.team]),
       ...bestimmeStandardSchuetzen(divisions[managerDivId].squads[profile.team]),
       // U19-Jugendliga: eigenes Team startet immer in der tiefsten Stufe (U19T3), mit einem echten,
@@ -19952,6 +20646,14 @@ function App() {
       jugendliga17: initialeJugendliga17(profile.team, rngFor(`jugendliga17|${profile.team}`)),
       jugendKader17: initialerU17Kader(profile.team, JUGENDLIGA17_DEFS.find(d => d.id === "U17T3").baseRating),
       jugendDivId17: "U17T3",
+      // U15-Jugendliga: dasselbe Prinzip, eine Stufe darunter (13-14 Jahre).
+      jugendliga15: initialeJugendliga15(profile.team, rngFor(`jugendliga15|${profile.team}`)),
+      jugendKader15: initialerU15Kader(profile.team, JUGENDLIGA15_DEFS.find(d => d.id === "U15T3").baseRating),
+      jugendDivId15: "U15T3",
+      // U13-Jugendliga: dasselbe Prinzip, eine Stufe darunter (11-12 Jahre).
+      jugendliga13: initialeJugendliga13(profile.team, rngFor(`jugendliga13|${profile.team}`)),
+      jugendKader13: initialerU13Kader(profile.team, JUGENDLIGA13_DEFS.find(d => d.id === "U13T3").baseRating),
+      jugendDivId13: "U13T3",
       ziele: null,
       trainerZiele: null,
       anzahlSaisonsImAmt: 1,
