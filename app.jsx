@@ -2795,7 +2795,7 @@ const PROVISION_BEREICH = { BL: [50000, 150000], L2: [15000, 40000], L3: [5000, 
 // kommt "Klassenerhalt" in den Pool. Ohne diese Sonderregel konnte der Vorstand z.B. direkt nach dem
 // Sprung von der 3. in die 2. Liga schon in der Folgesaison den Aufstieg in die Bundesliga fordern,
 // oder einen frisch übernommenen Verein schon in der allerersten eigenen Saison zum Aufstieg zwingen.
-function generiereVorstandsZiele(managerDivId, season, salt = 0, frischeSituation = false, hatJunior = true, wurdeMeisterLetzteSaison = false) {
+function generiereVorstandsZiele(managerDivId, season, salt = 0, frischeSituation = false, hatJunior = true, wurdeMeisterLetzteSaison = false, markenwertAktuell = 0) {
   const rng = rngFor(`vorstandsziele|${managerDivId}|s${season}|${salt}`);
   const bereich = PROVISION_BEREICH[managerDivId] || PROVISION_BEREICH.OL;
   // "Junior etablieren" fällt aus dem Pool, wenn der Kader gerade gar keinen Junior enthält — sonst
@@ -2817,6 +2817,9 @@ function generiereVorstandsZiele(managerDivId, season, salt = 0, frischeSituatio
     // "Titel verteidigen" ist nur ein Thema, wenn die Meisterschaft gerade tatsächlich gewonnen wurde —
     // sonst würde es nie im Pool auftauchen (nur relevant, wenn es überhaupt etwas zu verteidigen gibt).
     if (z.id === "titel_verteidigen" && !wurdeMeisterLetzteSaison) return false;
+    // Der Markenwert ist je nach Liga-Ebene gedeckelt (siehe markenwertDeckel) — ist der Deckel bereits
+    // erreicht, wäre "um mindestens 6 Punkte steigern" buchstäblich unerreichbar.
+    if (z.id === "markenwert_ziel" && markenwertAktuell >= markenwertDeckel(managerDivId)) return false;
     return true;
   });
   const gewaehlt = [];
@@ -5686,7 +5689,13 @@ function ermittleAktuellenNationalkader(divisions, kaderIds) {
   const pool = ermittleDeutscheSpielerPool(divisions);
   const gefunden = (kaderIds || []).map(id => pool.find(p => p.id === id)).filter(Boolean);
   if (gefunden.length >= 23) return gefunden.slice(0, 23);
-  const rest = pool.filter(p => !gefunden.some(g => g.id === p.id)).sort((a, b) => b.rating - a.rating);
+  // Wichtig: Auffüll-Kandidaten müssen selbst verfügbar sein (nicht verletzt/gesperrt) — sonst könnten
+  // ausgerechnet die Ersatzspieler ebenfalls ausfallen, und waehleStartelf würde am Spieltag mit deutlich
+  // weniger als 11 tatsächlich einsetzbaren Spielern dastehen (dort wird bewusst weiterhin durch 11
+  // geteilt, nicht durch die Anzahl der Anwesenden — eine unbesetzte Position ist eine echte Lücke).
+  // Genau das konnte bisher zu einer Kaderauswahl mit hohem angezeigtem Schnitt führen, die am
+  // Spieltag selbst aber kaum aufstellbar war.
+  const rest = pool.filter(p => !gefunden.some(g => g.id === p.id) && !p.verletzung && !p.laenderspielSperre && !p.kartenSperre).sort((a, b) => b.rating - a.rating);
   return [...gefunden, ...rest].slice(0, 23);
 }
 
@@ -9298,8 +9307,8 @@ function TrainerZieleScreen({ trainerName, managerDivId, season, saisonLabel, on
   );
 }
 
-function ZieleScreen({ managerDivId, season, saisonLabel, onConfirm, geradeAufgestiegen = false, hatJunior = true, wurdeMeisterLetzteSaison = false }) {
-  const [ziele] = useState(() => generiereVorstandsZiele(managerDivId, season, 0, geradeAufgestiegen, hatJunior, wurdeMeisterLetzteSaison));
+function ZieleScreen({ managerDivId, season, saisonLabel, onConfirm, geradeAufgestiegen = false, hatJunior = true, wurdeMeisterLetzteSaison = false, markenwertAktuell = 0 }) {
+  const [ziele] = useState(() => generiereVorstandsZiele(managerDivId, season, 0, geradeAufgestiegen, hatJunior, wurdeMeisterLetzteSaison, markenwertAktuell));
 
   return (
     <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
@@ -11014,7 +11023,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Direkt nach einem Aufstieg, direkt nach der Übernahme eines neuen Vereins (freiwilliger Wechsel oder nach Entlassung), oder in der allerersten Saison mit Vorstandszielen einer brandneuen Karriere fordert der Vorstand realistischerweise noch keinen sofortigen Aufstieg — \"Aufstieg schaffen\" fällt in diesen Fällen aus dem Zielkatalog, stattdessen kann \"Klassenerhalt schaffen\" vorkommen.",
       "Beim Ziel \"Junior etablieren\": Im Kader-Tab lässt sich ein Jugendspieler gezielt \"fördern\" — das gibt ihm einen spürbaren Stärke-Bonus bei der automatischen Startelf-Wahl, damit er auch gegen etablierte Stammspieler eine echte Chance bekommt. Das ist der einzige direkte Hebel, mit dem der Manager dieses Ziel überhaupt beeinflussen kann, da die Aufstellung sonst rein automatisch nach Spielstärke gewählt wird. Enthält der Kader diese Saison gar keinen Junior, fällt das Ziel aus dem Katalog — es soll nie strukturell unerreichbar sein.",
       "In einer frischen Situation (Karrierestart, frischer Aufstieg oder frischer Vereinswechsel) fällt zusätzlich \"Spielerberater verpflichten\" aus dem Zielkatalog — das Ziel hängt sowohl von einem zufälligen Angebot als auch von ausreichend Budget ab, was bei noch knapper Kasse und fehlender Reputation weniger fair wäre als bei einem etablierten Manager.",
-      "Fünf weitere Ziele mit direktem Bezug zu anderen Bereichen: alle Werbebanner-Plätze vermarkten (Sponsoring-Tab), eine eingespielte Startelf über mindestens 4 Spieltage halten (Taktik-Tab), Markenwert um mindestens 6 Punkte gegenüber dem Saisonstart steigern (Fanshop-Tab/Marketing) — bewusst ein Wachstumsziel statt eines festen Zielwerts, damit es in jeder Liga etwa gleich schwer ist, für mindestens 5 Fanartikel einen Ziel-Bestand festlegen (Fanshop-Tab), sowie einen von einem Spielerberater angebotenen Spieler verpflichten (Transfermarkt-Tab).",
+      "Fünf weitere Ziele mit direktem Bezug zu anderen Bereichen: alle Werbebanner-Plätze vermarkten (Sponsoring-Tab), eine eingespielte Startelf über mindestens 4 Spieltage halten (Taktik-Tab), Markenwert um mindestens 6 Punkte gegenüber dem Saisonstart steigern (Fanshop-Tab/Marketing) — bewusst ein Wachstumsziel statt eines festen Zielwerts, damit es in jeder Liga etwa gleich schwer ist, für mindestens 5 Fanartikel einen Ziel-Bestand festlegen (Fanshop-Tab), sowie einen von einem Spielerberater angebotenen Spieler verpflichten (Transfermarkt-Tab). Der Markenwert ist je nach Liga-Ebene gedeckelt (Oberliga 45, Regionalliga 60, 3. Liga 75, 2. Bundesliga/Bundesliga 100) — ist der Deckel bereits erreicht, taucht das Wachstumsziel gar nicht erst im möglichen Zielpool auf.",
       "Werden zu wenige Vorstandsziele erfüllt, entlässt dich die Vereinsversammlung — die Karriere geht aber weiter: du bekommst Zwangsangebote von bis zu drei anderen Vereinen zur Wahl (dein alter Verein bekommt einfach eine neue Führung). Nur bei wiederholter Zahlungsunfähigkeit endet die Karriere wirklich. Jede Entlassung bleibt dauerhaft im Karriere-Tab sichtbar."
     ]
   },
@@ -20031,6 +20040,7 @@ function App() {
         geradeAufgestiegen={geradeAufgestiegen || geradeVereinGewechselt || nochGanzNeueKarriere}
         hatJunior={hatJunior}
         wurdeMeisterLetzteSaison={wurdeMeisterLetzteSaison}
+        markenwertAktuell={careerState.markenwert ?? 0}
       />
     );
   }
