@@ -2459,14 +2459,19 @@ function berechneU19FreistellungAbloese(spieler, managerDivId) {
 // Jährige) — 17-18 ist die prägendste Entwicklungsphase überhaupt. Der neue U19-Trainer (Mitarbeiter-
 // rolle) beschleunigt das zusätzlich und unabhängig vom Akademieleiter, der eher für die Qualität der
 // NEUZUGÄNGE sorgt statt für die Entwicklung der bereits vorhandenen Spieler.
-function entwickleU19Kader(kader, jugendtrainerRating) {
+// akademieLevel: Die Akademie ist im echten Fussball nicht nur ein Sichtungsbüro für neue Talente,
+// sondern vor allem bessere Infrastruktur (Trainingsplätze, medizinische Betreuung, Methodik) — die
+// hilft ALLEN Spielern, auch den bereits vorhandenen, sich zu entwickeln. Ergänzt daher den
+// Trainer-Bonus, ersetzt ihn aber nicht: Trainer = Coaching-Qualität, Akademie = Infrastruktur.
+function entwickleU19Kader(kader, jugendtrainerRating, akademieLevel = 0) {
   const trainerBonus = jugendtrainerRating ? Math.max(0, (jugendtrainerRating - 30) / 500) : 0;
+  const akademieBonus = (akademieLevel || 0) * 0.004;
   const veraenderungen = [];
   const neuesKader = kader.map(p => {
     if (p.verletzung) return p;
     const obergrenze = p.potenzial || 99; // Bestandsschutz für alte Spielstände ohne das Feld
     if (p.rating >= obergrenze) return p;
-    const chance = 0.025 + trainerBonus;
+    const chance = 0.025 + trainerBonus + akademieBonus;
     if (Math.random() < chance) {
       const neuesRating = Math.min(obergrenze, p.rating + 1);
       veraenderungen.push({ name: p.name, delta: 1, rating: neuesRating });
@@ -2589,14 +2594,15 @@ function initialerU17Kader(teamName, baseRating) {
   return kader;
 }
 
-function entwickleU17Kader(kader, jugendtrainer17Rating) {
+function entwickleU17Kader(kader, jugendtrainer17Rating, akademieLevel = 0) {
   const trainerBonus = jugendtrainer17Rating ? Math.max(0, (jugendtrainer17Rating - 30) / 500) : 0;
+  const akademieBonus = (akademieLevel || 0) * 0.004;
   const veraenderungen = [];
   const neuesKader = kader.map(p => {
     if (p.verletzung) return p;
     const obergrenze = p.potenzial || 99;
     if (p.rating >= obergrenze) return p;
-    const chance = 0.03 + trainerBonus; // U17 entwickelt sich tendenziell noch etwas schneller als U19
+    const chance = 0.03 + trainerBonus + akademieBonus; // U17 entwickelt sich tendenziell noch etwas schneller als U19
     if (Math.random() < chance) {
       const neuesRating = Math.min(obergrenze, p.rating + 1);
       veraenderungen.push({ name: p.name, delta: 1, rating: neuesRating });
@@ -2778,14 +2784,15 @@ function initialerU15Kader(teamName, baseRating) {
   return kader;
 }
 
-function entwickleU15Kader(kader, jugendtrainer15Rating) {
+function entwickleU15Kader(kader, jugendtrainer15Rating, akademieLevel = 0) {
   const trainerBonus = jugendtrainer15Rating ? Math.max(0, (jugendtrainer15Rating - 30) / 500) : 0;
+  const akademieBonus = (akademieLevel || 0) * 0.004;
   const veraenderungen = [];
   const neuesKader = kader.map(p => {
     if (p.verletzung) return p;
     const obergrenze = p.potenzial || 99;
     if (p.rating >= obergrenze) return p;
-    const chance = 0.03 + trainerBonus;
+    const chance = 0.03 + trainerBonus + akademieBonus;
     if (Math.random() < chance) {
       const neuesRating = Math.min(obergrenze, p.rating + 1);
       veraenderungen.push({ name: p.name, delta: 1, rating: neuesRating });
@@ -2965,14 +2972,15 @@ function initialerU13Kader(teamName, baseRating) {
   return kader;
 }
 
-function entwickleU13Kader(kader, jugendtrainer13Rating) {
+function entwickleU13Kader(kader, jugendtrainer13Rating, akademieLevel = 0) {
   const trainerBonus = jugendtrainer13Rating ? Math.max(0, (jugendtrainer13Rating - 30) / 500) : 0;
+  const akademieBonus = (akademieLevel || 0) * 0.004;
   const veraenderungen = [];
   const neuesKader = kader.map(p => {
     if (p.verletzung) return p;
     const obergrenze = p.potenzial || 99;
     if (p.rating >= obergrenze) return p;
-    const chance = 0.03 + trainerBonus;
+    const chance = 0.03 + trainerBonus + akademieBonus;
     if (Math.random() < chance) {
       const neuesRating = Math.min(obergrenze, p.rating + 1);
       veraenderungen.push({ name: p.name, delta: 1, rating: neuesRating });
@@ -11329,6 +11337,7 @@ const SPIELREGELN_KATEGORIEN = [
       "5 Ausbaustufen — Kosten, Bauzeit und die maximal erreichbare Stufe hängen von der eigenen Liga ab.",
       "Nach jeder Fertigstellung gilt eine Wartezeit von rund einer Saison bis zur nächsten Stufe.",
       "Ein Talent erreicht nie mehr als die Liga-Durchschnittsstärke — auch bei maximaler Investition.",
+      "Höheres Akademie-Level erhöht zusätzlich leicht die wöchentliche Entwicklungschance ALLER Spieler in U13/U15/U17/U19 (bessere Infrastruktur hilft nicht nur bei der Sichtung neuer Talente, sondern auch beim Training der bereits vorhandenen) — ergänzt den jeweiligen Jugendtrainer-Bonus, ersetzt ihn aber nicht.",
       "Verkaufst du ein eigenes Eigengewächs, landet es bei einem echten anderen Verein und entwickelt sich dort normal weiter (Alterung, Rating) — im Transfermarkt-Tab unter \"Ehemalige Eigengewächse\" siehst du seinen aktuellen Stand und kannst ihn jederzeit zurückkaufen. Eine Rückkehr sorgt garantiert für einen Trikot-Ansturm im Fanshop, unabhängig vom aktuellen Rating."
     ]
   },
@@ -16594,7 +16603,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendligaErgebnis = jugendliga ? simuliereJugendligaSpieltag(jugendliga, jugendDivId, jugendKader, profile.team) : null;
     const neueJugendliga = jugendligaErgebnis ? jugendligaErgebnis.neueLiga : jugendliga;
     const { neuesKader: neuerJugendKader } = jugendliga
-      ? entwickleU19Kader(jugendligaErgebnis.neuerJugendKader, stab.jugendtrainer?.rating)
+      ? entwickleU19Kader(jugendligaErgebnis.neuerJugendKader, stab.jugendtrainer?.rating, akademie.level)
       : { neuesKader: jugendKader };
     // Highlight-Meldung: nur wenn der Spieler DIESE Woche getroffen hat (nicht bloss eine ältere Serie
     // weiterträgt) UND seine letzten bis zu 5 Spiele in Summe eine Schwelle überschreiten — verhindert,
@@ -16615,7 +16624,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendliga17Ergebnis = jugendliga17 ? simuliereJugendliga17Spieltag(jugendliga17, jugendDivId17, jugendKader17, profile.team) : null;
     const neueJugendliga17 = jugendliga17Ergebnis ? jugendliga17Ergebnis.neueLiga : jugendliga17;
     const { neuesKader: neuerJugendKader17 } = jugendliga17
-      ? entwickleU17Kader(jugendliga17Ergebnis.neuerJugendKader, stab.jugendtrainer17?.rating)
+      ? entwickleU17Kader(jugendliga17Ergebnis.neuerJugendKader, stab.jugendtrainer17?.rating, akademie.level)
       : { neuesKader: jugendKader17 };
     let neuesU17Highlight = null;
     if (jugendliga17Ergebnis) {
@@ -16633,7 +16642,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendliga15Ergebnis = jugendliga15 ? simuliereJugendliga15Spieltag(jugendliga15, jugendDivId15, jugendKader15, profile.team) : null;
     const neueJugendliga15 = jugendliga15Ergebnis ? jugendliga15Ergebnis.neueLiga : jugendliga15;
     const { neuesKader: neuerJugendKader15 } = jugendliga15
-      ? entwickleU15Kader(jugendliga15Ergebnis.neuerJugendKader, stab.jugendtrainer15?.rating)
+      ? entwickleU15Kader(jugendliga15Ergebnis.neuerJugendKader, stab.jugendtrainer15?.rating, akademie.level)
       : { neuesKader: jugendKader15 };
     let neuesU15Highlight = null;
     if (jugendliga15Ergebnis) {
@@ -16651,7 +16660,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendliga13Ergebnis = jugendliga13 ? simuliereJugendliga13Spieltag(jugendliga13, jugendDivId13, jugendKader13, profile.team) : null;
     const neueJugendliga13 = jugendliga13Ergebnis ? jugendliga13Ergebnis.neueLiga : jugendliga13;
     const { neuesKader: neuerJugendKader13 } = jugendliga13
-      ? entwickleU13Kader(jugendliga13Ergebnis.neuerJugendKader, stab.jugendtrainer13?.rating)
+      ? entwickleU13Kader(jugendliga13Ergebnis.neuerJugendKader, stab.jugendtrainer13?.rating, akademie.level)
       : { neuesKader: jugendKader13 };
     let neuesU13Highlight = null;
     if (jugendliga13Ergebnis) {
