@@ -5710,15 +5710,23 @@ function ermittleDeutscheSpielerPool(divisions) {
 function ermittleAktuellenNationalkader(divisions, kaderIds) {
   const pool = ermittleDeutscheSpielerPool(divisions);
   const gefunden = (kaderIds || []).map(id => pool.find(p => p.id === id)).filter(Boolean);
-  if (gefunden.length >= 23) return gefunden.slice(0, 23);
-  // Wichtig: Auffüll-Kandidaten müssen selbst verfügbar sein (nicht verletzt/gesperrt) — sonst könnten
+  // Wichtig: laenderspielSperre wird generisch gesetzt, wenn ein starker Spieler "von irgendeinem Land
+  // einberufen" und dadurch für seinen VEREIN nicht verfügbar ist (siehe ermittleLaenderspielEinberufungen)
+  // — genau DAS ist für einen deutschen DFB-Kaderspieler aber oft exakt diese Einberufung nach
+  // Deutschland! Ohne diese Bereinigung schloss sich ein Spieler quasi selbst aus der eigenen
+  // Nationalmannschaft aus, sobald er (fälschlich als "anderswo gebraucht") markiert wurde — und traf
+  // ausgerechnet die eigenen stärksten, meist einberufenen Spieler am härtesten. Hier zählt für die
+  // Aufstellung nur, ob er verletzt oder gesperrt ist (kartenSperre) — nicht, ob er "anderswo" gebraucht
+  // würde, denn hier IST er ja gerade im DFB-Einsatz.
+  const bereinigt = p => (p.laenderspielSperre ? { ...p, laenderspielSperre: null } : p);
+  const gefundenBereinigt = gefunden.map(bereinigt);
+  if (gefundenBereinigt.length >= 23) return gefundenBereinigt.slice(0, 23);
+  // Auffüll-Kandidaten müssen selbst verfügbar sein (nicht verletzt/gesperrt) — sonst könnten
   // ausgerechnet die Ersatzspieler ebenfalls ausfallen, und waehleStartelf würde am Spieltag mit deutlich
   // weniger als 11 tatsächlich einsetzbaren Spielern dastehen (dort wird bewusst weiterhin durch 11
   // geteilt, nicht durch die Anzahl der Anwesenden — eine unbesetzte Position ist eine echte Lücke).
-  // Genau das konnte bisher zu einer Kaderauswahl mit hohem angezeigtem Schnitt führen, die am
-  // Spieltag selbst aber kaum aufstellbar war.
-  const rest = pool.filter(p => !gefunden.some(g => g.id === p.id) && !p.verletzung && !p.laenderspielSperre && !p.kartenSperre).sort((a, b) => b.rating - a.rating);
-  return [...gefunden, ...rest].slice(0, 23);
+  const rest = pool.filter(p => !gefunden.some(g => g.id === p.id) && !p.verletzung && !p.laenderspielSperre && !p.kartenSperre).sort((a, b) => b.rating - a.rating).map(bereinigt);
+  return [...gefundenBereinigt, ...rest].slice(0, 23);
 }
 
 // Je später die Turnierrunde, desto eher ein echter Top-Gegner: das Achtelfinale wird aus der
@@ -11021,6 +11029,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Im neuen Nationalmannschaft-Tab wird der Kader (bis zu 23 Spieler) aus ALLEN deutschen Spielern der Liga gewählt, auch von gegnerischen Vereinen.",
       "Die taktische Formation für alle Länderspiele (Qualifikation und Turnier) ist frei wählbar — die Startelf wird daraus automatisch nach Positionsstärke gebildet, genau wie beim eigenen Verein.",
       "Ein tatsächlich bestrittenes Länderspiel trägt dasselbe Verletzungsrisiko wie ein Vereinsspiel — eine so entstandene Verletzung betrifft den Spieler danach ganz normal auch bei seinem Verein, egal ob es dein eigener Spieler ist oder der eines anderen Klubs.",
+      "Für die Aufstellung eines DFB-Kaderspielers zählt nur, ob er verletzt oder kartengesperrt ist — nicht, ob er im selben Fenster \"anderswo einberufen\" markiert wurde (das würde sonst gerade die eigenen stärksten, meist einberufenen Spieler von der eigenen Nationalmannschaft ausschliessen).",
       "Alle zwei Jahre ein Turnier (WM/EM abwechselnd, an den echten Kalender angelehnt — z.B. 2028 EM, 2030 WM, 2032 EM, 2034 WM): Qualifikation in einer echten 5er-Gruppe (Deutschland + 4 feste, ausschliesslich europäische Gegner — sowohl bei EM- als auch WM-Qualifikation, da Deutschland als UEFA-Mitglied für beide Turniere nur gegen europäische Nationen qualifiziert), mit Hin- und Rückspiel gegen jeden Gegner (4 Heim-, 4 Auswärtsspiele). Die vier Gegner spielen auch untereinander, echte Tabelle mit Sp/S/U/N/Tore/Diff/Pkt.",
       "Die ersten beiden Plätze der Gruppe qualifizieren sich fürs Turnier. Die Anzahl Runden pro Länderspielpause passt sich automatisch an die verbleibende Zeit bis zum Turnierjahr an, damit die letzte Runde möglichst genau im letzten Fenster davor gespielt wird — dadurch keine Pause ohne Partie, auch nicht gegen Ende der Qualifikation.",
       "Aussereuropäische Gegner (Brasilien, USA, Japan, ...) gibt es erst beim eigentlichen Turnier selbst (K.o.-Runden vom Achtelfinale bis zum Finale mit Elfmeterschiessen bei Unentschieden) — dort dann je nach Turnier (EM nur Europa, WM weltweit).",
