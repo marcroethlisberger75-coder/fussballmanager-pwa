@@ -2227,7 +2227,7 @@ function initialeJugendliga(managerTeam, rng) {
 
 // U19-Spieler: strikt 17 oder 18 Jahre (Voraussetzung des Managers) — 18-Jährige entstehen nur durch
 // natürliches Altern aus dem Kader heraus (siehe alterJugendKader), niemals frisch generiert.
-function generiereU19Spieler(teamName, baseRating, season) {
+function generiereU19Spieler(teamName, baseRating, season, alter = 17) {
   const rating = Math.max(22, Math.min(80, Math.round(baseRating + (Math.random() * 14 - 7))));
   // Potenzial = die Obergrenze, bis zu der sich der Spieler über die Zeit entwickeln kann (siehe
   // entwickleU19Kader) — bleibt über die ganze Zeit im Verein fix, unabhängig vom aktuellen Rating.
@@ -2239,7 +2239,7 @@ function generiereU19Spieler(teamName, baseRating, season) {
   const neueId = `${teamName}-u19-${season}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   return {
     id: neueId, name: `${vorname} ${nachname}`, pos: pos.code, posName: pos.name,
-    alter: 17, nr: 20 + Math.floor(Math.random() * 10), rating, potenzial,
+    alter, nr: 20 + Math.floor(Math.random() * 10), rating, potenzial,
     nationalitaet: NATIONALITAETEN_POOL[Math.floor(Math.random() * NATIONALITAETEN_POOL.length)],
     persoenlichkeit: zufallsPersoenlichkeit(),
     zufriedenheit: 70, junior: true, u19: true,
@@ -2288,7 +2288,7 @@ function initialeJugendliga17(managerTeam, rng) {
 
 // U17-Spieler: strikt 15 oder 16 Jahre — 16-Jährige entstehen nur durch natürliches Altern aus dem
 // Kader heraus (siehe alterJugendKader17), niemals frisch generiert.
-function generiereU17Spieler(teamName, baseRating, season) {
+function generiereU17Spieler(teamName, baseRating, season, alter = 15) {
   const rating = Math.max(18, Math.min(65, Math.round(baseRating + (Math.random() * 14 - 7))));
   const potenzial = Math.min(99, rating + 8 + Math.floor(Math.random() * 32));
   const pos = POSITIONEN[Math.floor(Math.random() * POSITIONEN.length)];
@@ -2297,7 +2297,7 @@ function generiereU17Spieler(teamName, baseRating, season) {
   const neueId = `${teamName}-u17-${season}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   return {
     id: neueId, name: `${vorname} ${nachname}`, pos: pos.code, posName: pos.name,
-    alter: 15, nr: 30 + Math.floor(Math.random() * 10), rating, potenzial,
+    alter, nr: 30 + Math.floor(Math.random() * 10), rating, potenzial,
     nationalitaet: NATIONALITAETEN_POOL[Math.floor(Math.random() * NATIONALITAETEN_POOL.length)],
     persoenlichkeit: zufallsPersoenlichkeit(),
     zufriedenheit: 70, junior: true, u17: true,
@@ -2307,7 +2307,7 @@ function generiereU17Spieler(teamName, baseRating, season) {
   };
 }
 
-const U17_KADERGROESSE = 16;
+const U17_KADERGROESSE = U19_KADERGROESSE; // beide Jugendkader müssen gleich gross sein — siehe unten
 
 // Wie beim U19-Kader (alterJugendKader), aber der entscheidende Unterschied: Ein 16-Jähriger, der 17
 // wird, verschwindet nicht und braucht auch kein manuelles Hochziehen — er wandert automatisch und
@@ -2395,9 +2395,29 @@ function simuliereJugendligaSpieltag(jugendliga, jugendDivId, jugendKader, manag
 
 
 
+// Zu Karrierestart je zur Hälfte 17- und 18-Jährige (statt alle 17) — sonst würden in den ersten
+// Saisons alle gemeinsam altern und erst nach zwei Zyklen käme die gewünschte, gleichmässige
+// Durchmischung der Jahrgänge zustande. So ist von Anfang an in jeder Saison dieselbe Anzahl beider
+// Jahrgänge im Kader, auch wenn Spieler nachrücken.
+// Macht bei vollem Jugendkader Platz für einen neuen, gescouteten Spieler: Ist der Kader noch nicht
+// voll, passiert nichts. Ist er voll, verlässt der schwächste Spieler DESSELBEN Jahrgangs (gleiches
+// Alter wie der Neuzugang) den Kader — wechselt zu einem echten anderen Verein, wie ein freigestellter
+// U19-Spieler (siehe u19FreistellungsMeldung), statt einfach zu verschwinden. So bleiben Kadergrösse
+// und die gleichmässige Jahrgangs-Verteilung immer erhalten, unabhängig davon, ob und wie oft gescoutet
+// wird. Gibt { kader: <Kader ohne den Ersetzten>, ersetzt: <Name oder null> } zurück — das eigentliche
+// Hinzufügen des Neuzugangs macht weiterhin die Aufrufstelle selbst.
+function fuegeJuniorMitPlatzHinzu(kader, neuerSpieler, maxGroesse) {
+  if (kader.length < maxGroesse) return { kader, ersetzt: null };
+  const gleicherJahrgang = kader.filter(p => p.alter === neuerSpieler.alter);
+  const kandidatenPool = gleicherJahrgang.length ? gleicherJahrgang : kader;
+  const schwaechster = kandidatenPool.reduce((min, p) => p.rating < min.rating ? p : min, kandidatenPool[0]);
+  return { kader: kader.filter(p => p.id !== schwaechster.id), ersetzt: schwaechster.name };
+}
+
 function initialerU19Kader(teamName, baseRating) {
   const kader = [];
-  for (let i = 0; i < U19_KADERGROESSE; i++) kader.push(generiereU19Spieler(teamName, baseRating));
+  const haelfte = U19_KADERGROESSE / 2;
+  for (let i = 0; i < U19_KADERGROESSE; i++) kader.push(generiereU19Spieler(teamName, baseRating, 0, i < haelfte ? 17 : 18));
   return kader;
 }
 
@@ -2550,9 +2570,11 @@ function simuliereJugendliga17Spieltag(jugendliga, jugendDivId, jugendKader, man
   return { neueLiga, neuerJugendKader };
 }
 
+// Dasselbe Prinzip wie bei initialerU19Kader: je zur Hälfte 15- und 16-Jährige von Anfang an.
 function initialerU17Kader(teamName, baseRating) {
   const kader = [];
-  for (let i = 0; i < U17_KADERGROESSE; i++) kader.push(generiereU17Spieler(teamName, baseRating));
+  const haelfte = U17_KADERGROESSE / 2;
+  for (let i = 0; i < U17_KADERGROESSE; i++) kader.push(generiereU17Spieler(teamName, baseRating, 0, i < haelfte ? 15 : 16));
   return kader;
 }
 
@@ -7921,10 +7943,11 @@ function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVer
     onVertragVerlaengern(spielerId, laufzeit, gehaltsFaktor);
   };
   const eigeneSpieler = squad.filter(p => !p.leihspieler);
-  const auslaufend = eigeneSpieler.filter(p => (p.vertragBisSaison ?? season + 9) - season <= 1);
-  const langfristig = eigeneSpieler
-    .filter(p => (p.vertragBisSaison ?? season + 9) - season >= 2)
-    .sort((a, b) => b.rating - a.rating);
+  const restlaufzeit = p => (p.vertragBisSaison ?? season + 9) - season;
+  // Beide Listen nach Restlaufzeit aufsteigend sortiert (kürzeste zuerst) — so ist auf einen Blick
+  // erkennbar, welche Verträge als Nächstes anstehen, statt nach Spielstärke sortiert zu sein.
+  const auslaufend = eigeneSpieler.filter(p => restlaufzeit(p) <= 1).sort((a, b) => restlaufzeit(a) - restlaufzeit(b) || b.rating - a.rating);
+  const langfristig = eigeneSpieler.filter(p => restlaufzeit(p) >= 2).sort((a, b) => restlaufzeit(a) - restlaufzeit(b) || b.rating - a.rating);
 
   return (
     <div>
@@ -10894,7 +10917,7 @@ const SPIELREGELN_KATEGORIEN = [
     icon: Sprout, farbe: "#6ee7b7", titel: "U19-Jugendliga",
     punkte: [
       "Eigenes U19-Team in einer echten dreistufigen Liga (U19-Bundesliga, U19-Regionalliga, U19-Landesliga) mit echtem Auf- und Abstieg für ALLE Teams — der eigene Verein startet zu Karrierebeginn immer in der tiefsten Stufe.",
-      "Der Kader besteht durchgehend aus echten, dauerhaften Spielern zwischen 17 und 18 Jahren. Wird ein 18-Jähriger nicht rechtzeitig hochgezogen, wird er beim nächsten Saisonübergang freigestellt und wechselt zu einem echten anderen Verein (wie ein verkauftes Eigengewächs) — ein sehr vielversprechender Spieler (hohes Potenzial) bringt dabei noch eine kleine Ablöse ein, ein durchschnittlicher geht ablösefrei. Neue 17-Jährige rücken automatisch nach.",
+      "Der Kader besteht durchgehend aus echten, dauerhaften Spielern zwischen 17 und 18 Jahren — zu Karrierestart wie auch danach immer je zur Hälfte beider Jahrgänge, damit die Durchmischung stabil bleibt. Wird ein 18-Jähriger nicht rechtzeitig hochgezogen, wird er beim nächsten Saisonübergang freigestellt und wechselt zu einem echten anderen Verein (wie ein verkauftes Eigengewächs) — ein sehr vielversprechender Spieler (hohes Potenzial) bringt dabei noch eine kleine Ablöse ein, ein durchschnittlicher geht ablösefrei. Neue 17-Jährige rücken automatisch nach.",
       "Spiele laufen automatisch im Hintergrund mit (ein Spieltag pro eigenem Spieltag) — kein zusätzliches Klicken nötig. Die eigene Stärke wird dabei jede Woche frisch aus dem aktuellen U19-Kader berechnet.",
       "Frisch gesichtete Eigengewächse aus der Jugendakademie (Sichtung im Jugend-Tab) landen jetzt im U19-Kader statt direkt in der ersten Mannschaft — von dort aus lässt sich jeder Spieler jederzeit (nicht nur am Saisonende) über \"Hochziehen\" in die erste Mannschaft befördern.",
       "Maximal 1-3 Beförderungen pro Saison: Basis 1, +1 ab Akademie-Level 3, +1 bei einem U19-Trainer mit Stärke 60 oder mehr — der Zähler wird bei jedem Saisonübergang wieder auf 0 zurückgesetzt.",
@@ -10910,8 +10933,9 @@ const SPIELREGELN_KATEGORIEN = [
     icon: Sprout, farbe: "#6ee7b7", titel: "U17-Jugendliga",
     punkte: [
       "Eigenes U17-Team, spiegelbildlich zur U19-Liga aufgebaut: dieselbe dreistufige Struktur (U17-Bundesliga, U17-Regionalliga, U17-Landesliga) mit echtem Auf- und Abstieg, automatischer Hintergrund-Simulation und eigenen Vereinsinfos-Meldungen bei Auf-/Abstieg und Torserien.",
-      "Der U17-Kader besteht aus 15- und 16-Jährigen. Wird ein Spieler 17, wechselt er automatisch und ohne jedes Zutun in den U19-Kader — volle Durchlässigkeit zwischen den beiden Jugendstufen, kein manuelles Hochziehen nötig (anders als beim Übergang U19 → erste Mannschaft). Ab 16 Jahren lässt sich ein U17-Spieler aber auch schon direkt in die erste Mannschaft ziehen, realistischerweise nicht mit 15 — teilt sich dabei dasselbe Saison-Kontingent mit der U19.",
+      "Der U17-Kader besteht aus 15- und 16-Jährigen — genau gleich gross wie der U19-Kader und ebenfalls von Karrierestart an je zur Hälfte beider Jahrgänge. Wird ein Spieler 17, wechselt er automatisch und ohne jedes Zutun in den U19-Kader — volle Durchlässigkeit zwischen den beiden Jugendstufen, kein manuelles Hochziehen nötig (anders als beim Übergang U19 → erste Mannschaft). Ab 16 Jahren lässt sich ein U17-Spieler aber auch schon direkt in die erste Mannschaft ziehen, realistischerweise nicht mit 15 — teilt sich dabei dasselbe Saison-Kontingent mit der U19.",
       "Bei jeder Talentsichtung (im Investitions-Tab) findet der Chefscout jetzt zusätzlich 1-2 jüngere Kandidaten (15-16 Jahre) speziell für die U17 — nutzt dieselbe Investition, denselben Scout und dieselbe Akademie wie die U19-Kandidaten, keine separate Sichtung nötig.",
+      "Ist der jeweilige Jugendkader bereits voll (18 Spieler), macht beim Auswählen eines gescouteten Kandidaten automatisch der schwächste Spieler desselben Jahrgangs Platz — wechselt zu einem echten anderen Verein, wie ein freigestellter U19-Spieler. So bleiben Kadergrösse und die gleichmässige 9/9-Jahrgangsverteilung immer erhalten.",
       "Eigene Mitarbeiterrolle \"U17-Trainer\", unabhängig vom U19-Trainer — beschleunigt gezielt die Entwicklung der U17-Spieler, nicht die der U19."
     ]
   },
@@ -11440,6 +11464,7 @@ function VereinsinfosView({ careerState }) {
                 : <>Neuer Junior im eigenen U19-Kader: </>}
               <span className="text-amber-800 font-semibold">{careerState.letzterJunior.name}</span>
               <span className="text-stone-500"> · {careerState.letzterJunior.posName} · {careerState.letzterJunior.alter}J · Stärke {careerState.letzterJunior.rating}</span>
+              {careerState.letzterJunior.ersetzt && <span className="text-stone-500"> — Kader war voll, dafür verlässt {careerState.letzterJunior.ersetzt} (schwächster gleichen Jahrgangs) den Verein.</span>}
             </span>
           </div>
         )}
@@ -17999,23 +18024,29 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // onJugendspielerHochziehen). Abwerbung/internationales Scouting betrifft bereits etwas ältere,
       // etablierte Spieler (bis 21) und bleibt daher weiterhin eine direkte Verpflichtung.
       if (kandidat.typ === "neu") {
+        // Der Kader ist fix auf U19_KADERGROESSE gedeckelt, je zur Hälfte beider Jahrgänge (siehe
+        // initialerU19Kader) — damit ein gescouteter Neuzugang trotzdem immer aufgenommen werden kann,
+        // macht bei vollem Kader automatisch der schwächste Spieler DESSELBEN Jahrgangs Platz. So
+        // bleiben Kadergrösse und 9/9-Verteilung immer erhalten, unabhängig von der Sichtung.
+        const { kader: jugendKaderMitPlatz, ersetzt } = fuegeJuniorMitPlatzHinzu(cs.jugendKader || [], kandidat.spieler, U19_KADERGROESSE);
         return {
           ...cs,
-          jugendKader: [...(cs.jugendKader || []), { ...kandidat.spieler, u19: true, akademieProdukt: true, ausgebildetVon: profile.team }],
+          jugendKader: [...jugendKaderMitPlatz, { ...kandidat.spieler, u19: true, akademieProdukt: true, ausgebildetVon: profile.team }],
           akademie: { ...(cs.akademie || { level: 0, umbau: null, absolventenGesamt: 0 }), absolventenGesamt: (cs.akademie?.absolventenGesamt || 0) + 1 },
           jugend: { ...cs.jugend, sichtung: null },
-          letzterJunior: { ...kandidat.spieler, ziel: "u19" }
+          letzterJunior: { ...kandidat.spieler, ziel: "u19", ersetzt }
         };
       }
       // Jüngeres Pendant zu "neu" oben — landet im U17- statt im U19-Kader. Wird der Spieler später 17,
       // wechselt er ohnehin automatisch weiter in die U19 (siehe alterJugendKader17).
       if (kandidat.typ === "neu17") {
+        const { kader: jugendKader17MitPlatz, ersetzt } = fuegeJuniorMitPlatzHinzu(cs.jugendKader17 || [], kandidat.spieler, U17_KADERGROESSE);
         return {
           ...cs,
-          jugendKader17: [...(cs.jugendKader17 || []), { ...kandidat.spieler, u17: true, akademieProdukt: true, ausgebildetVon: profile.team }],
+          jugendKader17: [...jugendKader17MitPlatz, { ...kandidat.spieler, u17: true, akademieProdukt: true, ausgebildetVon: profile.team }],
           akademie: { ...(cs.akademie || { level: 0, umbau: null, absolventenGesamt: 0 }), absolventenGesamt: (cs.akademie?.absolventenGesamt || 0) + 1 },
           jugend: { ...cs.jugend, sichtung: null },
-          letzterJunior: { ...kandidat.spieler, ziel: "u17" }
+          letzterJunior: { ...kandidat.spieler, ziel: "u17", ersetzt }
         };
       }
 

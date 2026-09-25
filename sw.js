@@ -2,7 +2,7 @@
 // ändern — sonst erkennt der "activate"-Handler unten den alten Cache nie als veraltet, und Nutzer
 // bleiben auf einer alten, zum Rest der App nicht mehr passenden app.jsx hängen (genau das hat zu
 // scheinbar zufällig kaputten Buttons geführt: verschiedene Programmteile passten nicht mehr zusammen).
-const CACHE_NAME = "fussball-manager-v96";
+const CACHE_NAME = "fussball-manager-v99";
 
 const CORE_ASSETS = [
   "./",
