@@ -19793,8 +19793,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                 <div className="text-[10px] text-red-400 mt-0.5">⚠️ Letzte Warnung des Vorstands: bei erneuter Zahlungsunfähigkeit erfolgt die sofortige Entlassung.</div>
               )}
               {speicherWarnung && (
-                <div className="text-[10px] text-amber-400 mt-1 flex items-center gap-2">
-                <span>⚠️ Speichern klappt gerade nicht — evtl. ist der Speicher des Browsers voll oder privates Surfen aktiv</span>
+                <div className="text-[10px] text-amber-400 mt-1 flex items-center gap-2 flex-wrap">
+                <span>⚠️ Speichern klappt gerade nicht — evtl. ist der Speicher des Browsers voll oder privates Surfen aktiv. Spielstand-Grösse: {speicherWarnung.groesseKB} KB. Fehler: {speicherWarnung.fehlermeldung}</span>
                 <button onClick={onSpeicherWarnungAusblenden} className="text-emerald-600 underline shrink-0">ausblenden</button>
               </div>
             )}
@@ -20532,7 +20532,7 @@ function App() {
     })();
   }, []);
 
-  const [speicherWarnung, setSpeicherWarnung] = useState(false);
+  const [speicherWarnung, setSpeicherWarnung] = useState(null);
 
   const speicherFehlerZaehler = useRef(0);
 
@@ -20543,18 +20543,21 @@ function App() {
         .then(() => localStorage.setItem(STORAGE_KEY, payload))
         .then(() => {
           speicherFehlerZaehler.current = 0;
-          setSpeicherWarnung(false);
+          setSpeicherWarnung(null);
         })
         .catch(err => {
-          console.error(`Speichern fehlgeschlagen (Versuch ${versuchNr}), Grösse: ${(payload.length / 1024).toFixed(0)} KB`, err);
+          const groesseKB = Math.round(payload.length / 1024);
+          console.error(`Speichern fehlgeschlagen (Versuch ${versuchNr}), Grösse: ${groesseKB} KB`, err);
           if (versuchNr < 2) {
             setTimeout(() => versuchen(versuchNr + 1), 800);
           } else {
             // Erst nach mehreren KOMPLETT fehlgeschlagenen Speichervorgängen in Folge warnen (nicht schon
             // beim ersten) — vermeidet Fehlalarme bei kurzen, einmaligen Aussetzern (z.B. voller
-            // localStorage-Speicher im privaten Browsermodus).
+            // localStorage-Speicher im privaten Browsermodus). Grösse UND Fehlermeldung direkt mit
+            // anzeigen (statt nur in der Konsole) — auf dem iPad ist die Konsole ohne Mac kaum
+            // zugänglich, im Spiel selbst sieht man es sofort.
             speicherFehlerZaehler.current += 1;
-            if (speicherFehlerZaehler.current >= 5) setSpeicherWarnung(true);
+            if (speicherFehlerZaehler.current >= 5) setSpeicherWarnung({ groesseKB, fehlermeldung: String(err?.message || err || "unbekannt") });
           }
         });
     };
@@ -20833,7 +20836,7 @@ function App() {
     });
   };
 
-  return <GameScreen profile={profile} careerState={careerState} setCareerState={setCareerState} onProfileUpdate={onProfileUpdate} speicherWarnung={speicherWarnung} onSpeicherWarnungAusblenden={() => setSpeicherWarnung(false)} onSpielNeuStarten={() => { setProfile(null); setCareerStateRaw(null); setManagerVertragAngebot(null); persist(null, null); }} onSpielstandImportieren={onSpielstandImportieren} />;
+  return <GameScreen profile={profile} careerState={careerState} setCareerState={setCareerState} onProfileUpdate={onProfileUpdate} speicherWarnung={speicherWarnung} onSpeicherWarnungAusblenden={() => setSpeicherWarnung(null)} onSpielNeuStarten={() => { setProfile(null); setCareerStateRaw(null); setManagerVertragAngebot(null); persist(null, null); }} onSpielstandImportieren={onSpielstandImportieren} />;
 }
 
 export default function AppMitFehlerAnzeige() {
