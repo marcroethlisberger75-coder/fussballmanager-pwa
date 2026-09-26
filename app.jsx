@@ -11998,6 +11998,12 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
     ? Object.entries(quali.tabelle).map(([name, z]) => ({ name, ...z, diff: z.tore - z.gegentore })).sort((a, b) => b.pkt - a.pkt || b.diff - a.diff || b.tore - a.tore)
     : [];
   const qualiVerlauf = quali?.verlauf || [];
+  // Stärkewert je Gegner-Nation zum Anzeigen (wie bei den Liga-Tabellen) — EM/WM-Listen überschneiden
+  // sich bei gemeinsamen Nationen mit demselben Wert, daher reicht eine kombinierte Suche unabhängig
+  // davon, für welchen Wettbewerb die aktuelle Gruppe ausgelost wurde. Deutschlands eigene Stärke ist
+  // nicht fix wie bei den Gegnern, sondern der tatsächliche Kaderschnitt der eigenen Auswahl.
+  const alleNationenStaerke = [...EM_NATIONEN, ...WM_NATIONEN];
+  const staerkeVonNation = name => name === "Deutschland" ? kaderDurchschnitt : (alleNationenStaerke.find(n => n.name === name)?.staerke ?? "–");
 
   return (
     <div>
@@ -12014,6 +12020,7 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
               <tr className="text-emerald-600 border-b border-emerald-900">
                 <th className="text-left font-normal pb-1">#</th>
                 <th className="text-left font-normal pb-1">Team</th>
+                <th className="text-center font-normal pb-1">Stärke</th>
                 <th className="text-center font-normal pb-1">Sp</th>
                 <th className="text-center font-normal pb-1">S</th>
                 <th className="text-center font-normal pb-1">U</th>
@@ -12027,7 +12034,8 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
               {gruppentabelleSortiert.map((t, i) => (
                 <tr key={t.name} className={t.name === "Deutschland" ? "text-amber-300 font-semibold" : "text-emerald-200"}>
                   <td className={`py-1 ${i < 2 ? "text-emerald-400" : "text-emerald-700"}`}>{i + 1}.</td>
-                  <td className="py-1">{t.name === "Deutschland" ? "🇩🇪 " : ""}{t.name}</td>
+                  <td className="py-1">{t.name}</td>
+                  <td className="text-center">{staerkeVonNation(t.name)}</td>
                   <td className="text-center">{t.sp}</td>
                   <td className="text-center">{t.s}</td>
                   <td className="text-center">{t.u}</td>
@@ -19794,7 +19802,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               )}
               {speicherWarnung && (
                 <div className="text-[10px] text-amber-400 mt-1 flex items-center gap-2 flex-wrap">
-                <span>⚠️ Speichern klappt gerade nicht — evtl. ist der Speicher des Browsers voll oder privates Surfen aktiv. Spielstand-Grösse: {speicherWarnung.groesseKB} KB. Fehler: {speicherWarnung.fehlermeldung}</span>
+                <span>
+                  ⚠️ Speichern klappt gerade nicht
+                  {speicherWarnung.groesseKB < 4000 && /quota/i.test(speicherWarnung.fehlermeldung)
+                    ? <> — bei nur {speicherWarnung.groesseKB} KB liegt das fast sicher am **privaten Modus** des Browsers (Safari setzt dort das Speicherlimit auf praktisch 0), nicht an der Spielstand-Grösse. Öffne die Seite in einem normalen, nicht-privaten Tab.</>
+                    : <> — evtl. ist der Speicher des Browsers voll oder privates Surfen aktiv. Spielstand-Grösse: {speicherWarnung.groesseKB} KB. Fehler: {speicherWarnung.fehlermeldung}</>}
+                </span>
                 <button onClick={onSpeicherWarnungAusblenden} className="text-emerald-600 underline shrink-0">ausblenden</button>
               </div>
             )}
