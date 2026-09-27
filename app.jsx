@@ -15289,7 +15289,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   // sondern auch ein eventuell noch laufender Pokal- oder Europapokal-Wettbewerb (z.B. das Finale).
   const pokalAbgeschlossen = !pokal || pokal.managerAusgeschieden || !!pokal.sieger;
   const europapokalAbgeschlossen = !europapokal || europapokal.phase === "sieger" || europapokal.phase === "ausgeschieden";
-  const wirklichAllesFertig = seasonFertig && pokalAbgeschlossen && europapokalAbgeschlossen;
+  // Auch eine noch offene ODER bereits fertig gespielte, aber noch nicht übernommene Relegation/ein
+  // Turnier zählt als "noch nicht wirklich fertig" — sonst erscheint der "Saison abschliessen"-Knopf
+  // erneut, obwohl saisonAbschliessenBestaetigt schon true ist, und ein Klick ändert nichts mehr (siehe
+  // onRelegationErgebnisUebernehmen/onTurnierErgebnisUebernehmen, die diesen Fall eigentlich behandeln).
+  const relegationOffenOderUnuebernommen = !!relegationsspiel;
+  const turnierOffenOderUnuebernommen = !!turnierspiel;
+  const wirklichAllesFertig = seasonFertig && pokalAbgeschlossen && europapokalAbgeschlossen && !relegationOffenOderUnuebernommen && !turnierOffenOderUnuebernommen;
   const eigeneLigaFertig = division.matchday >= division.fixtures.length;
   const wartendeLigen = eigeneLigaFertig && !seasonFertig
     ? Object.values(divisions).filter(d => d.matchday < d.fixtures.length)
@@ -20355,6 +20361,24 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           </div>
           <button onClick={onTurnierErgebnisUebernehmen} className="w-full bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold text-sm rounded py-3">
             Weiter zur Saisonauswertung
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Absicherung: saisonAbschliessenBestaetigt wurde bereits bestätigt, aber seasonEndInfo fehlt aus
+  // irgendeinem Grund (z.B. ein unerwarteter Fehler bei der Berechnung) — ohne diesen Bildschirm bliebe
+  // die App hier hängen, da "Saison abschliessen" wegen wirklichAllesFertig (siehe oben) nicht mehr
+  // erscheint, aber auch die eigentliche Auswertung nie kommt. Versucht die Berechnung einfach erneut.
+  if (turnierspiel && turnierspiel.fertig && saisonAbschliessenBestaetigt && !seasonEndInfo) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="max-w-md w-full border border-red-500/50 rounded-lg p-6 space-y-4" style={{ backgroundColor: "#0f2818" }}>
+          <div className="text-center text-white font-bold">Die Saisonauswertung konnte nicht berechnet werden.</div>
+          <p className="text-xs text-emerald-500 text-center">Das Turnierergebnis bleibt dabei erhalten — ein erneuter Versuch sollte funktionieren.</p>
+          <button onClick={onTurnierErgebnisUebernehmen} className="w-full bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold text-sm rounded py-3">
+            Erneut versuchen
           </button>
         </div>
       </div>
