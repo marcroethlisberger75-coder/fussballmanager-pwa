@@ -17940,12 +17940,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   // ohne Team-Override — das Turnierergebnis selbst wird direkt aus careerState.turnierspiel gelesen
   // (siehe neueSaisonStarten), es beeinflusst keine Auf-/Abstiegs-Tabellen wie bei der Relegation.
   const onTurnierErgebnisUebernehmen = () => {
-    // turnierspiel MUSS hier auch gelöscht werden — sonst bleibt "turnierspiel.fertig" weiterhin wahr,
-    // die frühere if-Bedingung für DIESEN Bildschirm greift bei jedem Rendern erneut, und die App wechselt
-    // trotz gesetztem seasonEndInfo/saisonAbschliessenBestaetigt nie zur Saisonauswertung (genau der
-    // "Knopf tut nichts"-Bug — hier für die Turnier-Variante, siehe onRelegationErgebnisUebernehmen für
-    // denselben, bisher übersehenen Fall bei der Relegation).
-    setCareerState(cs => ({ ...cs, turnierspiel: null }));
+    // WICHTIG: turnierspiel hier NICHT löschen (frühere Version tat das versehentlich) — neueSaisonStarten
+    // liest careerState.turnierspiel weiter unten noch aus, um das ECHTE, bereits gespielte Ergebnis zu
+    // übernehmen, statt das Turnier ein zweites Mal neu zu würfeln. Stattdessen wird dieser Bildschirm
+    // unten (siehe "turnierspiel.fertig && !saisonAbschliessenBestaetigt") automatisch ausgeblendet,
+    // sobald bestätigt wurde — turnierspiel selbst bleibt bis zum Saisonstart unverändert bestehen.
     setSaisonAbschliessenBestaetigt(true);
     try {
       const result = processSeasonTransition(divisions, season, profile.team);
@@ -20340,7 +20339,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     );
   }
 
-  if (turnierspiel && turnierspiel.fertig) {
+  if (turnierspiel && turnierspiel.fertig && !saisonAbschliessenBestaetigt) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
         <div className={`max-w-md w-full border rounded-lg p-6 space-y-4 ${turnierspiel.sieger ? "border-amber-400/50" : "border-red-500/50"}`} style={{ backgroundColor: "#0f2818" }}>
