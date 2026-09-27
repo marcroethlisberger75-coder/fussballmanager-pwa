@@ -17857,6 +17857,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // saisonAbschliessenBestaetigt beide gesetzt sind — im normalen Ablauf setzt der "Saison
     // abschliessen"-Knopf beides zusammen. Hier lief das bisher nur über seasonEndInfo, wodurch der
     // "Weiter zur Saisonauswertung"-Knopf nach einer entschiedenen Relegation wirkungslos blieb.
+    // Zusätzlich muss relegationsspiel selbst gelöscht werden — sonst bleibt "relegationsspiel.phase
+    // === 'fertig'" weiterhin wahr und die vorherige if-Bedingung für DIESEN Bildschirm greift bei
+    // jedem Rendern erneut (derselbe Fehler wie bei onTurnierErgebnisUebernehmen, dort tatsächlich
+    // aufgetreten und von dort erkannt).
+    setCareerState(cs => ({ ...cs, relegationsspiel: null }));
     setSaisonAbschliessenBestaetigt(true);
     try {
       const result = processSeasonTransition(divisions, season, profile.team, override);
@@ -17935,6 +17940,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   // ohne Team-Override — das Turnierergebnis selbst wird direkt aus careerState.turnierspiel gelesen
   // (siehe neueSaisonStarten), es beeinflusst keine Auf-/Abstiegs-Tabellen wie bei der Relegation.
   const onTurnierErgebnisUebernehmen = () => {
+    // turnierspiel MUSS hier auch gelöscht werden — sonst bleibt "turnierspiel.fertig" weiterhin wahr,
+    // die frühere if-Bedingung für DIESEN Bildschirm greift bei jedem Rendern erneut, und die App wechselt
+    // trotz gesetztem seasonEndInfo/saisonAbschliessenBestaetigt nie zur Saisonauswertung (genau der
+    // "Knopf tut nichts"-Bug — hier für die Turnier-Variante, siehe onRelegationErgebnisUebernehmen für
+    // denselben, bisher übersehenen Fall bei der Relegation).
+    setCareerState(cs => ({ ...cs, turnierspiel: null }));
     setSaisonAbschliessenBestaetigt(true);
     try {
       const result = processSeasonTransition(divisions, season, profile.team);
