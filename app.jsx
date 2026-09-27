@@ -18711,6 +18711,27 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         platz: jugendErgebnisVorAlterung.platz, anzahlTeams: jugendErgebnisVorAlterung.anzahlTeams
       },
       letzteU19Freistellung: u19FreistellungsMeldung,
+      // Fehlte hier komplett, exakt derselbe Fehlertyp wie zuvor bei rotationsprinzipAktiv: da dieses
+      // Objekt ein grosses Literal ist (kein Spread von cs), ging die gewählte Stufe jeder der fünf
+      // Personalabteilungen bei jedem Saisonübergang verloren und fiel auf "minimal" zurück, statt bis
+      // zur manuellen Änderung bestehen zu bleiben.
+      personalabteilungen,
+      // Zahlungstermin ist an personalabteilungen gekoppelt (siehe naechsterSpieltag) — würde er hier
+      // NICHT mit übernommen, gälte er ab sofort als überfällig und die Kosten würden am allernächsten
+      // Spieltag gleich nochmals fällig, obwohl gerade erst bezahlt wurde.
+      naechstePersonalabteilungenLohnzahlung,
+      // Ebenfalls bisher hier vergessen, exakt dieselbe Fehlerfamilie: philosophiePaketSeitSaison ist
+      // die Grundlage der Philosophie-Abnutzung (siehe TrainerView/philosophieJahre) — ohne Übernahme
+      // hätte JEDES bestehende Philosophiepaket nach jedem Saisonübergang wieder bei 0 Jahren
+      // "Abnutzung" angefangen, die Mechanik also nie wirklich gegriffen. spielerSchwerpunkt sind die
+      // individuellen Trainings-Schwerpunkte pro Spieler (TrainingsmaterialView) — ohne Übernahme wären
+      // sie nach jedem Saisonübergang für alle Spieler wieder auf den Kader-Standard zurückgefallen.
+      philosophiePaketSeitSaison,
+      spielerSchwerpunkt,
+      // Absicherung für den Randfall "Dynastie-Trainer verlässt den Verein, aber vor der Neubesetzung
+      // endet schon die Saison" — sonst ginge der wartende Eingewöhnungs-Effekt für den nächsten neuen
+      // Trainer in der Zwischenzeit verloren.
+      wartetAufNachfolgerEffekt,
       // Bisher wurde hier nur die Gruppe selbst (jugendliga11ErgebnisVorAlterung.jugendliga) übernommen,
       // die Platzierung (platz/anzahlTeams) aber nirgends gespeichert — für den Jahresbericht-Überblick
       // über alle Jugendstufen (siehe generiereJahresbericht) wird das jetzt zusätzlich festgehalten.
