@@ -5130,6 +5130,24 @@ const PRESSEKONFERENZ_FRAGEN = [
     ]
   },
   {
+    id: "verein_wm_em_sieg", bedingung: k => k.wmEmSiegDieseSaison, thema: "Verein", frage: "Als Bundestrainer wurden Sie mit Deutschland Welt- bzw. Europameister. Was bedeutet dieser Titel für Sie?",
+    antworten: [
+      { text: "Der grösste Moment meiner ganzen Karriere — für mich und das ganze Land!", ziel: "fans", delta: 7, nebenziel: "marke", nebendelta: 5 },
+      { text: "Eine schöne Ehre, aber meine Priorität bleibt der Verein.", ziel: "fans", delta: 3, nebenziel: "marke", nebendelta: 2 },
+      { text: "Das war vor allem die Leistung der Nationalspieler, nicht meine.", ziel: "fans", delta: 1 },
+      { text: "Ich will darüber lieber nicht zu viele Worte verlieren.", ziel: "fans", delta: -1 },
+    ]
+  },
+  {
+    id: "verein_wm_em_final_verloren", bedingung: k => k.wmEmFinalVerlorenDieseSaison, thema: "Verein", frage: "Als Bundestrainer haben Sie mit Deutschland das WM- bzw. EM-Finale verloren. Wie schwer wiegt diese Enttäuschung?",
+    antworten: [
+      { text: "Bitter, aber der Weg ins Finale war schon eine grosse Leistung.", ziel: "fans", delta: 3, nebenziel: "marke", nebendelta: 1 },
+      { text: "Ehrlich gesagt tut eine so knappe Niederlage im Finale besonders weh.", ziel: "fans", delta: -1 },
+      { text: "Der bessere Gegner hat an diesem Tag gewonnen, das gehört dazu.", ziel: "fans", delta: 1 },
+      { text: "Darüber möchte ich jetzt nicht weiter sprechen.", ziel: "fans", delta: -2 },
+    ]
+  },
+  {
     id: "verein_aufstieg", bedingung: k => k.aufgestiegenDieseSaison, thema: "Verein", frage: "Der Aufstieg ist geschafft! Wie blicken Sie auf die kommende, höhere Liga?",
     antworten: [
       { text: "Ein grossartiger Erfolg — wir freuen uns riesig auf die neue Herausforderung!", ziel: "fans", delta: 6, nebenziel: "marke", nebendelta: 3 },
@@ -11931,6 +11949,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Erscheint gelegentlich nach einem Spieltag (ca. 45% Chance, keine Obergrenze pro Saison): 1 Frage mit 4 Antwortmöglichkeiten.",
       "Die Fragen passen zum tatsächlichen Spielgeschehen (z.B. Verletzungsfragen nur bei echten Verletzungen).",
       "Jede Frage kommt pro Saison höchstens einmal vor — bereits gestellte Fragen fallen für den Rest der Saison aus dem möglichen Pool, unabhängig davon, wie sie beantwortet wurden.",
+      "Fragen zu Meisterschaft, Torschützenkönig, Pokalsieg, Europapokalsieg, WM-/EM-Sieg (als Bundestrainer) sowie einem verlorenen Pokal-/Europapokal- oder WM-/EM-Finale werden bewusst erst ab der DARAUFFOLGENDEN Saison möglich, nicht schon direkt nach dem Ereignis selbst.",
       "Antworten wirken sich auf Fan-Unterstützung, Kaderform, Trainerzufriedenheit und Markenwert aus — auch auf mehrere Bereiche gleichzeitig."
     ]
   },
@@ -15260,7 +15279,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null } = careerState;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -15810,6 +15829,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterAufstieg: false,
           letzterMeistertitelPK: null,
           letzterTorschuetzenkoenigPK: null,
+          letzterPokalsiegPK: null,
+          letzterEuropapokalsiegPK: null,
+          letzterPokalFinaleVerlorenPK: null,
+          letzterEuropapokalFinaleVerlorenPK: null,
+          letzterWmEmSiegPK: null,
+          letzterWmEmFinalVerlorenPK: null,
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
@@ -15865,6 +15890,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         let geldZuwachs = 0;
         let letzterEuroBericht = null;
         let euroHistorienEintrag = null;
+        // Season-weiter (NICHT wöchentlich zurückgesetzter) Marker fürs Pressekonferenz-Timing, siehe
+        // dieselbe Lösung beim Pokal weiter oben — eigener Name statt die destrukturierte Konstante
+        // europapokalFinaleVerlorenDieseSaisonMarker erneut zuzuweisen (sonst Absturz).
+        let europapokalFinaleVerlorenNeu = europapokalFinaleVerlorenDieseSaisonMarker;
         // Für den "Zu-Null"-Bonus bei der Bestimmung des Spielers des Spieltages — wird in jedem der
         // folgenden Zweige (Ligaphase, Hin-/Rückspiel, Finale) mit den in diesem Spiel kassierten
         // Gegentoren belegt.
@@ -16038,6 +16067,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             const gewonnen = sieger === profile.team;
             geldZuwachs = preisgeld.finale + (gewonnen ? preisgeld.sieger : 0);
             letzterEuroBericht = { wettbewerb: europapokal.wettbewerb, phase: "finale", gewonnen, text: `Finale: ${profile.team} ${tHeim}:${tGast} ${gegner.name}${elfmeter ? " n.E." : ""} — ${gewonnen ? "GEWONNEN! 🏆" : "verloren"}`, geld: geldZuwachs, tore: letzteEuroEreignisse.torSpieler, vorlagen: letzteEuroEreignisse.vorlagenSpieler, gelb: letzteEuroEreignisse.gelbeSpieler, rot: letzteEuroEreignisse.rotSpieler };
+            if (!gewonnen) europapokalFinaleVerlorenNeu = true;
           euroHistorienEintrag = {
             wettbewerb: `Europapokal (${europapokal.wettbewerb})`, spieltag: null,
             heim: gegner.heim ? gegner.name : profile.team, gast: gegner.heim ? profile.team : gegner.name,
@@ -16152,6 +16182,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           vereinsheim: neuesVereinsheimEuro,
           europapokal: neuerEuropapokal,
           letzterEuroBericht: letzterEuroBericht ? { ...letzterEuroBericht, einwechslungen: einwechslungenEuro, motm: spielerDesSpieltagesEuro } : letzterEuroBericht,
+          europapokalFinaleVerlorenDieseSaisonMarker: europapokalFinaleVerlorenNeu,
           spielHistorie: euroHistorienEintrag ? [...(cs.spielHistorie || []), euroHistorienEintrag] : (cs.spielHistorie || []),
           letzteEinnahmen: letzteEuroHeimEinnahmenDetails ? { ...letzteEuroHeimEinnahmenDetails, preisgeld: geldZuwachs, gesamt: letzteEuroHeimEinnahmenDetails.gesamt + geldZuwachs } : letzteEuroHeimEinnahmenDetails,
           letzterSpielbericht: null,
@@ -16181,6 +16212,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterAufstieg: false,
           letzterMeistertitelPK: null,
           letzterTorschuetzenkoenigPK: null,
+          letzterPokalsiegPK: null,
+          letzterEuropapokalsiegPK: null,
+          letzterPokalFinaleVerlorenPK: null,
+          letzterEuropapokalFinaleVerlorenPK: null,
+          letzterWmEmSiegPK: null,
+          letzterWmEmFinalVerlorenPK: null,
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
@@ -16534,6 +16571,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterAufstieg: false,
           letzterMeistertitelPK: null,
           letzterTorschuetzenkoenigPK: null,
+          letzterPokalsiegPK: null,
+          letzterEuropapokalsiegPK: null,
+          letzterPokalFinaleVerlorenPK: null,
+          letzterEuropapokalFinaleVerlorenPK: null,
+          letzterWmEmSiegPK: null,
+          letzterWmEmFinalVerlorenPK: null,
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
@@ -16551,6 +16594,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             einwechslungen: einwechslungenPokal, motm: spielerDesSpieltagesPokal,
             rundenLabel
           } : null,
+          // Season-weiter (NICHT wöchentlich zurückgesetzter) Marker fürs Pressekonferenz-Timing —
+          // letzterPokalBericht selbst wird von anderen Spielarten (Liga/Euro/Test) bald wieder auf null
+          // gesetzt und würde bis zum Saisonende nicht mehr zuverlässig "Finale verloren" hergeben.
+          pokalFinaleVerlorenDieseSaisonMarker: (managerErgebnis && rundenLabel === "finale" && managerErgebnis.gewinner !== profile.team) ? true : pokalFinaleVerlorenDieseSaisonMarker,
           spielHistorie: managerErgebnis ? [...(cs.spielHistorie || []), {
             wettbewerb: "Pokal", spieltag: null,
             heim: managerErgebnis.heim, gast: managerErgebnis.gast, tHeim: managerErgebnis.tHeim, tGast: managerErgebnis.tGast,
@@ -16744,28 +16791,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       datum
     } : null;
     const alleFertig = Object.values(neueDivisions).every(d => d.matchday >= d.fixtures.length);
-    // Für die Pressekonferenz-Kreuzverbindung (siehe pkKontext weiter unten): Meisterschaft UND
-    // Torschützenkönig stehen erst am allerletzten Spieltag der Saison fest — anders als z.B. ein
-    // Pokalsieg (mitten in der Saison) gibt es DANACH keinen weiteren Spieltag mehr in DERSELBEN
-    // Saison, an dem eine Frage dazu noch den (dann schon weitergezählten) season-Wert träfe. Werden
-    // deshalb HIER, VOR pkKontext, berechnet — nicht erst im eigentlichen Trophäen-Block weiter unten,
-    // sonst würde pkKontext noch den alten Stand vor dem Titelgewinn sehen. ermittleTorschuetzenkoenig
-    // ist rein deterministisch (nur Auswertung bereits feststehender Tore-Zahlen), die doppelte
-    // Berechnung liefert also garantiert dasselbe Ergebnis wie im Trophäen-Block weiter unten.
-    let letzterMeistertitelPK = null;
-    let letzterTorschuetzenkoenigPK = null;
-    if (alleFertig) {
-      const managerDivFuerTitelPK = neueDivisions[managerDivId] || {};
-      const finaleTabellePK = sortedTable(managerDivFuerTitelPK.table || {});
-      if (finaleTabellePK[0]?.name === profile.team) {
-        letzterMeistertitelPK = { typ: managerDivId === "BL" ? "meisterschaft" : "aufstieg_meister" };
-      }
-      let koenigPK = null;
-      try { koenigPK = ermittleTorschuetzenkoenig(managerDivFuerTitelPK); } catch (err) { /* wird im Haupt-Trophäen-Block unten ebenfalls versucht und dort korrekt behandelt */ }
-      if (koenigPK && koenigPK.team === profile.team) {
-        letzterTorschuetzenkoenigPK = { typ: "torschuetzenkoenig", text: `Torschützenkönig: ${koenigPK.name} (${koenigPK.tore} Tore)` };
-      }
-    }
+    // Pressekonferenz-Kreuzverbindung für Meisterschaft/Torschützenkönig (siehe pkKontext weiter
+    // unten): bewusst OHNE Vorzieh-Berechnung hier — letzterMeistertitelPK/letzterTorschuetzenkoenigPK
+    // bleiben also schlicht die aus dem VORHERIGEN Aufruf ererbten (destrukturierten) Werte. Ein hier
+    // gerade frisch gewonnener Titel wird dadurch erst AB DER NÄCHSTEN SAISON für eine mögliche
+    // Pressefrage sichtbar, nicht schon in derselben Woche des Titelgewinns selbst — genau so gewünscht.
+    // Die eigentliche Übernahme in den persistenten State passiert weiterhin weiter unten im
+    // Trophäen-Block (mannschaftsTitel/persoenlicherTitel), unverändert.
 
     // Relegation: prüfen, ob der Manager selbst betroffen ist (BL-16. gegen L2-3., oder L2-16. gegen
     // L3-3.) — falls ja, wird daraus jetzt ein echtes, spielbares Hin-/Rückspiel (siehe
@@ -16863,13 +16895,15 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           bundestrainerAktiv: !!bundestrainerAmt,
           marketingBudgetHoch: Object.keys(marketingKampagnen || {}).length > 0,
           vermieterBautAus: !!careerState.vermieterAusbauAngekuendigt,
-          titelDieseSaison: !!letzterMeistertitelPK || !!letzterTorschuetzenkoenigPK || (vereinsHistorien[profile.team] || []).some(t => t.saison === season && (t.typ === "pokalsieg" || t.typ === "europapokal")),
-          pokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "pokalsieg"),
-          europapokalSiegerDieseSaison: (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "europapokal"),
+          titelDieseSaison: !!letzterMeistertitelPK || !!letzterTorschuetzenkoenigPK || !!letzterPokalsiegPK || !!letzterEuropapokalsiegPK || !!letzterWmEmSiegPK,
+          pokalSiegerDieseSaison: !!letzterPokalsiegPK,
+          europapokalSiegerDieseSaison: !!letzterEuropapokalsiegPK,
+          wmEmSiegDieseSaison: !!letzterWmEmSiegPK,
+          wmEmFinalVerlorenDieseSaison: !!letzterWmEmFinalVerlorenPK,
           torschuetzenkoenigDieseSaison: letzterTorschuetzenkoenigPK,
           topspielerVerlaengertDieseSaison: !!letzteTopspielerVerlaengerung,
-          pokalFinaleVerlorenDieseSaison: careerState.letzterPokalBericht?.rundenLabel === "finale" && careerState.letzterPokalBericht?.gewinner !== profile.team,
-          europapokalFinaleVerlorenDieseSaison: careerState.letzterEuroBericht?.phase === "finale" && careerState.letzterEuroBericht?.gewonnen === false,
+          pokalFinaleVerlorenDieseSaison: !!letzterPokalFinaleVerlorenPK,
+          europapokalFinaleVerlorenDieseSaison: !!letzterEuropapokalFinaleVerlorenPK,
           aufgestiegenDieseSaison: !!letzterAufstieg,
           abgestiegenDieseSaison: !!letzterAbstieg,
           vereinsWechselAngebot: !!letzterVereinswechselAngebot,
@@ -16927,6 +16961,15 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Trophäen am Saisonende: Meisterschaft/Aufstieg als Erster & Torschützenkönig
     let neueTrophaeenSaisonende = [];
     let neuerHistorieEintrag = null;
+    // Für den Rückgabewert weiter unten (siehe letzterMeistertitelPKNeu dort drin) — hier ausserhalb des
+    // if(alleFertig)-Blocks deklariert, damit sie danach noch zugänglich sind, auch wenn alleFertig
+    // false ist (dann bleiben sie einfach null).
+    let letzterMeistertitelPKNeu = null;
+    let letzterTorschuetzenkoenigPKNeu = null;
+    let letzterPokalsiegPKNeu = null;
+    let letzterEuropapokalsiegPKNeu = null;
+    let letzterPokalFinaleVerlorenPKNeu = null;
+    let letzterEuropapokalFinaleVerlorenPKNeu = null;
     if (alleFertig) {
       const managerDivFinal = neueDivisions[managerDivId] || {};
       const finaleTabelle = sortedTable(managerDivFinal.table || {});
@@ -16958,8 +17001,21 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // ermittelten Spieler. Grundlage für die "gesamte Karriere" in der Spieler-Detailansicht.
       const mannschaftsTitel = neueTrophaeenSaisonende.filter(t => t.typ !== "torschuetzenkoenig");
       const persoenlicherTitel = neueTrophaeenSaisonende.filter(t => t.typ === "torschuetzenkoenig");
-      letzterMeistertitelPK = mannschaftsTitel[0] || null;
-      letzterTorschuetzenkoenigPK = persoenlicherTitel[0] || null;
+      // Eigene, neue Namen statt die (jetzt konstanten, aus der Destrukturierung ererbten)
+      // letzterMeistertitelPK/letzterTorschuetzenkoenigPK erneut zuzuweisen — das würde einen
+      // "Assignment to constant variable"-Absturz auslösen. Diese hier (aussen deklariert, siehe oben)
+      // sind für den State-Rückgabewert weiter unten gedacht (persistiert den Titel für die Pressefrage
+      // der NÄCHSTEN Saison), pkKontext weiter oben hat bereits mit dem alten, ererbten Wert gearbeitet.
+      letzterMeistertitelPKNeu = mannschaftsTitel[0] || null;
+      letzterTorschuetzenkoenigPKNeu = persoenlicherTitel[0] || null;
+      // Pokal/Europapokal-Sieg stehen (anders als Meisterschaft) meist schon vor dem letzten Liga-
+      // Spieltag fest — vereinsHistorien enthält den Eintrag zu diesem Zeitpunkt bereits zuverlässig.
+      // "Finale verloren" nutzt stattdessen die season-weiten Marker von oben, da es dafür keinen
+      // Trophäen-Eintrag in vereinsHistorien gibt.
+      letzterPokalsiegPKNeu = (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "pokalsieg") || null;
+      letzterEuropapokalsiegPKNeu = (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "europapokal") || null;
+      letzterPokalFinaleVerlorenPKNeu = pokalFinaleVerlorenDieseSaisonMarker || null;
+      letzterEuropapokalFinaleVerlorenPKNeu = europapokalFinaleVerlorenDieseSaisonMarker || null;
       if (mannschaftsTitel.length || persoenlicherTitel.length) {
         let squadMitTiteln = neueDivisions[managerDivId].squads[profile.team];
         if (mannschaftsTitel.length) squadMitTiteln = stempleTitelAufSquad(squadMitTiteln, mannschaftsTitel);
@@ -17729,8 +17785,16 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       jugendliga: neueJugendliga,
       jugendKader: neuerJugendKader,
       letztesU19Highlight: neuesU19Highlight,
-      letzterMeistertitelPK,
-      letzterTorschuetzenkoenigPK,
+      letzterMeistertitelPK: letzterMeistertitelPKNeu,
+      letzterTorschuetzenkoenigPK: letzterTorschuetzenkoenigPKNeu,
+      letzterPokalsiegPK: letzterPokalsiegPKNeu,
+      letzterEuropapokalsiegPK: letzterEuropapokalsiegPKNeu,
+      letzterPokalFinaleVerlorenPK: letzterPokalFinaleVerlorenPKNeu,
+      letzterEuropapokalFinaleVerlorenPK: letzterEuropapokalFinaleVerlorenPKNeu,
+      // Season-weite Marker jetzt zurücksetzen — der nächste Saisondurchlauf soll wieder bei false
+      // starten, nicht die alten Werte weitertragen.
+      pokalFinaleVerlorenDieseSaisonMarker: false,
+      europapokalFinaleVerlorenDieseSaisonMarker: false,
       jugendliga17: neueJugendliga17,
       jugendKader17: neuerJugendKader17,
       letztesU17Highlight: neuesU17Highlight,
@@ -17780,6 +17844,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzterAufstieg: false,
           letzterMeistertitelPK: null,
           letzterTorschuetzenkoenigPK: null,
+          letzterPokalsiegPK: null,
+          letzterEuropapokalsiegPK: null,
+          letzterPokalFinaleVerlorenPK: null,
+          letzterEuropapokalFinaleVerlorenPK: null,
+          letzterWmEmSiegPK: null,
+          letzterWmEmFinalVerlorenPK: null,
           letzterAbstieg: false,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
@@ -18192,6 +18262,17 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const trophaeenNachTurnier = letztesTurnierErgebnis?.sieger
       ? [...trophaeen, { saison: seasonEndInfo.season, verein: profile.team, typ: letztesTurnierErgebnis.wettbewerb === "WM" ? "wm_sieg" : "em_sieg", text: `${letztesTurnierErgebnis.wettbewerb}-Titel als Bundestrainer` }]
       : trophaeen;
+    // Eigener Name statt die destrukturierte Konstante letzterWmEmSiegPK erneut zuzuweisen (sonst
+    // Absturz) — Pressekonferenz-Kreuzverbindung, sichtbar erst ab der nächsten Saison (siehe
+    // dieselbe Lösung bei Meisterschaft/Torschützenkönig in naechsterSpieltag).
+    const letzterWmEmSiegPKNeu = letztesTurnierErgebnis?.sieger
+      ? { wettbewerb: letztesTurnierErgebnis.wettbewerb }
+      : null;
+    // Gleiches Prinzip für ein verlorenes Finale — "Finale" ist die letzte Runde in TURNIER_RUNDEN,
+    // erreichteRunde zeigt dabei die Runde, in der man ausgeschieden ist (nicht die letzte ERREICHTE).
+    const letzterWmEmFinalVerlorenPKNeu = (letztesTurnierErgebnis && !letztesTurnierErgebnis.sieger && letztesTurnierErgebnis.erreichteRunde === "Finale")
+      ? { wettbewerb: letztesTurnierErgebnis.wettbewerb }
+      : null;
 
     // Stadion-Namensrechte laufen ähnlich wie der Trikotsponsor über mehrere Saisons und zahlen jährlich
     const altesStadion = division.stadien[profile.team];
@@ -18716,6 +18797,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // Personalabteilungen bei jedem Saisonübergang verloren und fiel auf "minimal" zurück, statt bis
       // zur manuellen Änderung bestehen zu bleiben.
       personalabteilungen,
+      letzterWmEmSiegPK: letzterWmEmSiegPKNeu,
+      letzterWmEmFinalVerlorenPK: letzterWmEmFinalVerlorenPKNeu,
       // Zahlungstermin ist an personalabteilungen gekoppelt (siehe naechsterSpieltag) — würde er hier
       // NICHT mit übernommen, gälte er ab sofort als überfällig und die Kosten würden am allernächsten
       // Spieltag gleich nochmals fällig, obwohl gerade erst bezahlt wurde.
