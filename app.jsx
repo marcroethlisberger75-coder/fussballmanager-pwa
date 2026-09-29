@@ -1963,6 +1963,40 @@ function berechneSquadLohnsumme(squad, divisionId) {
   return squad.reduce((s, p) => s + (p.gehalt ?? berechneSpielerlohn(p, divisionId)), 0);
 }
 
+// Findet eine im Kader noch nicht vergebene Rückennummer im gewünschten Bereich — bisher wurden
+// Nummern überall rein zufällig und unabhängig voneinander vergeben, wodurch Duplikate im selben
+// Kader an der Tagesordnung waren. Fällt der bevorzugte Bereich komplett aus (voller Kader mit lauter
+// Nummern desselben engen Bereichs), wird der Suchbereich schrittweise erweitert, bis eine freie
+// Nummer gefunden ist — vergibt im Zweifel lieber eine unübliche Nummer als eine doppelte.
+function vergibtEindeutigeNummer(squad, minNr, maxNr) {
+  const belegt = new Set((squad || []).map(p => p.nr));
+  let von = minNr, bis = maxNr;
+  for (let versuch = 0; versuch < 20; versuch++) {
+    const kandidaten = [];
+    for (let n = von; n <= bis; n++) if (!belegt.has(n)) kandidaten.push(n);
+    if (kandidaten.length) return kandidaten[Math.floor(Math.random() * kandidaten.length)];
+    von = Math.max(1, von - 10);
+    bis = Math.min(99, bis + 10);
+  }
+  return Math.max(1, Math.min(99, maxNr + 1)); // sollte praktisch nie erreicht werden
+}
+
+// Repariert einen kompletten Kader nachträglich: doppelte Nummern werden erkannt und die jeweils
+// späteren Vorkommen neu (eindeutig) vergeben, alle anderen Nummern bleiben unverändert erhalten.
+function bereinigeDoppelteNummern(squad) {
+  const gesehen = new Set();
+  let veraendert = false;
+  const neu = squad.map(p => {
+    if (!gesehen.has(p.nr)) { gesehen.add(p.nr); return p; }
+    veraendert = true;
+    const belegteAlsSquad = Array.from(gesehen).map(nr => ({ nr }));
+    const neueNr = vergibtEindeutigeNummer(belegteAlsSquad, 1, 99);
+    gesehen.add(neueNr);
+    return { ...p, nr: neueNr };
+  });
+  return veraendert ? neu : squad;
+}
+
 function generateErsatzSpieler(teamName, baseRating, pos, season, divisionId) {
   const vorname = VORNAMEN[Math.floor(Math.random() * VORNAMEN.length)];
   const nachname = NACHNAMEN[Math.floor(Math.random() * NACHNAMEN.length)];
@@ -18267,7 +18301,20 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const wmEmTrophaeenEintrag = letztesTurnierErgebnis?.sieger
       ? { saison: seasonEndInfo.season, verein: profile.team, typ: letztesTurnierErgebnis.wettbewerb === "WM" ? "wm_sieg" : "em_sieg", text: `${letztesTurnierErgebnis.wettbewerb}-Titel als Bundestrainer` }
       : null;
-    const trophaeenNachTurnier = wmEmTrophaeenEintrag ? [...trophaeen, wmEmTrophaeenEintrag] : trophaeen;
+    // Selbstheilungs-Absicherung: bundestrainerAmt.letztesTurnier (der EINGEHENDE Stand von VOR diesem
+    // Saisonübergang, kann auch von vor zwei Turnier-Zyklen stammen) wird gegen trophaeen abgeglichen —
+    // fehlt dort trotz Sieg der passende Eintrag (z.B. weil ein früherer Saisonübergang mit einer
+    // älteren App-Version ohne diese Funktion gelaufen ist), wird er hier automatisch nachgetragen,
+    // unabhängig davon, wodurch die Lücke ursprünglich entstanden ist.
+    const fehlenderHistorischerWmEmSieg = (bundestrainerAmt?.letztesTurnier?.sieger && bundestrainerAmt.letztesTurnier.jahr != null
+      && !trophaeen.some(t => (t.typ === "wm_sieg" || t.typ === "em_sieg") && t.saison === bundestrainerAmt.letztesTurnier.jahr))
+      ? { saison: bundestrainerAmt.letztesTurnier.jahr, verein: profile.team, typ: bundestrainerAmt.letztesTurnier.wettbewerb === "WM" ? "wm_sieg" : "em_sieg", text: `${bundestrainerAmt.letztesTurnier.wettbewerb}-Titel als Bundestrainer` }
+      : null;
+    const trophaeenNachTurnier = [
+      ...trophaeen,
+      ...(fehlenderHistorischerWmEmSieg ? [fehlenderHistorischerWmEmSieg] : []),
+      ...(wmEmTrophaeenEintrag ? [wmEmTrophaeenEintrag] : [])
+    ];
     // Eigener Name statt die destrukturierte Konstante letzterWmEmSiegPK erneut zuzuweisen (sonst
     // Absturz) — Pressekonferenz-Kreuzverbindung, sichtbar erst ab der nächsten Saison (siehe
     // dieselbe Lösung bei Meisterschaft/Torschützenkönig in naechsterSpieltag).
@@ -18475,6 +18522,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         console.error("Spielergehalts-Anpassung beim Aufstieg fehlgeschlagen, Verträge bleiben unverändert:", err);
       }
     }
+    // Zusätzliches Sicherheitsnetz bei jedem Saisonübergang: sollte trotz der Absicherungen bei
+    // Transfer/Leihe/Jugendbeförderung doch irgendwo eine doppelte Rückennummer entstanden sein,
+    // wird sie hier spätestens einmal pro Saison automatisch bereinigt.
+    squadNachAblauf = bereinigeDoppelteNummern(squadNachAblauf);
 
     // Jahresbericht dauerhaft festhalten, damit er in der neuen Saison im eigenen Tab nachlesbar bleibt
     const aufgestiegenFuerBericht = divisionTier(neueManagerDivIdFuerVorschlaege) < divisionTier(managerDivId);
@@ -19864,7 +19915,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       if ((cs.jugendbefoerderungenDieseSaison || 0) >= maxErlaubt) return cs; // Kontingent diese Saison bereits ausgeschöpft
       const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
       const { u19, ...basisSpieler } = spieler;
-      div.squads[profile.team] = [...div.squads[profile.team], { ...basisSpieler, vertragBisSaison: cs.season + 2, gehalt: berechneSpielerlohn(basisSpieler, managerDivId), beimVereinSeitSaison: cs.season }];
+      // Dieselbe Rückennummer-Absicherung wie beim Transfer — ein Junior behielt bisher seine
+      // U19-interne Nummer, was mit der ersten Mannschaft kollidieren konnte.
+      const juniorAlteNummerNochFrei = !div.squads[profile.team].some(p => p.nr === basisSpieler.nr);
+      const juniorNeueRueckennummer = juniorAlteNummerNochFrei ? basisSpieler.nr : vergibtEindeutigeNummer(div.squads[profile.team], 1, 40);
+      div.squads[profile.team] = [...div.squads[profile.team], { ...basisSpieler, nr: juniorNeueRueckennummer, vertragBisSaison: cs.season + 2, gehalt: berechneSpielerlohn(basisSpieler, managerDivId), beimVereinSeitSaison: cs.season }];
       return {
         ...cs,
         divisions: { ...cs.divisions, [managerDivId]: div },
@@ -19888,7 +19943,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       if ((cs.jugendbefoerderungenDieseSaison || 0) >= maxErlaubt) return cs;
       const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
       const { u17, ...basisSpieler } = spieler;
-      div.squads[profile.team] = [...div.squads[profile.team], { ...basisSpieler, vertragBisSaison: cs.season + 2, gehalt: berechneSpielerlohn(basisSpieler, managerDivId), beimVereinSeitSaison: cs.season }];
+      const junior17AlteNummerNochFrei = !div.squads[profile.team].some(p => p.nr === basisSpieler.nr);
+      const junior17NeueRueckennummer = junior17AlteNummerNochFrei ? basisSpieler.nr : vergibtEindeutigeNummer(div.squads[profile.team], 1, 40);
+      div.squads[profile.team] = [...div.squads[profile.team], { ...basisSpieler, nr: junior17NeueRueckennummer, vertragBisSaison: cs.season + 2, gehalt: berechneSpielerlohn(basisSpieler, managerDivId), beimVereinSeitSaison: cs.season }];
       return {
         ...cs,
         divisions: { ...cs.divisions, [managerDivId]: div },
@@ -20254,7 +20311,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         const quellDiv = { ...neueDivisions[quellDivId], squads: { ...neueDivisions[quellDivId].squads } };
         const verkaeuferSquad = quellDiv.squads[teamName].filter(p => p.id !== spieler.id);
         const ersatz = generateErsatzSpieler(teamName, quellDiv.baseRating, posObj, cs.season, quellDivId);
-        quellDiv.squads[teamName] = [...verkaeuferSquad, ersatz];
+        // Rückennummer des rein zufällig generierten Ersatzspielers gegen den (verkleinerten)
+        // Verkäufer-Kader absichern, statt dessen zufällige Nummer unbesehen zu übernehmen.
+        const ersatzMitEindeutigerNummer = verkaeuferSquad.some(p => p.nr === ersatz.nr)
+          ? { ...ersatz, nr: vergibtEindeutigeNummer(verkaeuferSquad, 1, 40) }
+          : ersatz;
+        quellDiv.squads[teamName] = [...verkaeuferSquad, ersatzMitEindeutigerNummer];
         neueDivisions[quellDivId] = quellDiv;
 
         const zielDiv = quellDivId === managerDivId
@@ -20264,7 +20326,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         // während der Verhandlung gewählt (Fallback 3 Jahre, falls z.B. ein älterer Aufruf ohne
         // Laufzeit-Angabe erfolgt). Karrierewerte des ALTEN Vereins werden bewusst nicht mitgenommen —
         // "seit er im Verein ist" beginnt beim neuen Klub wieder bei null.
-        const spielerMitNeuemVertrag = { ...spieler, vertragBisSaison: cs.season + (laufzeit || 3), gehalt: berechneSpielerlohn(spieler, managerDivId), beimVereinSeitSaison: cs.season, karriereTore: 0, karriereVorlagen: 0, karriereGelb: 0, karriereRot: 0, karriereSpiele: 0, motmAnzahl: 0, elfDesTagesAnzahl: 0, junior: false };
+        // Rückennummer: Neuzugang behielt bisher schlicht seine alte Nummer vom vorigen Verein — bei
+        // einer Überschneidung mit dem neuen Kader entstand so eine Dopplung. Bleibt jetzt nur
+        // erhalten, wenn sie im neuen Kader noch frei ist, sonst wird eine neue eindeutige vergeben.
+        const eigeneAlteNummerNochFrei = !zielDiv.squads[profile.team].some(p => p.nr === spieler.nr);
+        const neueRueckennummer = eigeneAlteNummerNochFrei ? spieler.nr : vergibtEindeutigeNummer(zielDiv.squads[profile.team], 1, 40);
+        const spielerMitNeuemVertrag = { ...spieler, nr: neueRueckennummer, vertragBisSaison: cs.season + (laufzeit || 3), gehalt: berechneSpielerlohn(spieler, managerDivId), beimVereinSeitSaison: cs.season, karriereTore: 0, karriereVorlagen: 0, karriereGelb: 0, karriereRot: 0, karriereSpiele: 0, motmAnzahl: 0, elfDesTagesAnzahl: 0, junior: false };
         // Star-Transfer-Erkennung: gilt als echter Star, wenn ENTWEDER der Neuzugang deutlich (mind.
         // 15 Punkte) über dem bisherigen Kaderschnitt liegt (gut bei kleineren Vereinen, wo das eine
         // echte Verwandlung bedeutet) ODER er selbst eine sehr hohe absolute Stärke erreicht (≥92) —
@@ -20396,8 +20463,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         neueDivisions[quellDivId] = quellDiv;
 
         const zielDiv = quellDivId === managerDivId ? quellDiv : { ...neueDivisions[managerDivId], squads: { ...neueDivisions[managerDivId].squads } };
+        // Dieselbe Rückennummer-Absicherung wie beim Kauf — ein Leihspieler behielt bisher ebenso
+        // schlicht seine alte Nummer, was zu Dopplungen im neuen Kader führen konnte.
+        const leiheAlteNummerNochFrei = !zielDiv.squads[profile.team].some(p => p.nr === spieler.nr);
+        const leiheNeueRueckennummer = leiheAlteNummerNochFrei ? spieler.nr : vergibtEindeutigeNummer(zielDiv.squads[profile.team], 1, 40);
         const spielerAlsLeihgabe = {
           ...spieler,
+          nr: leiheNeueRueckennummer,
           leihspieler: true,
           leihVerein: teamName,
           leihVereinDivId: quellDivId,
