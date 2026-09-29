@@ -18259,13 +18259,19 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         turnierVerletzte = [...turnierVerletzte, ...capsErgebnis.neueVerletzten];
       });
     }
-    const trophaeenNachTurnier = letztesTurnierErgebnis?.sieger
-      ? [...trophaeen, { saison: seasonEndInfo.season, verein: profile.team, typ: letztesTurnierErgebnis.wettbewerb === "WM" ? "wm_sieg" : "em_sieg", text: `${letztesTurnierErgebnis.wettbewerb}-Titel als Bundestrainer` }]
-      : trophaeen;
+    // EINE einzige Quelle für beides — früher wurden trophaeenNachTurnier und letzterWmEmSiegPKNeu
+    // unabhängig voneinander aus derselben Bedingung berechnet; das ist genau einmal auseinandergelaufen
+    // (WM/EM-Sieg korrekt als PK-Flag erkannt, aber NICHT in trophaeen gelandet — vermutlich durch eine
+    // Zwischenversion während einer früheren Änderung). Jetzt gibt es nur noch EINE Berechnung
+    // (wmEmTrophaeenEintrag), aus der sich alles andere ableitet — kann dadurch nicht mehr auseinanderlaufen.
+    const wmEmTrophaeenEintrag = letztesTurnierErgebnis?.sieger
+      ? { saison: seasonEndInfo.season, verein: profile.team, typ: letztesTurnierErgebnis.wettbewerb === "WM" ? "wm_sieg" : "em_sieg", text: `${letztesTurnierErgebnis.wettbewerb}-Titel als Bundestrainer` }
+      : null;
+    const trophaeenNachTurnier = wmEmTrophaeenEintrag ? [...trophaeen, wmEmTrophaeenEintrag] : trophaeen;
     // Eigener Name statt die destrukturierte Konstante letzterWmEmSiegPK erneut zuzuweisen (sonst
     // Absturz) — Pressekonferenz-Kreuzverbindung, sichtbar erst ab der nächsten Saison (siehe
     // dieselbe Lösung bei Meisterschaft/Torschützenkönig in naechsterSpieltag).
-    const letzterWmEmSiegPKNeu = letztesTurnierErgebnis?.sieger
+    const letzterWmEmSiegPKNeu = wmEmTrophaeenEintrag
       ? { wettbewerb: letztesTurnierErgebnis.wettbewerb }
       : null;
     // Gleiches Prinzip für ein verlorenes Finale — "Finale" ist die letzte Runde in TURNIER_RUNDEN,
