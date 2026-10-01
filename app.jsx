@@ -693,10 +693,17 @@ function generateSquad(teamName, baseRating, season, divisionId, salt = 0) {
     for (let i = 0; i < pos.n; i++) {
       const vorname = pick(rng, VORNAMEN);
       const nachname = pick(rng, NACHNAMEN);
-      const variance = randInt(rng, -9, 9);
+      // Glockenkurve statt Gleichverteilung: Summe dreier kleinerer Würfe (-3 bis 3 statt direkt -9 bis
+      // 9) konzentriert sich viel stärker um die Mitte, Extremwerte werden dadurch deutlich seltener —
+      // realistischer, da die meisten Spieler nahe am Liganiveau liegen sollen, nicht gleichverteilt bis
+      // zum Rand. Zusätzlich eine echte Ausnahme-Chance (Ausnahmetalent): nur ca. 1.5% der Spieler
+      // bekommen einen spürbaren Zusatzschub — 99 soll so wirklich die absolute Ausnahme bleiben, nicht
+      // der Normalfall in jedem Spitzenkader.
+      const variance = randInt(rng, -3, 3) + randInt(rng, -3, 3) + randInt(rng, -3, 3);
+      const ausnahmetalent = rng() < 0.015 ? randInt(rng, 4, 9) : 0;
       const alter = randInt(rng, 18, 35);
       const altersBonus = alter < 22 ? -3 : alter > 31 ? -2 : 2;
-      const rating = Math.max(28, Math.min(99, baseRating + variance + altersBonus));
+      const rating = Math.max(28, Math.min(99, baseRating + variance + altersBonus + ausnahmetalent));
       const beimVereinSeitSaison = zufallsVereinszugehoerigkeit(rng, season, alter);
       const jahreBeiVerein = season - beimVereinSeitSaison;
       const vergangeneKarriere = schaetzeVergangeneKarriere(`${teamName}-${rueckennummer}`, pos.code, rating, jahreBeiVerein);
@@ -8009,8 +8016,16 @@ function fallbackSeasonTransition(divisions, season, managerTeam) {
       const rngJugend = rngFor(`${name}|jugend|${naechsteSaison}`);
       const gealtertesSquad = altesSquad
         ? altesSquad
-            .map(p => ({
+            .map(p => {
+              // Dieselbe Alterungs-Abnutzung wie im regulären Saisonübergang (siehe dort) — auch im
+              // vereinfachten Fallback sollen KI-Vereine nicht nur durch Ersatz, sondern auch durch
+              // nachlassende ältere Spieler realistisch gestaffelt bleiben.
+              const istManagerVereinFallback = name === managerTeam;
+              const abnutzungsChanceFallback = istManagerVereinFallback ? 0 : p.alter >= 33 ? 0.22 : p.alter >= 30 ? 0.12 : 0;
+              const abnutzungFallback = (abnutzungsChanceFallback > 0 && rngJugend() < abnutzungsChanceFallback) ? 1 : 0;
+              return {
               ...p,
+              rating: Math.max(28, p.rating - abnutzungFallback),
               alter: p.alter + 1,
               // Neue Saison, neuer Vergleichspunkt für die "jährliche Entwicklung" im
               // Spielerdatenblatt — auch wenn dieser vereinfachte Übergang das Rating selbst nicht
@@ -8032,7 +8047,8 @@ function fallbackSeasonTransition(divisions, season, managerTeam) {
               gesamtkarriereRot: (p.gesamtkarriereRot || 0) + (p.rot || 0),
               gesamtkarriereSpiele: (p.gesamtkarriereSpiele || 0) + (p.spiele || 0),
               tore: 0, ligaTore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0, form: 60, verletzung: null, kartenSperre: false, junior: false, jugendfoerderung: false
-            }))
+              };
+            })
             .filter(p => {
               if (p.alter >= 38) return false;
               if (p.alter >= 35) return Math.random() > (p.alter - 34) * 0.25;
@@ -8291,8 +8307,11 @@ function processSeasonTransitionInner(divisions_, season, managerTeam, relegatio
         // eigene Kader den Zufallsausschlag ab, wodurch eine während der Saison hart ertrainierte
         // Verbesserung (z.B. 50 → 53) beim Saisonübergang durch simples Pech wieder verloren gehen konnte.
         const istManagerVerein = name === managerTeam;
+        // Verstärkt von *6 auf *10: der bisherige Ausschlag (max. ±3) reichte nicht aus, um Vereine über
+        // viele Saisons spürbar auseinanderzuziehen — zusammen mit der Alterungs-Abnutzung oben und der
+        // positionsabhängigen Jugendqualität unten sorgt das für eine realistischere Streuung.
         const vereinsBonus = (!istManagerVerein && platzInfo)
-          ? Math.round(((1 - (platzInfo.platz - 1) / Math.max(1, platzInfo.anzahlTeams - 1)) - 0.5) * 6)
+          ? Math.round(((1 - (platzInfo.platz - 1) / Math.max(1, platzInfo.anzahlTeams - 1)) - 0.5) * 10)
           : 0;
         const gealtertesSquad = altesSquad
           .map(p => {
@@ -8300,7 +8319,14 @@ function processSeasonTransitionInner(divisions_, season, managerTeam, relegatio
             // gedämpft, damit ältere Spieler nicht künstlich über Jahre hinweg hochgepuscht werden
             const altersDaempfung = p.alter >= 32 ? 0.3 : p.alter >= 29 ? 0.7 : 1;
             const zufallsausschlag = istManagerVerein ? 0 : randInt(rngDev, -3, 3);
-            const neuesRating = Math.max(28, Math.min(99, p.rating + zufallsausschlag + Math.round(vereinsBonus * altersDaempfung)));
+            // Alterungs-Abnutzung bei KI-Vereinen: bisher gab es nur Ersatz (schwächste/älteste Spieler
+            // verlassen den Kader), aber kein Gegenstück dazu, dass auch verbleibende ältere Spieler
+            // mit der Zeit nachlassen. Ohne das sammeln sich über viele Saisons nur die historisch besten
+            // Zufallswürfe an (nie ersetzt, da nie die Schwächsten), wodurch sich alle Vereine über
+            // Jahrzehnte demselben hohen Niveau annähern statt realistisch gestaffelt zu bleiben.
+            const abnutzungsChance = istManagerVerein ? 0 : p.alter >= 33 ? 0.22 : p.alter >= 30 ? 0.12 : 0;
+            const abnutzung = (abnutzungsChance > 0 && rngDev() < abnutzungsChance) ? 1 : 0;
+            const neuesRating = Math.max(28, Math.min(99, p.rating + zufallsausschlag + Math.round(vereinsBonus * altersDaempfung) - abnutzung));
             const neuesAttribute = synchronisiereAttribute(p, neuesRating);
             return {
               ...p,
@@ -8332,9 +8358,14 @@ function processSeasonTransitionInner(divisions_, season, managerTeam, relegatio
             if (p.alter >= 35) return Math.random() > (p.alter - 34) * 0.25;
             return true;
           });
+        // Neue Talente orientieren sich jetzt auch an der Tabellenposition statt an einem für die ganze
+        // Liga einheitlichen Basiswert (vereinsBonus von oben wiederverwendet) — ein Spitzenverein zieht
+        // tendenziell bessere Talente an als ein Tabellenletzter, genau wie im echten Leben. Gedämpft
+        // (halber Ausschlag), damit Jugendarbeit nicht komplett von einer einzigen Saison abhängt.
+        const baseRatingFuerJugend = def.baseRating + Math.round(vereinsBonus * 0.5);
         squads[name] = name === managerTeam
           ? gealtertesSquad // eigenes Team: kein automatischer Nachwuchs mehr — nur noch über die eigene Jugendarbeit/Scouting
-          : verjuengeSquad(gealtertesSquad, def.baseRating, name, naechsteSaison, rngJugend, def.id);
+          : verjuengeSquad(gealtertesSquad, baseRatingFuerJugend, name, naechsteSaison, rngJugend, def.id);
       } else {
         squads[name] = generateSquad(name, def.baseRating, naechsteSaison, def.id);
       }
