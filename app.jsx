@@ -2,6 +2,57 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, Component } f
 import { Trophy, Users, CalendarDays, ArrowUp, ArrowDown, Shield, ChevronRight, Play, RotateCcw, Info, Repeat, Lock, Tent, ThumbsDown, Landmark, Bus, Sprout, ClipboardList, TrendingUp, UserCog, Medal, Award, XCircle, Megaphone, Shirt, UserPlus, Wallet, ShoppingBag, Building2, Dumbbell, Heart, Flag, Coffee, Package, BookOpen, Mic, Newspaper, Radio, FileText } from "lucide-react";
 
 /* =========================================================================
+   THEME — zentrale Quelle für Farben, Schrift und Grundstil (modernes dunkles Design).
+   Alles Weitere (Hintergrund, Schrift, Ziffern, Scrollbars) hängt an diesen Werten; die
+   Tailwind-Palette (emerald/stone) wird passend dazu in index.html definiert.
+   Ein späterer Umschalter (hell/dunkel) muss nur dieses Objekt austauschen.
+   ========================================================================= */
+const THEME = {
+  bg: "#0a0f1a",
+  bgGlow: "#16233d",
+  surface: "#121a2b",
+  surfaceRaised: "#182238",
+  border: "#263247",
+  text: "#e6edf6",
+  textMuted: "#8a99b0",
+  accent: "#43d9a0",
+  gold: "#fbbf24",
+  danger: "#f87171",
+  fontSans: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif",
+  radius: "12px",
+};
+
+(function installiereTheme() {
+  if (typeof document === "undefined") return;
+  const css = `
+    :root {
+      --fm-bg: radial-gradient(1100px 620px at 18% -8%, ${THEME.bgGlow} 0%, transparent 62%), ${THEME.bg};
+      --fm-surface: ${THEME.surface};
+      --fm-surface-raised: ${THEME.surfaceRaised};
+      --fm-border: ${THEME.border};
+      --fm-text: ${THEME.text};
+      --fm-text-muted: ${THEME.textMuted};
+      --fm-accent: ${THEME.accent};
+      --fm-gold: ${THEME.gold};
+      --fm-danger: ${THEME.danger};
+      --fm-radius: ${THEME.radius};
+    }
+    html, body { background: ${THEME.bg}; color: ${THEME.text}; font-family: ${THEME.fontSans};
+      -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent; }
+    /* Die bisherige Monospace-Schrift wird überall durch die moderne Systemschrift ersetzt; tabellarische
+       Ziffern halten Zahlenspalten sauber untereinander. */
+    .font-mono { font-family: ${THEME.fontSans} !important; font-variant-numeric: tabular-nums; }
+    ::selection { background: ${THEME.accent}33; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: ${THEME.border}; border-radius: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+  `;
+  let el = document.getElementById("fm-theme");
+  if (!el) { el = document.createElement("style"); el.id = "fm-theme"; document.head.appendChild(el); }
+  el.textContent = css;
+})();
+
+/* =========================================================================
    STAMMDATEN — Saison 2026/27, reale Vereine
    ========================================================================= */
 
@@ -8444,8 +8495,8 @@ function SetupScreen({ onStart }) {
   const kannStarten = vorname.trim().length > 0 && nachname.trim().length > 0;
 
   return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="w-full max-w-xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+      <div className="w-full max-w-xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-6 py-5 text-center">
           <div className="flex items-center justify-center gap-2 text-amber-400 mb-1">
             <Trophy size={22} />
@@ -8463,13 +8514,13 @@ function SetupScreen({ onStart }) {
                 value={vorname}
                 onChange={e => setVorname(e.target.value)}
                 placeholder="Vorname"
-                className="border border-emerald-700/50 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-400 placeholder:text-emerald-700" style={{backgroundColor: "#0b1f14", colorScheme: "dark"}}
+                className="border border-emerald-700/50 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-400 placeholder:text-emerald-700" style={{backgroundColor: "var(--fm-surface)", colorScheme: "dark"}}
               />
               <input
                 value={nachname}
                 onChange={e => setNachname(e.target.value)}
                 placeholder="Nachname"
-                className="border border-emerald-700/50 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-400 placeholder:text-emerald-700" style={{backgroundColor: "#0b1f14", colorScheme: "dark"}}
+                className="border border-emerald-700/50 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-400 placeholder:text-emerald-700" style={{backgroundColor: "var(--fm-surface)", colorScheme: "dark"}}
               />
             </div>
           </div>
@@ -8505,7 +8556,7 @@ function SetupScreen({ onStart }) {
             <select
               value={team}
               onChange={e => setTeam(e.target.value)}
-              className="w-full border border-emerald-700/50 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-400" style={{backgroundColor: "#0b1f14", colorScheme: "dark"}}
+              className="w-full border border-emerald-700/50 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-400" style={{backgroundColor: "var(--fm-surface)", colorScheme: "dark"}}
             >
               {region.teams.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
@@ -8708,7 +8759,7 @@ function SpielerAttributBlock({ spieler }) {
           return (
             <div key={attr} className="flex items-center gap-2">
               <div className="w-24 text-[11px] text-emerald-300 shrink-0">{label[attr]}</div>
-              <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: "#0b1f14" }}>
+              <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: "var(--fm-surface)" }}>
                 <div className="h-full rounded-full" style={{ width: `${attribute[attr]}%`, backgroundColor: attributFarbe(attribute[attr]) }} />
               </div>
               <div className="w-7 text-right text-[11px] font-semibold text-emerald-200 shrink-0">{attribute[attr]}</div>
@@ -8730,8 +8781,8 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
   // stempleTitelAufSquad), übersteht daher auch Vereinswechsel und ist unabhängig vom aktuellen Verein.
   const alleTitel = p.titelHistorie || [];
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(5,14,8,0.85)" }} onClick={onClose}>
-      <div className="w-full max-w-md border border-amber-400/50 rounded-lg p-5 space-y-4 max-h-[85vh] overflow-y-auto" style={{ backgroundColor: "#0e2818" }} onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(6,10,18,0.82)" }} onClick={onClose}>
+      <div className="w-full max-w-md border border-amber-400/50 rounded-lg p-5 space-y-4 max-h-[85vh] overflow-y-auto" style={{ backgroundColor: "var(--fm-surface-raised)" }} onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <img src={portrait} alt="" className="w-16 h-16 rounded-full border-2 border-amber-400/50 object-cover shrink-0" />
@@ -8758,19 +8809,19 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-600 text-[10px] uppercase tracking-wider">Vertrag</div>
             <div className="text-emerald-200 font-semibold">{p.vertragBisSaison != null ? `bis Saison ${p.vertragBisSaison}/${(p.vertragBisSaison + 1) % 100}` : "?"}</div>
           </div>
-          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-600 text-[10px] uppercase tracking-wider">Gehalt</div>
             <div className="text-emerald-200 font-semibold">{(p.gehalt ?? berechneSpielerlohn(p, managerDivId)).toLocaleString("de-CH")} €/Jahr</div>
           </div>
-          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-600 text-[10px] uppercase tracking-wider">Marktwert</div>
             <div className="text-emerald-200 font-semibold">{marktwert.toLocaleString("de-CH")} €</div>
           </div>
-          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-600 text-[10px] uppercase tracking-wider">Im Verein seit</div>
             <div className="text-emerald-200 font-semibold">{p.beimVereinSeitSaison != null ? `Saison ${p.beimVereinSeitSaison}/${(p.beimVereinSeitSaison + 1) % 100}` : "?"} ({jahreImVerein <= 0 ? "diese Saison" : `${jahreImVerein}J`})</div>
           </div>
@@ -8955,22 +9006,22 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
   } : null;
   return (
     <div className="overflow-x-auto">
-      <div className="flex items-center justify-between border border-emerald-800 rounded px-3 py-2 mb-3 text-xs" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="flex items-center justify-between border border-emerald-800 rounded px-3 py-2 mb-3 text-xs" style={{ backgroundColor: "var(--fm-surface)" }}>
         <span className="text-emerald-500 uppercase tracking-wider text-[10px]">Gesamte Lohnsumme (jährlich)</span>
         <span className="text-amber-400 font-semibold">{lohnsumme.toLocaleString("de-CH")} €</span>
       </div>
 
       {kaderDurchschnitte && (
         <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
-          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-500 uppercase tracking-wider text-[10px] mb-0.5">Ø Alter</div>
             <div className="text-amber-400 font-semibold">{kaderDurchschnitte.alter.toFixed(1)}</div>
           </div>
-          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-500 uppercase tracking-wider text-[10px] mb-0.5">Ø Form</div>
             <div className="text-amber-400 font-semibold">{Math.round(kaderDurchschnitte.form)}</div>
           </div>
-          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded px-3 py-2 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-500 uppercase tracking-wider text-[10px] mb-0.5">Ø Stärke</div>
             <div className="text-amber-400 font-semibold">{Math.round(kaderDurchschnitte.staerke)}</div>
           </div>
@@ -8984,7 +9035,7 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
         </div>
       )}
 
-      <div className="border border-emerald-800 rounded p-3 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-3 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] uppercase tracking-wider text-emerald-500">Teamgeist</span>
           <span className={`text-sm font-bold ${teamgeistInfo.farbe}`}>{teamgeist.gesamt}/100 — {teamgeistInfo.label}</span>
@@ -9350,7 +9401,7 @@ function SpielplanView({ division, managerTeam, testspiele, season, pokal, europ
       {unteransicht === "zusammenfassung" ? (
         <div className="space-y-2">
           {[...spielHistorie].reverse().map((s, i) => (
-            <div key={i} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+            <div key={i} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="text-emerald-500">{s.wettbewerb}{s.spieltag != null ? ` · Spieltag ${s.spieltag}` : ""} · {formatDatum(s.datum)}</span>
                 <span className="text-emerald-600">{s.formation}</span>
@@ -9415,7 +9466,7 @@ function SpielplanView({ division, managerTeam, testspiele, season, pokal, europ
 
       <div className="grid grid-cols-7 gap-px rounded overflow-hidden border border-emerald-800" style={{ backgroundColor: "#08150d" }}>
         {KALENDER_WOCHENTAGE.map(w => (
-          <div key={w} className="text-center text-[11px] text-emerald-500 py-1.5 font-semibold" style={{ backgroundColor: "#0e2818" }}>{w}</div>
+          <div key={w} className="text-center text-[11px] text-emerald-500 py-1.5 font-semibold" style={{ backgroundColor: "var(--fm-surface-raised)" }}>{w}</div>
         ))}
         {zellen.map((tag, i) => {
           if (tag === null) return <div key={i} style={{ backgroundColor: "#0a1f13", minHeight: "116px" }} />;
@@ -9425,7 +9476,7 @@ function SpielplanView({ division, managerTeam, testspiele, season, pokal, europ
           const istTransferfenster = fensterInfo.offen;
           const istCampfenster = istTransferfenster && (fensterInfo.name === "Sommer-Transferfenster" ? !trainingslager?.vorrunde : !trainingslager?.rueckrunde);
           return (
-            <div key={i} className="p-1 space-y-0.5" style={{ backgroundColor: "#0e2818", minHeight: "116px" }}>
+            <div key={i} className="p-1 space-y-0.5" style={{ backgroundColor: "var(--fm-surface-raised)", minHeight: "116px" }}>
               <div className="flex items-center justify-between gap-0.5">
                 <div className="flex items-center gap-0.5">
                   {istTransferfenster && (
@@ -9473,8 +9524,8 @@ function CoachScreen({ profile, onCoachChosen }) {
   const sterne = (rating) => Math.max(1, Math.min(5, Math.round(rating / 20)));
 
   return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="w-full max-w-2xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+      <div className="w-full max-w-2xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-6 py-5 text-center">
           <div className="flex items-center justify-center gap-2 text-amber-400 mb-1">
             <Users size={22} />
@@ -9707,7 +9758,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
             const aktuellerSpieler = aktuellerVerein ? alleDivisionen[e.verkauftDivId].squads[aktuellerVerein]?.find(p => p.id === e.spielerId) : null;
             if (!aktuellerSpieler) {
               return (
-                <div key={e.spielerId} className="border border-emerald-900 rounded p-2.5 text-xs text-emerald-600" style={{ backgroundColor: "#0b1f14" }}>
+                <div key={e.spielerId} className="border border-emerald-900 rounded p-2.5 text-xs text-emerald-600" style={{ backgroundColor: "var(--fm-surface)" }}>
                   {e.name} — Spur verloren (Vereinswechsel im Ausland o.ä.), kein Rückkauf mehr möglich.
                 </div>
               );
@@ -9745,7 +9796,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
             const aktuellerSpieler = aktuellerVerein ? alleDivisionen[e.verliehenAnDivId].squads[aktuellerVerein]?.find(p => p.id === e.spielerId) : null;
             if (!aktuellerSpieler) {
               return (
-                <div key={e.spielerId} className="border border-emerald-900 rounded p-2.5 text-xs text-emerald-600" style={{ backgroundColor: "#0b1f14" }}>
+                <div key={e.spielerId} className="border border-emerald-900 rounded p-2.5 text-xs text-emerald-600" style={{ backgroundColor: "var(--fm-surface)" }}>
                   {e.name} — Spur verloren, kehrt aber trotzdem zum Saisonende automatisch zurück.
                 </div>
               );
@@ -9807,13 +9858,13 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
                   onChange={e => setSuchbegriff(e.target.value)}
                   placeholder="Name oder Verein suchen…"
                   className="flex-1 border border-emerald-700/50 rounded px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
-                  style={{ backgroundColor: "#0b1f14", colorScheme: "dark" }}
+                  style={{ backgroundColor: "var(--fm-surface)", colorScheme: "dark" }}
                 />
                 <select
                   value={positionsFilter}
                   onChange={e => setPositionsFilter(e.target.value)}
                   className="border border-emerald-700/50 rounded px-2 py-2 text-xs focus:outline-none focus:border-amber-400"
-                  style={{ backgroundColor: "#0b1f14", colorScheme: "dark" }}
+                  style={{ backgroundColor: "var(--fm-surface)", colorScheme: "dark" }}
                 >
                   <option value="ALLE">Alle Positionen</option>
                   {POSITIONEN.map(pos => <option key={pos.code} value={pos.code}>{pos.code}</option>)}
@@ -9826,7 +9877,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
                     <div
                       key={k.p.id}
                       className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border ${gesperrt ? "border-emerald-900/50 opacity-40" : "border-emerald-900"}`}
-                      style={{ backgroundColor: "#0b1f14" }}
+                      style={{ backgroundColor: "var(--fm-surface)" }}
                     >
                       <button
                         disabled={gesperrt}
@@ -9868,7 +9919,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
                 value={gegnerAuswahl}
                 onChange={e => { setGegnerAuswahl(e.target.value); setVerhandlung(null); }}
                 className="w-full border border-emerald-700/50 rounded px-3 py-2 text-sm mb-2 focus:outline-none focus:border-amber-400"
-                style={{ backgroundColor: "#0b1f14", colorScheme: "dark" }}
+                style={{ backgroundColor: "var(--fm-surface)", colorScheme: "dark" }}
               >
                 {gegnerTeamsMitLiga.map(e => <option key={gegnerSchluessel(e)} value={gegnerSchluessel(e)}>{e.team} ({e.ligaName})</option>)}
               </select>
@@ -9882,7 +9933,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
                       disabled={gesperrt}
                       onClick={() => oeffneVerhandlung(sp, aktuellerGegner.team, "kaufen", aktuellerGegner.divId, gelistet)}
                       className={`w-full flex items-center justify-between text-xs px-3 py-1.5 rounded border text-left ${gesperrt ? "border-emerald-900/50 opacity-40 cursor-not-allowed" : gelistet ? "border-emerald-900 hover:border-emerald-600" : "border-emerald-900/60 hover:border-red-500/50"}`}
-                      style={{ backgroundColor: "#0b1f14" }}
+                      style={{ backgroundColor: "var(--fm-surface)" }}
                     >
                       <span className="text-emerald-100">
                         <span className="underline decoration-dotted hover:text-amber-300" onClick={e => { e.stopPropagation(); setSpielerFuerDetail(sp); }}>{sp.name}</span>
@@ -9950,7 +10001,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
                 <div
                   key={sp.id}
                   className={`w-full flex items-center justify-between text-xs px-3 py-1.5 rounded border ${gelistet ? "border-sky-400/50" : empfohlen ? "border-orange-400/50" : "border-emerald-900"}`}
-                  style={{ backgroundColor: "#0b1f14" }}
+                  style={{ backgroundColor: "var(--fm-surface)" }}
                 >
                   <span className="text-emerald-100 flex items-center gap-1.5">
                     {empfohlen && <ThumbsDown size={11} className="text-orange-400" />}
@@ -10155,8 +10206,8 @@ function SponsorScreen({ managerDivId, season, saisonLabel, onConfirm }) {
   const [ausgewaehlt, setAusgewaehlt] = useState(null);
 
   return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="w-full max-w-2xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+      <div className="w-full max-w-2xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-6 py-5 text-center">
           <div className="flex items-center justify-center gap-2 text-amber-400 mb-1">
             <Shirt size={22} />
@@ -10214,8 +10265,8 @@ function TrainerZieleScreen({ trainerName, managerDivId, season, saisonLabel, on
   };
 
   return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="w-full max-w-xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+      <div className="w-full max-w-xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-6 py-5 text-center">
           <div className="flex items-center justify-center gap-2 text-amber-400 mb-1">
             <UserCog size={22} />
@@ -10259,8 +10310,8 @@ function ZieleScreen({ managerDivId, season, saisonLabel, onConfirm, geradeAufge
   const [ziele] = useState(() => generiereVorstandsZiele(managerDivId, season, 0, geradeAufgestiegen, hatJunior, wurdeMeisterLetzteSaison, markenwertAktuell));
 
   return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="w-full max-w-xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+      <div className="w-full max-w-xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-6 py-5 text-center">
           <div className="flex items-center justify-center gap-2 text-amber-400 mb-1">
             <ClipboardList size={22} />
@@ -10293,8 +10344,8 @@ function ZieleScreen({ managerDivId, season, saisonLabel, onConfirm, geradeAufge
 function KarriereEndeScreen({ karriereEnde, onNeueKarriere }) {
   const istInsolvenz = karriereEnde.grund === "insolvenz";
   return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="w-full max-w-md border border-red-500/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+      <div className="w-full max-w-md border border-red-500/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <div className="bg-red-900/30 border-b border-red-700/50 px-6 py-6 text-center">
           <XCircle className="mx-auto text-red-400 mb-2" size={32} />
           <h1 className="text-xl font-bold text-red-300">{istInsolvenz ? "Entlassen" : "Abgewählt"}</h1>
@@ -10325,8 +10376,8 @@ function ManagerVertragScreen({ teamName, managerDivId, season, saisonLabel, onC
   const [ausgewaehlt, setAusgewaehlt] = useState(null);
 
   return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="w-full max-w-xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+      <div className="w-full max-w-xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-6 py-5 text-center">
           <div className="flex items-center justify-center gap-2 text-amber-400 mb-1">
             <UserCog size={22} />
@@ -10403,7 +10454,7 @@ function formationPositionen(elf) {
 function TaktikSpielfeld({ elf }) {
   const spieler = useMemo(() => formationPositionen(elf), [elf]);
   return (
-    <div className="border border-emerald-800 rounded p-3 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+    <div className="border border-emerald-800 rounded p-3 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
       <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Aufstellung auf dem Feld</div>
       <svg viewBox="0 0 100 70" className="w-full h-auto rounded" style={{ backgroundColor: "#123a22" }}>
         {/* Spielfeldlinien */}
@@ -10523,7 +10574,7 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
 
   return (
     <div>
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Philosophie-Paket wählen — bestimmt die Leitplanken UND wirkt sich spürbar auf Spielstärke, Entwicklung und Verletzungsrisiko aus</div>
         <div className="space-y-1.5 mb-3">
           {Object.entries(PHILOSOPHIE_PAKETE).map(([id, paket]) => (
@@ -10592,7 +10643,7 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
 
       <TaktikSpielfeld elf={elf} />
 
-      <div className="border border-emerald-800 rounded p-3 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-3 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Formationen im Überblick — welche Positionen brauchst du wofür?</div>
         <div className="space-y-1.5">
           {FORMATIONEN.map(f => {
@@ -10620,7 +10671,7 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
         </div>
       </div>
 
-      <div className="border border-emerald-800 rounded p-3 mb-4 flex items-center justify-between" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-3 mb-4 flex items-center justify-between" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div>
           <div className="text-xs uppercase tracking-wider text-emerald-400/80">Eingespieltheit</div>
           <div className="text-[10px] text-emerald-600 mt-0.5">Bleibt die Startelf über mehrere Spieltage weitgehend gleich, bauen sich echte Automatismen auf — Serie von {eingespieltheitStreak} Spieltag{eingespieltheitStreak === 1 ? "" : "en"} mit mind. 8/11 unveränderter Startelf.</div>
@@ -10633,7 +10684,7 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
         {elf.map(sp => {
           const fehlPlatziert = sp.gespielterPos && sp.gespielterPos !== sp.pos;
           return (
-            <div key={sp.id} onClick={() => setAusgewaehlterSpieler(sp)} className={`flex items-center justify-between text-xs px-3 py-1.5 rounded border cursor-pointer hover:bg-emerald-900/20 ${fehlPlatziert ? "border-red-500/40" : "border-emerald-900"}`} style={{ backgroundColor: "#0b1f14" }}>
+            <div key={sp.id} onClick={() => setAusgewaehlterSpieler(sp)} className={`flex items-center justify-between text-xs px-3 py-1.5 rounded border cursor-pointer hover:bg-emerald-900/20 ${fehlPlatziert ? "border-red-500/40" : "border-emerald-900"}`} style={{ backgroundColor: "var(--fm-surface)" }}>
               <span className="text-emerald-100">
                 {sp.name} <span className="text-emerald-600">· {sp.posName} · {sp.alter}J</span>
                 {fehlPlatziert && (
@@ -10654,7 +10705,7 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
       <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-1.5">Bank</div>
       <div className="space-y-1">
         {bankNachPosition.map(sp => (
-          <div key={sp.id} onClick={() => setAusgewaehlterSpieler(sp)} className={`flex items-center justify-between text-xs px-3 py-1 rounded border cursor-pointer hover:bg-emerald-900/20 ${(sp.verletzung || sp.kartenSperre) ? "border-red-500/40 opacity-70" : "border-emerald-900 opacity-60"}`} style={{ backgroundColor: "#0b1f14" }}>
+          <div key={sp.id} onClick={() => setAusgewaehlterSpieler(sp)} className={`flex items-center justify-between text-xs px-3 py-1 rounded border cursor-pointer hover:bg-emerald-900/20 ${(sp.verletzung || sp.kartenSperre) ? "border-red-500/40 opacity-70" : "border-emerald-900 opacity-60"}`} style={{ backgroundColor: "var(--fm-surface)" }}>
             <span className="text-emerald-200">
               {sp.name} <span className="text-emerald-600">· {sp.posName} · {sp.alter}J</span>
               {sp.verletzung && <span className="ml-1.5 text-[9px] uppercase tracking-wide text-red-400 border border-red-500/40 rounded px-1 py-0.5">🩹 {sp.verletzung.tageVerbleibend}T</span>}
@@ -10689,7 +10740,7 @@ function StabView({ stab, budget, managerDivId, season, matchday, onVerpflichten
       <p className="text-[11px] text-emerald-600 mb-3">Jederzeit verpflichtbar, nicht nur zu Saisonbeginn. Jede Rolle wirkt sich spürbar auf Form, Stärkenentwicklung deiner Spieler oder die Zufriedenheit des Cheftrainers aus. Vertragslaufzeit 1-4 Jahre — läuft er noch, musst du zu Saisonbeginn nichts tun.</p>
 
       {stadion && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Verwaltungs- und Verkaufspersonal</div>
           <p className="text-[11px] text-emerald-600 mb-3">Ticketverkäufer, Kassierer, Imbiss-/Fanshop-Personal, Reinigung und Verwaltung — proportional zur Stadiongrösse, inkl. Sozialabgaben. Keine einzelne Person wie oben, sondern eine wählbare Personalstufe. Aktuelle Jahreskosten: {Math.round((stadion.kapazitaet || 0) * PERSONALKOSTEN_PRO_PLATZ_PRO_JAHR * (PERSONALSTUFEN[stadion.personalstufe] || PERSONALSTUFEN.standard).kostenFaktor).toLocaleString("de-CH")} €.</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -10708,7 +10759,7 @@ function StabView({ stab, budget, managerDivId, season, matchday, onVerpflichten
       )}
 
       {personalabteilungen && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Weitere Personalabteilungen</div>
           <p className="text-[11px] text-emerald-600 mb-3">Ergänzen die jeweilige Einzelrolle oben (Chefscout, Vereinsarzt, Platzwart, Jugendtrainer), ersetzen sie aber nicht — auch ohne die Einzelperson wirken diese Abteilungen bereits für sich. Wählbare Personalstufe wie beim Verwaltungspersonal, keine einzelne Anstellung.</p>
           <div className="space-y-3">
@@ -10744,7 +10795,7 @@ function StabView({ stab, budget, managerDivId, season, matchday, onVerpflichten
           const kandidaten = offeneRolle === rolle.id ? generateStabKandidaten(rolle.id, managerDivId, season, matchday) : null;
           const dauer = dauerProRolle[rolle.id] || 2;
           return (
-            <div key={rolle.id} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+            <div key={rolle.id} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-semibold text-emerald-100">{rolle.name}</div>
@@ -10788,7 +10839,7 @@ function StabView({ stab, budget, managerDivId, season, matchday, onVerpflichten
                         disabled={!bezahlbar}
                         onClick={() => { onVerpflichten(rolle.id, { ...k, laufzeit: dauer }); setOffeneRolle(null); }}
                         className={`w-full flex items-center justify-between text-xs px-2.5 py-1.5 rounded border text-left ${bezahlbar ? "border-emerald-800 hover:border-amber-400" : "border-emerald-900 opacity-40 cursor-not-allowed"}`}
-                        style={{ backgroundColor: "#0e2818" }}
+                        style={{ backgroundColor: "var(--fm-surface-raised)" }}
                       >
                         <span className="text-emerald-100">{k.name} <span className="text-emerald-600">· {k.alter}J · Stärke {k.rating}</span></span>
                         <span className="text-amber-400">{k.jahresgehalt.toLocaleString("de-CH")} €/Jahr</span>
@@ -10816,8 +10867,8 @@ function TrainerDetailModal({ coach, teamName, season, trophaeen, onClose }) {
   const punkteschnitt = gesamtSpiele ? ((gesamtSiege * 3 + gesamtUnentschieden) / gesamtSpiele).toFixed(2) : "–";
   const eigeneTitel = (trophaeen || []).filter(t => t.verein === teamName && t.saison >= (coach.amtAntrittSaison ?? t.saison));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(5,14,8,0.85)" }} onClick={onClose}>
-      <div className="w-full max-w-md border border-amber-400/50 rounded-lg p-5 space-y-4 max-h-[85vh] overflow-y-auto" style={{ backgroundColor: "#0e2818" }} onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(6,10,18,0.82)" }} onClick={onClose}>
+      <div className="w-full max-w-md border border-amber-400/50 rounded-lg p-5 space-y-4 max-h-[85vh] overflow-y-auto" style={{ backgroundColor: "var(--fm-surface-raised)" }} onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <img src={trainerPortraitFuer(coach.name)} alt="" className="w-16 h-16 rounded-full border-2 border-amber-400/50 object-cover shrink-0" />
@@ -10830,15 +10881,15 @@ function TrainerDetailModal({ coach, teamName, season, trophaeen, onClose }) {
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-600 text-[10px] uppercase tracking-wider">Vertrag</div>
             <div className="text-emerald-200 font-semibold">{coach.vertragBisSaison != null ? `bis Saison ${coach.vertragBisSaison}/${(coach.vertragBisSaison + 1) % 100}` : "?"}</div>
           </div>
-          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded p-2" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-600 text-[10px] uppercase tracking-wider">Gehalt</div>
             <div className="text-emerald-200 font-semibold">{(coach.jahressalaer || 0).toLocaleString("de-CH")} €/Jahr</div>
           </div>
-          <div className="border border-emerald-800 rounded p-2 col-span-2" style={{ backgroundColor: "#0b1f14" }}>
+          <div className="border border-emerald-800 rounded p-2 col-span-2" style={{ backgroundColor: "var(--fm-surface)" }}>
             <div className="text-emerald-600 text-[10px] uppercase tracking-wider">Im Amt seit</div>
             <div className="text-emerald-200 font-semibold">{coach.amtAntrittSaison != null ? `Saison ${coach.amtAntrittSaison}/${(coach.amtAntrittSaison + 1) % 100}` : "?"} ({amtJahre <= 0 ? "diese Saison" : `${amtJahre}J`})</div>
           </div>
@@ -10960,7 +11011,7 @@ function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, m
       </div>
 
       {coach ? (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 cursor-pointer hover:opacity-80" onClick={() => setDetailOffen(true)}>
               <img src={trainerPortraitFuer(coach.name)} alt="" className="w-14 h-14 rounded-full border-2 border-amber-400/50 object-cover shrink-0" />
@@ -11071,7 +11122,7 @@ function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, m
       )}
 
       {coach && vorschlaege && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs uppercase tracking-wider text-emerald-400/80">Trainer-Zufriedenheit</span>
             <span className={`text-xs font-semibold ${zufriedenheitsLabel(zufriedenheit).farbe}`}>{zufriedenheitsLabel(zufriedenheit).text} ({zufriedenheit}/100)</span>
@@ -11262,7 +11313,7 @@ function PokalView({ pokal, managerTeam }) {
       )}
 
       {!istSieger && istDrin && !eigeneAnstehendePaarung && (
-        <div className="border border-emerald-700 rounded p-3 mb-3 text-xs text-emerald-300" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-700 rounded p-3 mb-3 text-xs text-emerald-300" style={{ backgroundColor: "var(--fm-surface)" }}>
           Noch im Wettbewerb — aktuell in Runde {pokal.runde} ({pokalRundenName(pokal.teams.length) || `${pokal.runde}. Runde`}).
         </div>
       )}
@@ -11278,7 +11329,7 @@ function PokalView({ pokal, managerTeam }) {
       })()}
 
       {eigenerVerlauf.length > 0 && (
-        <div className="border border-emerald-800 rounded p-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Bisherige Pokalspiele</div>
           <div className="space-y-1.5">
             {eigenerVerlauf.map((v, i) => {
@@ -11319,7 +11370,7 @@ function BuchhaltungTabView({ saisonFinanzen, finanzenHistorie = [], season }) {
             value={gewaehlteSaison}
             onChange={e => setGewaehlteSaison(Number(e.target.value))}
             className="text-[11px] border border-emerald-700/50 rounded px-1.5 py-0.5"
-            style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+            style={{ backgroundColor: "var(--fm-surface-raised)", colorScheme: "dark" }}
           >
             {vorhandeneSaisons.map(s => (
               <option key={s} value={s}>{s === season ? "Aktuelle Saison" : `Saison ${s}/${(s + 1) % 100}`}</option>
@@ -11338,7 +11389,7 @@ function FinanzAbrechnungView({ finanzen, live }) {
   const aufwandGesamt = f.aufwandGehalt + (f.aufwandMitarbeiterstab || 0) + (f.aufwandManagerlohn || 0) + (f.aufwandSpielerloehne || 0) + f.aufwandReisen + f.aufwandTransfers + (f.aufwandBerater || 0) + (f.aufwandFanartikel || 0) + (f.aufwandImbiss || 0) + (f.aufwandStadion || 0) + (f.aufwandStadionmiete || 0) + (f.aufwandMaterial || 0) + (f.aufwandPersonal || 0) + (f.aufwandTrainingslager || 0) + (f.aufwandJugend || 0) + (f.aufwandSicherheit || 0) + (f.aufwandBetrieb || 0) + (f.aufwandSchiedsrichter || 0) + (f.aufwandZinsen || 0) + f.aufwandSonstiges;
   const reingewinn = ertragGesamt - aufwandGesamt;
   return (
-    <div className="text-left border border-emerald-700 rounded p-3 space-y-1.5" style={{ backgroundColor: "#0b1f14" }}>
+    <div className="text-left border border-emerald-700 rounded p-3 space-y-1.5" style={{ backgroundColor: "var(--fm-surface)" }}>
       <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">{live ? "Buchhaltung — laufende Saison" : "Saison-Abrechnung"}</div>
       <div className="text-xs text-emerald-400 font-semibold">Ertrag</div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Ticketing</span><span>{f.ertragTicketing.toLocaleString("de-CH")} €</span></div>
@@ -11665,7 +11716,7 @@ function EmPokalIcon({ size = 40 }) {
 function StatistikListe({ titel, icon: Icon, spieler, wert, einheit = "", farbe = "text-amber-400", formatiere = null }) {
   const sortiert = [...spieler].filter(p => (p[wert] || 0) > 0).sort((a, b) => (b[wert] || 0) - (a[wert] || 0)).slice(0, 10);
   return (
-    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
       <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2 flex items-center gap-1.5">{Icon && <Icon size={12} />} {titel}</div>
       {sortiert.length ? (
         <div className="space-y-1">
@@ -12582,7 +12633,7 @@ function VereinsinfosView({ careerState }) {
 // genauso lebendig anfühlt wie ein Ligaspiel.
 function LaenderspielKarte({ s, label, ergebnisFarbe, ergebnisIcon, elfmeter }) {
   return (
-    <div className="border border-emerald-900 rounded p-2.5" style={{ backgroundColor: "#0b1f14" }}>
+    <div className="border border-emerald-900 rounded p-2.5" style={{ backgroundColor: "var(--fm-surface)" }}>
       <div className="flex items-center justify-between text-xs mb-1">
         <span className="text-emerald-500">{label}</span>
         {ergebnisIcon && <span className={`font-semibold ${ergebnisFarbe}`}>{ergebnisIcon}</span>}
@@ -12653,7 +12704,7 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
         <div className="text-xs text-emerald-300">Im Amt seit Saison {bundestrainerAmt.seit}/{(bundestrainerAmt.seit + 1) % 100} · Nächstes Turnier: Saison {bundestrainerAmt.naechstesTurnierJahr}/{(bundestrainerAmt.naechstesTurnierJahr + 1) % 100} ({bundestrainerAmt.naechstesTurnierJahr % 4 === 2 ? "WM" : "EM"})</div>
       </div>
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Qualifikationsgruppe</div>
         {gruppentabelleSortiert.length > 0 ? (
           <table className="w-full text-xs">
@@ -12694,7 +12745,7 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
         <div className="text-[10px] text-emerald-600 mt-2">Die ersten beiden Plätze qualifizieren sich fürs Turnier. Hin- und Rückspiel gegen alle vier Gegner (4 Heim-, 4 Auswärtsspiele) — die Gegner spielen auch untereinander.</div>
       </div>
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Spielplan Nationalmannschaft</div>
         <div className="space-y-2">
           {qualiVerlauf.map((s, i) => (
@@ -12714,7 +12765,7 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
         </div>
       </div>
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Formation für Länderspiele</div>
         <div className="grid grid-cols-3 gap-1.5">
           {FORMATIONEN.map(f => {
@@ -12788,7 +12839,7 @@ function SpielregelnView() {
     <div className="space-y-3">
       <p className="text-xs text-emerald-500">Kurzüberblick über die wichtigsten Mechaniken je Bereich — für Details einfach den jeweiligen Tab öffnen.</p>
       {SPIELREGELN_KATEGORIEN.map((kat, i) => (
-        <div key={i} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0e2818" }}>
+        <div key={i} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
           <div className="flex items-center gap-2 mb-2">
             <kat.icon size={16} style={{ color: kat.farbe }} />
             <span className="font-semibold text-sm" style={{ color: kat.farbe }}>{kat.titel}</span>
@@ -12845,19 +12896,19 @@ function KarriereView({ trophaeen, saisonHistorie, teamName, profileVorname, pro
       <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-3">Managerkarriere — {managerAnzeigeName(profileVorname, profileNachname)}</div>
 
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-2xl font-bold text-amber-400">{historie.length}</div>
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Saisons insgesamt</div>
         </div>
-        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-2xl font-bold text-amber-400">{(trophaeen || []).length}</div>
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Titel gesamt</div>
         </div>
-        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-2xl font-bold text-emerald-300">{vereinsStats.length}</div>
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">{vereinsStats.length === 1 ? "Verein trainiert" : "Vereine trainiert"}</div>
         </div>
-        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-2xl font-bold text-emerald-300">{karriereAufstiege}<span className="text-red-400/70 text-base"> / {karriereAbstiege}</span></div>
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Auf-/Abstiege</div>
         </div>
@@ -12877,7 +12928,7 @@ function KarriereView({ trophaeen, saisonHistorie, teamName, profileVorname, pro
       </div>
 
       {Object.keys(titelProTyp).length > 0 && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Titel nach Art</div>
           <div className="flex flex-wrap gap-2">
             {Object.entries(titelProTyp).map(([typ, anzahl]) => {
@@ -12895,7 +12946,7 @@ function KarriereView({ trophaeen, saisonHistorie, teamName, profileVorname, pro
       )}
 
       {vereinsStats.length > 0 && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Vereinshistorie</div>
           <div className="space-y-1.5">
             {vereinsStats.map(v => (
@@ -12923,7 +12974,7 @@ function KarriereView({ trophaeen, saisonHistorie, teamName, profileVorname, pro
       )}
 
       {historie.length > 0 && (
-        <div className="border border-emerald-800 rounded p-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Saison für Saison</div>
           <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
@@ -13026,7 +13077,7 @@ function TrophaeenView({ vereinsTrophaeen, teamName, saisonHistorie }) {
           {sortiert.map((t, i) => {
             const Icon = ICON[t.typ] || Trophy;
             return (
-              <div key={i} className={`flex items-center gap-3 border rounded p-3 ${FARBE[t.typ] || "text-emerald-400 border-emerald-700"}`} style={{ backgroundColor: "#0b1f14" }}>
+              <div key={i} className={`flex items-center gap-3 border rounded p-3 ${FARBE[t.typ] || "text-emerald-400 border-emerald-700"}`} style={{ backgroundColor: "var(--fm-surface)" }}>
                 {t.typ === "meisterschaft" ? <MeisterschaleIcon size={40} /> : t.typ === "meisterschaft_l2" ? <ZweitligaPokalIcon size={40} /> : t.typ === "meisterschaft_l3" ? <DrittligaPokalIcon size={40} /> : t.typ === "meisterschaft_rl" ? <RegionalligaPokalIcon size={40} /> : t.typ === "meisterschaft_ol" ? <OberligaPokalIcon size={40} /> : t.typ === "torschuetzenkoenig" ? <TorschuetzenPokalIcon size={40} /> : t.typ === "pokalsieg" ? <DfbPokalIcon size={40} /> : t.typ === "europapokal" ? <EuropapokalIcon wettbewerb={t.wettbewerb} size={40} /> : t.typ === "wm_sieg" ? <WmPokalIcon size={40} /> : t.typ === "em_sieg" ? <EmPokalIcon size={40} /> : <Icon size={20} className="shrink-0" />}
                 <div>
                   <div className="text-sm font-semibold">{t.text}</div>
@@ -13098,7 +13149,7 @@ function StadionKategorieCard({ kategorie, daten, budget, datum, heimspieleAnzah
   const einzelpreisSumme = daten.ticketpreis * heimspieleAnzahl;
 
   return (
-    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-semibold text-emerald-100">{STADION_KATEGORIE_NAMEN[kategorie]}</div>
         <div className="text-amber-300 font-semibold text-sm">{daten.kapazitaet.toLocaleString("de-CH")} Plätze</div>
@@ -13125,7 +13176,7 @@ function StadionKategorieCard({ kategorie, daten, budget, datum, heimspieleAnzah
             value={daten.ticketpreis}
             onChange={e => onPreisSetzen(kategorie, Math.max(0, parseInt(e.target.value) || 0))}
             className="w-24 border border-emerald-700/50 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-amber-400"
-            style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+            style={{ backgroundColor: "var(--fm-surface-raised)", colorScheme: "dark" }}
           />
           <span className="text-emerald-600 text-xs">€ / Ticket</span>
         </div>
@@ -13145,7 +13196,7 @@ function StadionKategorieCard({ kategorie, daten, budget, datum, heimspieleAnzah
                 value={saisonkartenAnzahl}
                 onChange={e => setSaisonkartenAnzahl(Math.max(0, Math.min(maxSaisonkartenAnzahl, parseInt(e.target.value) || 0)))}
                 className="w-full border border-sky-700/50 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-sky-400"
-                style={{ backgroundColor: "#0b1f14", colorScheme: "dark" }}
+                style={{ backgroundColor: "var(--fm-surface)", colorScheme: "dark" }}
               />
               {skDelta > 0 && <div className="text-[11px] text-emerald-500">Zusätzlich verkaufen: {skDelta.toLocaleString("de-CH")} × {skPreis.toLocaleString("de-CH")} € = <span className="text-amber-400">+{skKosten.toLocaleString("de-CH")} €</span> Einnahme sofort</div>}
               <div className="flex gap-1.5">
@@ -13176,7 +13227,7 @@ function StadionKategorieCard({ kategorie, daten, budget, datum, heimspieleAnzah
           <div className="text-emerald-500 mt-0.5">Fertig ab {formatDatum(laufenderUmbau.fertigAmDatum)}</div>
         </div>
       ) : umbauOffen ? (
-        <div className="border border-emerald-700 rounded px-3 py-2 space-y-2" style={{ backgroundColor: "#0e2818" }}>
+        <div className="border border-emerald-700 rounded px-3 py-2 space-y-2" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
           <label className="text-[11px] text-emerald-500 block">Neue Kapazität (max. {maxKapazitaetFuerKategorie.toLocaleString("de-CH")} für diese Kategorie — insgesamt darf das Stadion {STADION_MAX_KAPAZITAET.toLocaleString("de-CH")} Plätze nicht überschreiten, grösser als das reale Signal Iduna Park in Dortmund geht in Deutschland nicht)</label>
           <input
             type="number"
@@ -13185,7 +13236,7 @@ function StadionKategorieCard({ kategorie, daten, budget, datum, heimspieleAnzah
             value={neueKapazitaet}
             onChange={e => setNeueKapazitaet(Math.max(0, Math.min(maxKapazitaetFuerKategorie, parseInt(e.target.value) || 0)))}
             className="w-full border border-emerald-700/50 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-amber-400"
-            style={{ backgroundColor: "#0b1f14", colorScheme: "dark" }}
+            style={{ backgroundColor: "var(--fm-surface)", colorScheme: "dark" }}
           />
           {delta !== 0 && (
             <div className="text-[11px] text-emerald-500">
@@ -13335,7 +13386,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
           </button>
         </div>
       ) : (
-        <div className="border border-emerald-800 rounded p-3 mb-4 text-xs text-emerald-400 flex items-center justify-between" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-3 mb-4 text-xs text-emerald-400 flex items-center justify-between" style={{ backgroundColor: "var(--fm-surface)" }}>
           <span>Investition {saisonLabel}</span>
           <span className="text-amber-300 font-semibold">{jugend.investition.toLocaleString("de-CH")} €</span>
         </div>
@@ -13343,7 +13394,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
       </>)}
 
       {abschnitt === "akademie" && (<>
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs uppercase tracking-wider text-emerald-400/80">Jugendakademie</span>
           <span className="text-amber-400 font-bold text-lg">{"⭐".repeat(level) || "—"}</span>
@@ -13357,7 +13408,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
         </p>
       </div>
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2 flex items-center gap-1.5"><Megaphone size={13} /> Namensrechte</div>
         {akademie?.namensSponsor ? (
           <div className="flex items-center justify-between">
@@ -13388,7 +13439,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
           <div className="text-sm text-amber-200">Stufe {umbau.zielLevel} — fertig ab {formatDatum(umbau.fertigAmDatum)}</div>
         </div>
       ) : level < akademieMaxLevelLiga ? (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Auf Stufe {level + 1} ausbauen</div>
           <div className="text-xs text-emerald-500 mb-3">
             Kosten: <span className="text-amber-400 font-semibold">{naechsteStufeKosten.toLocaleString("de-CH")} €</span>
@@ -13415,11 +13466,11 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-2xl font-bold text-emerald-300">{absolventenImKader}</div>
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Absolventen im Kader</div>
         </div>
-        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-2xl font-bold text-amber-400">{absolventenGesamt}</div>
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Absolventen insgesamt</div>
         </div>
@@ -13825,7 +13876,7 @@ function StadionView({ stadion, budget, datum, heimspieleAnzahl, letzteHeimspiel
   const platzFarbe = platzzustand >= 65 ? "#34d399" : platzzustand >= 35 ? "#fbbf24" : "#f87171";
   return (
     <div>
-      <div className="flex items-center gap-3 border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="flex items-center gap-3 border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <StadionIcon kapazitaet={gesamtKapazitaet} />
         <div className="flex-1">
           <div className="text-[10px] uppercase tracking-wider text-emerald-500">Heimstätte</div>
@@ -13855,7 +13906,7 @@ function StadionView({ stadion, budget, datum, heimspieleAnzahl, letzteHeimspiel
         </div>
       </div>
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Eigentumsverhältnis</div>
         {stadion.eigentum ? (
           <div className="text-sm text-emerald-300">🏟️ Das Stadion gehört dem Verein — Erweiterungen, Logen-Ausbau, Namensrechte-Sponsoring und die Vermietung für Konzerte & Events an spielfreien Tagen sind uneingeschränkt möglich.</div>
@@ -13884,7 +13935,7 @@ function StadionView({ stadion, budget, datum, heimspieleAnzahl, letzteHeimspiel
       </div>
 
       {stadion.eigentum && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2 flex items-center gap-1.5">🎤 Konzerte & Events</div>
           {stadion.eventAngebot ? (
             <div className="space-y-2">
@@ -13904,7 +13955,7 @@ function StadionView({ stadion, budget, datum, heimspieleAnzahl, letzteHeimspiel
       )}
 
       {stadion.zuschauerHistorie && stadion.zuschauerHistorie.length > 0 && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Auslastung diese Saison</div>
           <ZuschauerChart historie={stadion.zuschauerHistorie} kapazitaet={gesamtKapazitaet} />
         </div>
@@ -13922,7 +13973,7 @@ function StadionView({ stadion, budget, datum, heimspieleAnzahl, letzteHeimspiel
       )}
 
       {!stadion.namensSponsor && !stadion.namensSponsorAngebot && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Eigener Stadionname (ohne Sponsor)</div>
           <div className="flex gap-1.5">
             <input
@@ -13939,13 +13990,13 @@ function StadionView({ stadion, budget, datum, heimspieleAnzahl, letzteHeimspiel
       )}
 
       {stadion.namensSponsor && (
-        <div className="border border-emerald-800 rounded p-3 mb-4 text-xs text-emerald-400 flex items-center justify-between" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-3 mb-4 text-xs text-emerald-400 flex items-center justify-between" style={{ backgroundColor: "var(--fm-surface)" }}>
           <span>Namenssponsor: <span className="text-amber-300 font-semibold">{stadion.namensSponsor.firma}</span></span>
           <span>{stadion.namensSponsor.betragProJahr.toLocaleString("de-CH")} €/Jahr bis Saison {stadion.namensSponsor.vertragBisSaison}/{(stadion.namensSponsor.vertragBisSaison + 1) % 100}</span>
         </div>
       )}
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Infrastruktur-Ausbau</div>
         <div className="space-y-2">
           {Object.entries(STADION_INFRASTRUKTUR).map(([typ, info]) => {
@@ -14001,7 +14052,7 @@ function StadionView({ stadion, budget, datum, heimspieleAnzahl, letzteHeimspiel
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="border border-emerald-800 rounded p-4 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Gesamtkapazität</div>
           <div className="text-2xl font-bold text-amber-400">{gesamtKapazitaet.toLocaleString("de-CH")} Plätze</div>
         </div>
@@ -14132,7 +14183,7 @@ function ImbissVerkaufsstatistik({ imbiss, vereinsheim, imbissHistorie = [], sea
   if (gesamtVerkauft === 0 && istAktuelleSaison && !imbissHistorie.length) return null;
 
   return (
-    <div className="mt-4 border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+    <div className="mt-4 border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
       <div className="flex items-center justify-between mb-2 flex-wrap gap-1.5">
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">
           Verkaufsstatistik {istAktuelleSaison ? "dieser Saison" : `Saison ${gewaehlteSaison}/${(gewaehlteSaison + 1) % 100}`} (Stände + Vereinsheim)
@@ -14142,7 +14193,7 @@ function ImbissVerkaufsstatistik({ imbiss, vereinsheim, imbissHistorie = [], sea
             value={gewaehlteSaison}
             onChange={e => setGewaehlteSaison(Number(e.target.value))}
             className="text-[11px] border border-emerald-700/50 rounded px-1.5 py-0.5"
-            style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+            style={{ backgroundColor: "var(--fm-surface-raised)", colorScheme: "dark" }}
           >
             {vorhandeneSaisons.map(s => (
               <option key={s} value={s}>{s === season ? "Aktuelle Saison" : `Saison ${s}/${(s + 1) % 100}`}</option>
@@ -14172,7 +14223,7 @@ function ImbissVerkaufsstatistik({ imbiss, vereinsheim, imbissHistorie = [], sea
 function ImbissKategorieCard({ typ, daten, budget, marge, onPreisSetzen, onZielSetzen, maxZiel }) {
   const ziel = daten.ziel || 0;
   return (
-    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-semibold text-emerald-100">{typ.name}</div>
         <div className={`text-xs font-semibold ${daten.bestand === 0 ? "text-red-400" : "text-emerald-300"}`}>
@@ -14192,7 +14243,7 @@ function ImbissKategorieCard({ typ, daten, budget, marge, onPreisSetzen, onZielS
           value={daten.verkaufspreis}
           onChange={e => onPreisSetzen(typ.id, Math.max(0, parseFloat(e.target.value) || 0))}
           className="w-full border border-emerald-700/50 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-amber-400"
-          style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+          style={{ backgroundColor: "var(--fm-surface-raised)", colorScheme: "dark" }}
         />
       </div>
       <div>
@@ -14276,7 +14327,7 @@ function EuropapokalView({ europapokal, teamName }) {
       </div>
 
       {europapokal.phase === "ligaphase" || europapokal.tabelle.sp > 0 ? (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Ligaphase — {europapokal.tabelle.sp} / {EURO_LIGAPHASE_SPIELE[europapokal.wettbewerb]} Spiele</div>
           <div className="grid grid-cols-4 gap-2 text-center text-xs mb-3">
             <div><div className="text-emerald-500">S/U/N</div><div className="text-emerald-200 font-semibold">{europapokal.tabelle.s}/{europapokal.tabelle.u}/{europapokal.tabelle.n}</div></div>
@@ -14304,7 +14355,7 @@ function EuropapokalView({ europapokal, teamName }) {
       ) : null}
 
       {europapokal.restfeld && (europapokal.phase === "ligaphase" || europapokal.tabelle.sp > 0) && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Rangliste — alle 36 Teilnehmer</div>
           <div className="flex items-center gap-3 text-[10px] mb-2">
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> Top 8 — direkt Achtelfinale</span>
@@ -14331,7 +14382,7 @@ function EuropapokalView({ europapokal, teamName }) {
       )}
 
       {europapokal.koVerlauf && europapokal.koVerlauf.length > 0 && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">K.-o.-Phase — bisheriger Verlauf</div>
           <div className="space-y-2">
             {europapokal.koVerlauf.map((k, i) => {
@@ -14375,12 +14426,12 @@ function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, o
   return (
     <div>
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="border border-emerald-800 rounded p-4 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Offizieller Fanclub</div>
           <div className="text-2xl font-bold text-amber-400">{fanclub.groesse.toLocaleString("de-CH")}</div>
           <div className="text-[10px] text-emerald-600 mt-0.5">Mitglieder</div>
         </div>
-        <div className="border border-emerald-800 rounded p-4 text-center" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Gesamtstimmung</div>
           <div className={`text-2xl font-bold ${gesamt >= 65 ? "text-emerald-300" : gesamt >= 40 ? "text-amber-400" : "text-red-400"}`}>{gesamt}%</div>
           <div className="text-[10px] text-emerald-600 mt-0.5">bei {teamName}</div>
@@ -14423,14 +14474,14 @@ function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, o
         </div>
       )}
 
-      <div className="border border-emerald-800 rounded p-4 mb-4 space-y-3" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4 space-y-3" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Zufriedenheit im Detail</div>
         {Object.entries(labels).map(([key, label]) => (
           <FanclubBalken key={key} label={label} wert={zufriedenheit[key]} />
         ))}
       </div>
 
-      <div className="border border-emerald-800 rounded p-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Aktivitäten des Fanclubs</div>
         {fanclub.aktivitaeten.length === 0 ? (
           <div className="text-[11px] text-emerald-700">Noch keine Aktivitäten diese Saison.</div>
@@ -14453,7 +14504,7 @@ function TrainingsmaterialView({ trainingsschwerpunkt, onSchwerpunktWaehlen, bel
   const [spielerFuerDetail, setSpielerFuerDetail] = useState(null);
   return (
     <div>
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Wöchentlicher Trainingsschwerpunkt (kaderweiter Standard)</div>
         <div className="space-y-1.5">
           {Object.entries(TRAININGSSCHWERPUNKTE).map(([id, s]) => {
@@ -14474,7 +14525,7 @@ function TrainingsmaterialView({ trainingsschwerpunkt, onSchwerpunktWaehlen, bel
         <div className="text-[11px] text-emerald-600 mt-2">Gilt für den ganzen Kader, ausser für Spieler mit einem individuellen Schwerpunkt weiter unten. Taktik- und Standardsituationen-Training bleiben bewusst nur kaderweit wählbar — das ist Mannschaftsarbeit.</div>
       </div>
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Belastungssteuerung</div>
         <div className="grid grid-cols-3 gap-1.5">
           {Object.entries(BELASTUNGSSTUFEN).map(([id, s]) => {
@@ -14494,7 +14545,7 @@ function TrainingsmaterialView({ trainingsschwerpunkt, onSchwerpunktWaehlen, bel
         <div className="text-[11px] text-emerald-600 mt-2">{BELASTUNGSSTUFEN[belastung]?.beschreibung}</div>
       </div>
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">Individuelle Trainingsschwerpunkte</div>
         <div className="text-[11px] text-emerald-600 mb-3">
           Einzelne Spieler können vom kaderweiten Standard abweichen — z.B. ein Talent gezielt auf Technik, ein verletzungsanfälliger Stammspieler auf Regeneration, während der Rest weiter im Team-Standard trainiert.
@@ -14562,7 +14613,7 @@ function TrainingsmaterialEinkaufView({ trainingsmaterial, budget, managerDivId,
 
   return (
     <div>
-      <div className="border border-emerald-800 rounded p-4 mb-4 text-center" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Gesamtzustand Trainingsmaterial</div>
         <div className={`text-2xl font-bold ${zustandFarbe(durchschnitt)}`}>{Math.round(durchschnitt)}%</div>
         <div className="text-[11px] text-emerald-600 mt-1">Bessere Ausrüstung motiviert — hebt spürbar die Entwicklungschance deiner Spieler im Training. Physio-Material, GPS-Tracker und Konditions-Ausrüstung (Medizinbälle, Sprungkästen, Fitnessbänder) senken zusätzlich das Verletzungsrisiko — je besser ihr Zustand, desto stärker der Effekt.</div>
@@ -14574,7 +14625,7 @@ function TrainingsmaterialEinkaufView({ trainingsmaterial, budget, managerDivId,
           const leistbar = kosten <= budget;
           if (nochNichtVorhanden) {
             return (
-              <div key={item.id} className="border border-emerald-800/60 border-dashed rounded p-2.5" style={{ backgroundColor: "#0b1f14" }}>
+              <div key={item.id} className="border border-emerald-800/60 border-dashed rounded p-2.5" style={{ backgroundColor: "var(--fm-surface)" }}>
                 <div className="flex items-center justify-between text-xs mb-1.5">
                   <span className="text-emerald-400 font-semibold">{item.name}</span>
                   <span className="text-emerald-700 text-[11px]">noch nicht angeschafft</span>
@@ -14592,7 +14643,7 @@ function TrainingsmaterialEinkaufView({ trainingsmaterial, budget, managerDivId,
           const zustand = Math.round(trainingsmaterial?.[item.id] ?? 50);
           const bereitsBestzustand = zustand >= 100;
           return (
-            <div key={item.id} className="border border-emerald-800 rounded p-2.5" style={{ backgroundColor: "#0b1f14" }}>
+            <div key={item.id} className="border border-emerald-800 rounded p-2.5" style={{ backgroundColor: "var(--fm-surface)" }}>
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="text-emerald-100 font-semibold">{item.name}</span>
                 <span className={`font-semibold ${zustandFarbe(zustand)}`}>{zustand}%</span>
@@ -14692,7 +14743,7 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
                 value={gewaehlterSpieler}
                 onChange={e => setGewaehlterSpieler(e.target.value)}
                 className="w-full text-xs border border-emerald-700/50 rounded px-2 py-1.5 mb-2"
-                style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+                style={{ backgroundColor: "var(--fm-surface-raised)", colorScheme: "dark" }}
               >
                 {squad.slice().sort((a, b) => b.rating - a.rating).map(p => (
                   <option key={p.id} value={p.id}>{p.name} · {p.posName} · Stärke {p.rating}{p.persoenlichkeit === "ehrgeizig" ? " (ehrgeizig)" : ""}</option>
@@ -14723,7 +14774,7 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
           const maxZiel = berechneMaxZielbestand(kapazitaet, t.nachfrageAnteil, managerDivId, t.id === "shirts" ? 2.5 : 1);
           const marge = item.verkaufspreis - t.einkaufspreis;
           return (
-            <div key={t.id} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+            <div key={t.id} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
               <div className="flex items-center justify-between mb-2">
                 <div className="text-sm font-semibold text-emerald-100">{t.name}</div>
                 <div className={`text-xs font-semibold ${item.bestand === 0 ? "text-red-400" : "text-emerald-300"}`}>
@@ -14744,7 +14795,7 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
                   value={item.verkaufspreis}
                   onChange={e => onPreisSetzen(t.id, Math.max(0, parseInt(e.target.value) || 0))}
                   className="w-full border border-emerald-700/50 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-amber-400"
-                  style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+                  style={{ backgroundColor: "var(--fm-surface-raised)", colorScheme: "dark" }}
                 />
               </div>
 
@@ -14773,7 +14824,7 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
       </div>
 
       {(gesamtVerkauftSaison > 0 || fanshopHistorie.length > 0) && (
-        <div className="mt-4 border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="mt-4 border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="flex items-center justify-between mb-2 flex-wrap gap-1.5">
             <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">
               Verkaufsstatistik {istAktuelleSaison ? "dieser Saison" : `Saison ${gewaehlteSaison}/${(gewaehlteSaison + 1) % 100}`}
@@ -14783,7 +14834,7 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
                 value={gewaehlteSaison}
                 onChange={e => setGewaehlteSaison(Number(e.target.value))}
                 className="text-[11px] border border-emerald-700/50 rounded px-1.5 py-0.5"
-                style={{ backgroundColor: "#0e2818", colorScheme: "dark" }}
+                style={{ backgroundColor: "var(--fm-surface-raised)", colorScheme: "dark" }}
               >
                 {vorhandeneFanshopSaisons.map(s => (
                   <option key={s} value={s}>{s === season ? "Aktuelle Saison" : `Saison ${s}/${(s + 1) % 100}`}</option>
@@ -14828,7 +14879,7 @@ function SponsoringView({ trikotsponsor, trikotsponsorKandidaten, aermelsponsor,
         { titel: "Ärmelsponsor", aktuell: aermelsponsor, kandidaten: aermelsponsorKandidaten, onEinholen: onAermelAngeboteEinholen, onWaehlen: onAermelsponsorWaehlen },
         { titel: "Trainingsanzug-Sponsor", aktuell: trainingsanzugsponsor, kandidaten: trainingsanzugsponsorKandidaten, onEinholen: onTrainingsanzugAngeboteEinholen, onWaehlen: onTrainingsanzugsponsorWaehlen }
       ].map(({ titel, aktuell, kandidaten, onEinholen, onWaehlen }) => (
-        <div key={titel} className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div key={titel} className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2 flex items-center gap-1.5"><Shirt size={13} /> {titel}</div>
           {aktuell ? (
             <div className="flex items-center justify-between">
@@ -14862,7 +14913,7 @@ function SponsoringView({ trikotsponsor, trikotsponsorKandidaten, aermelsponsor,
 
 
       {stadion && (
-        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+        <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2 flex items-center gap-1.5"><Building2 size={13} /> Stadion-Namensrechte</div>
           {stadion.namensSponsor ? (
             <div className="flex items-center justify-between">
@@ -14886,7 +14937,7 @@ function SponsoringView({ trikotsponsor, trikotsponsorKandidaten, aermelsponsor,
         </div>
       )}
 
-      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="flex items-center justify-between mb-1">
           <div className="text-xs uppercase tracking-wider text-emerald-400/80 flex items-center gap-1.5"><Megaphone size={13} /> Stadion-Werbebanner</div>
           <div className="text-xs text-emerald-500">{belegtePlaetze} / {BANNER_MAX_PLAETZE[managerDivId] || BANNER_MAX_PLAETZE.OL} belegt</div>
@@ -14928,7 +14979,7 @@ function SponsoringView({ trikotsponsor, trikotsponsorKandidaten, aermelsponsor,
       ) : (
         <div className="space-y-1">
           {vertraege.map(v => (
-            <div key={v.id} className="flex items-center justify-between text-xs border border-emerald-900 rounded px-3 py-1.5" style={{ backgroundColor: "#0b1f14" }}>
+            <div key={v.id} className="flex items-center justify-between text-xs border border-emerald-900 rounded px-3 py-1.5" style={{ backgroundColor: "var(--fm-surface)" }}>
               <span className="text-emerald-200">
                 {v.firma} <span className="text-emerald-600">· {v.anzahl || 1} Banner{v.vertragBisSaison != null ? ` · bis Saison ${v.vertragBisSaison}/${(v.vertragBisSaison + 1) % 100}` : ""}</span>
               </span>
@@ -14971,8 +15022,8 @@ function TeamRepairScreen({ profile, careerState, setCareerState }) {
   };
 
   return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="w-full max-w-md border border-red-500/50 rounded-lg p-6 text-center space-y-4" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+      <div className="w-full max-w-md border border-red-500/50 rounded-lg p-6 text-center space-y-4" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <XCircle className="mx-auto text-red-400" size={32} />
         <h2 className="text-lg font-bold text-red-300">Dein Team wurde in keiner Liga gefunden</h2>
         <p className="text-emerald-400 text-xs">
@@ -14992,8 +15043,8 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
   const frage = pressekonferenz.fragen[pressekonferenz.aktuellerIndex];
   if (!frage) return null;
   return (
-    <div className="min-h-screen text-emerald-50 font-mono p-4 flex items-center justify-center" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className="max-w-lg w-full border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{ backgroundColor: "#0e2818" }}>
+    <div className="min-h-screen text-emerald-50 font-mono p-4 flex items-center justify-center" style={{background: "var(--fm-bg)"}}>
+      <div className="max-w-lg w-full border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-5 py-4">
           <div className="text-[10px] text-emerald-500 uppercase tracking-widest">Pressekonferenz · Frage {pressekonferenz.aktuellerIndex + 1}/{pressekonferenz.fragen.length} · Thema: {frage.thema}</div>
           {frage.journalist && (
@@ -15012,7 +15063,7 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
               key={i}
               onClick={() => onAntwort(i)}
               className="w-full text-left text-sm border border-emerald-800 hover:border-amber-400 rounded px-4 py-3 text-emerald-100 transition-colors"
-              style={{ backgroundColor: "#0b1f14" }}
+              style={{ backgroundColor: "var(--fm-surface)" }}
             >
               „{a.text}"
             </button>
@@ -15027,8 +15078,8 @@ function SpieltagErgebnisseModal({ info, managerTeam, onClose }) {
   if (!info) return null;
   const hatElfDesTages = info.elfDesTages?.spieler?.length > 0;
   return (
-    <div className="min-h-screen text-emerald-50 font-mono p-4" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <div className={`${hatElfDesTages ? "max-w-5xl" : "max-w-md"} mx-auto border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden`} style={{ backgroundColor: "#0e2818" }}>
+    <div className="min-h-screen text-emerald-50 font-mono p-4" style={{background: "var(--fm-bg)"}}>
+      <div className={`${hatElfDesTages ? "max-w-5xl" : "max-w-md"} mx-auto border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden`} style={{ backgroundColor: "var(--fm-surface-raised)" }}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-5 py-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] text-emerald-500 uppercase tracking-widest">{info.ligaName}</div>
@@ -15062,7 +15113,7 @@ function SpieltagErgebnisseModal({ info, managerTeam, onClose }) {
 
         {info.torschuetzenliste?.length > 0 && (
           <div className="px-4 pb-4 flex justify-center">
-            <div className="border border-emerald-800 rounded p-3 w-full lg:max-w-sm" style={{ backgroundColor: "#0b1f14" }}>
+            <div className="border border-emerald-800 rounded p-3 w-full lg:max-w-sm" style={{ backgroundColor: "var(--fm-surface)" }}>
               <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2 flex items-center gap-1.5">⚽ Torschützenliste (aktueller Stand)</div>
               <div className="space-y-1">
                 {info.torschuetzenliste.map((s, i) => (
@@ -15184,7 +15235,7 @@ function SpielberichtKarten({ tore, vorlagen, gelb, rot }) {
 // Vereinsname, da hier Spieler aus mehreren unterschiedlichen Teams gemeinsam aufgelistet werden.
 function LigaStatistikListe({ titel, icon: Icon, spieler, wert, einheit = "", farbe = "text-amber-400" }) {
   return (
-    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "#0b1f14" }}>
+    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
       <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2 flex items-center gap-1.5">{Icon && <Icon size={12} />} {titel}</div>
       {spieler.length ? (
         <div className="space-y-1">
@@ -17907,12 +17958,6 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteJugendbeforderung: null,
           letzteMarketingAblauf: null,
           letzterAufstieg: false,
-          letzterMeistertitelPK: null,
-          letzterTorschuetzenkoenigPK: null,
-          letzterPokalsiegPK: null,
-          letzterEuropapokalsiegPK: null,
-          letzterPokalFinaleVerlorenPK: null,
-          letzterEuropapokalFinaleVerlorenPK: null,
           letzterWmEmSiegPK: null,
           letzterWmEmFinalVerlorenPK: null,
           letzterAbstieg: false,
@@ -18341,11 +18386,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       && !trophaeen.some(t => (t.typ === "wm_sieg" || t.typ === "em_sieg") && t.saison === bundestrainerAmt.letztesTurnier.jahr))
       ? { saison: bundestrainerAmt.letztesTurnier.jahr, verein: profile.team, typ: bundestrainerAmt.letztesTurnier.wettbewerb === "WM" ? "wm_sieg" : "em_sieg", text: `${bundestrainerAmt.letztesTurnier.wettbewerb}-Titel als Bundestrainer` }
       : null;
+    // Entdoppelung nach Typ + Saison: da trophaeen jetzt tatsächlich im Spielstand landet (siehe
+    // Entfernung des überschreibenden "trophaeen,"), darf derselbe Titel nie doppelt eingetragen werden.
     const trophaeenNachTurnier = [
       ...trophaeen,
       ...(fehlenderHistorischerWmEmSieg ? [fehlenderHistorischerWmEmSieg] : []),
       ...(wmEmTrophaeenEintrag ? [wmEmTrophaeenEintrag] : [])
-    ];
+    ].filter((t, idx, arr) => !(t.typ === "wm_sieg" || t.typ === "em_sieg") || arr.findIndex(u => u.typ === t.typ && u.saison === t.saison) === idx);
     // Eigener Name statt die destrukturierte Konstante letzterWmEmSiegPK erneut zuzuweisen (sonst
     // Absturz) — Pressekonferenz-Kreuzverbindung, sichtbar erst ab der nächsten Saison (siehe
     // dieselbe Lösung bei Meisterschaft/Torschützenkönig in naechsterSpieltag).
@@ -18817,7 +18864,6 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       abgelehnteVerkaufsvorschlaege: [],
       trainerZufriedenheit: coachFuerNeueSaison ? neueZufriedenheit : 70,
       pokal: initialerPokal(seasonEndInfo.divisions),
-      trophaeen,
       saisonHistorie,
       trikotsponsor: neuerTrikotsponsor,
       aermelsponsor: neuerAermelsponsor,
@@ -18885,6 +18931,15 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // Personalabteilungen bei jedem Saisonübergang verloren und fiel auf "minimal" zurück, statt bis
       // zur manuellen Änderung bestehen zu bleiben.
       personalabteilungen,
+      // Diese sechs Pressekonferenz-Flags wurden am Saisonende korrekt berechnet, aber im neuen Saisonstand
+      // nie übernommen (das Objekt ist ein grosses Literal ohne Spread von cs) — Titel-Fragen konnten
+      // dadurch in der Folgesaison nie erscheinen.
+      letzterMeistertitelPK,
+      letzterTorschuetzenkoenigPK,
+      letzterPokalsiegPK,
+      letzterEuropapokalsiegPK,
+      letzterPokalFinaleVerlorenPK,
+      letzterEuropapokalFinaleVerlorenPK,
       letzterWmEmSiegPK: letzterWmEmSiegPKNeu,
       letzterWmEmFinalVerlorenPK: letzterWmEmFinalVerlorenPKNeu,
       // Zahlungstermin ist an personalabteilungen gekoppelt (siehe naechsterSpieltag) — würde er hier
@@ -20612,7 +20667,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
 
   if (ruecktritt) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="max-w-md w-full border border-amber-400/40 rounded-lg p-6 space-y-4" style={{ backgroundColor: "#0f2818" }}>
           <div className="text-xs uppercase tracking-wider text-amber-400/80 text-center">Rücktritt</div>
           <div className="text-center text-white font-bold">
@@ -20645,7 +20700,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
 
   if (zwangsentlassung) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="max-w-md w-full border border-red-500/50 rounded-lg p-6 space-y-4" style={{ backgroundColor: "#0f2818" }}>
           <div className="text-xs uppercase tracking-wider text-red-400/80 text-center">Entlassen</div>
           <div className="text-center text-white font-bold">
@@ -20681,7 +20736,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const heimTeam = relegationsspiel.phase === "hinspiel" ? relegationsspiel.teamHoeher : relegationsspiel.teamTiefer;
     const gastTeam = relegationsspiel.phase === "hinspiel" ? relegationsspiel.teamTiefer : relegationsspiel.teamHoeher;
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="max-w-md w-full border border-amber-400/40 rounded-lg p-6 space-y-4" style={{ backgroundColor: "#0f2818" }}>
           <div className="text-xs uppercase tracking-wider text-amber-400/80 text-center">Relegation — {relegationsspiel.liga === "BL" ? "Bundesliga / 2. Liga" : "2. Liga / 3. Liga"}</div>
           <div className="text-center text-emerald-300 text-sm">
@@ -20705,7 +20760,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   if (relegationsspiel && relegationsspiel.phase === "fertig") {
     const gewonnen = relegationsspiel.gewinner === profile.team;
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className={`max-w-md w-full border rounded-lg p-6 space-y-4 ${gewonnen ? "border-emerald-400/50" : "border-red-500/50"}`} style={{ backgroundColor: "#0f2818" }}>
           <div className="text-xs uppercase tracking-wider text-amber-400/80 text-center">Relegation entschieden</div>
           <div className="text-center text-2xl">{gewonnen ? "🎉" : "😔"}</div>
@@ -20727,7 +20782,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
 
   if (turnierspiel && !turnierspiel.fertig) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="max-w-md w-full border border-amber-400/40 rounded-lg p-6 space-y-4" style={{ backgroundColor: "#0f2818" }}>
           <div className="text-xs uppercase tracking-wider text-amber-400/80 text-center">{turnierspiel.wettbewerb} — Endrunde</div>
           <div className="text-center text-sky-300 text-sm">{TURNIER_RUNDEN[turnierspiel.rundenIndex]}</div>
@@ -20750,7 +20805,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
 
   if (turnierspiel && turnierspiel.fertig && !saisonAbschliessenBestaetigt) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className={`max-w-md w-full border rounded-lg p-6 space-y-4 ${turnierspiel.sieger ? "border-amber-400/50" : "border-red-500/50"}`} style={{ backgroundColor: "#0f2818" }}>
           <div className="text-xs uppercase tracking-wider text-amber-400/80 text-center">{turnierspiel.wettbewerb} — Turnier beendet</div>
           <div className="text-center text-2xl">{turnierspiel.sieger ? "🏆" : "😔"}</div>
@@ -20776,7 +20831,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   // erscheint, aber auch die eigentliche Auswertung nie kommt. Versucht die Berechnung einfach erneut.
   if (turnierspiel && turnierspiel.fertig && saisonAbschliessenBestaetigt && !seasonEndInfo) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0b1f14" }}>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="max-w-md w-full border border-red-500/50 rounded-lg p-6 space-y-4" style={{ backgroundColor: "#0f2818" }}>
           <div className="text-center text-white font-bold">Die Saisonauswertung konnte nicht berechnet werden.</div>
           <p className="text-xs text-emerald-500 text-center">Das Turnierergebnis bleibt dabei erhalten — ein erneuter Versuch sollte funktionieren.</p>
@@ -20798,8 +20853,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     if (!saisonauswertungGelesen) {
       const saisonStatistik = ermittleSaisonStatistiken(division);
       return (
-        <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-          <div className="w-full max-w-3xl border border-amber-400/50 rounded-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto" style={{backgroundColor: "#0e2818"}}>
+        <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+          <div className="w-full max-w-3xl border border-amber-400/50 rounded-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto" style={{backgroundColor: "var(--fm-surface-raised)"}}>
             <div className="text-center">
               <Trophy className="mx-auto text-amber-400 mb-2" size={28} />
               <h2 className="text-xl font-bold">Saisonauswertung {season}/{(season + 1) % 100}</h2>
@@ -20852,8 +20907,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         philosophiePaket, saisonAuszeichnungen: saisonAuszeichnungenFuerBericht
       });
       return (
-        <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-          <div className="w-full max-w-lg border border-amber-400/50 rounded-lg p-6 space-y-4" style={{backgroundColor: "#0e2818"}}>
+        <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+          <div className="w-full max-w-lg border border-amber-400/50 rounded-lg p-6 space-y-4" style={{backgroundColor: "var(--fm-surface-raised)"}}>
             <div className="text-center">
               <ClipboardList className="mx-auto text-amber-400 mb-2" size={28} />
               <h2 className="text-xl font-bold">Jahresbericht Saison {season}/{(season + 1) % 100}</h2>
@@ -20879,8 +20934,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       : 0;
     const brauchtEntscheidung = (seasonEndInfo.vertragLaeuftAusSnapshot && vertragsEntscheidung === null) || (seasonEndInfo.managerVertragLaeuftAusSnapshot && managerVertragsEntscheidung === null);
     return (
-      <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-        <div className="w-full max-w-md border border-amber-400/50 rounded-lg p-6 text-center space-y-4" style={{backgroundColor: "#0e2818"}}>
+      <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+        <div className="w-full max-w-md border border-amber-400/50 rounded-lg p-6 text-center space-y-4" style={{backgroundColor: "var(--fm-surface-raised)"}}>
           <Trophy className="mx-auto text-amber-400" size={32} />
           <h2 className="text-xl font-bold">Saison {season}/{(season + 1) % 100} beendet</h2>
           <p className="text-emerald-300 text-sm">
@@ -21059,8 +21114,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   }
 
   return (
-    <div className="min-h-screen text-emerald-50 font-mono pb-10" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-      <header className="border-b border-emerald-800 px-4 py-3 sticky top-0 z-10" style={{backgroundColor: "#0e2818"}}>
+    <div className="min-h-screen text-emerald-50 font-mono pb-10" style={{background: "var(--fm-bg)"}}>
+      <header className="border-b border-emerald-800 px-4 py-3 sticky top-0 z-10" style={{backgroundColor: "var(--fm-surface-raised)"}}>
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src={trainerPortraitFuer(`${profile.vorname} ${profile.nachname}`)} alt="" className="w-11 h-11 rounded-full border-2 border-amber-400/50 object-cover shrink-0" />
@@ -21123,7 +21178,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       <main className="max-w-6xl mx-auto px-4 pt-4">
         <div className="flex gap-4 items-start">
           {/* FRAME 1 — feste linke Navigation, unabhängig vom Inhalt der anderen beiden Bereiche scrollbar */}
-          <nav className="hidden md:flex flex-col gap-0.5 shrink-0 w-52 border border-emerald-800 rounded p-2 sticky top-[88px] max-h-[calc(100vh-104px)] overflow-y-auto" style={{ backgroundColor: "#0e2818" }}>
+          <nav className="hidden md:flex flex-col gap-0.5 shrink-0 w-52 border border-emerald-800 rounded p-2 sticky top-[88px] max-h-[calc(100vh-104px)] overflow-y-auto" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
             {TAB_GRUPPEN.map(g => {
               const aktiv = TAB_ZU_GRUPPE[tab] === g.id;
               const punkt = gruppeBenachrichtigung(g);
@@ -21394,7 +21449,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               {spielberichtProtokoll.map((eintrag, i) => {
                 const { typ, bericht, label, scoreZeile } = eintrag;
                 return (
-                  <div key={i} className="border border-emerald-700/50 rounded p-3 space-y-2" style={{ backgroundColor: i === 0 ? "#0e2818" : "#0a1f13" }}>
+                  <div key={i} className="border border-emerald-700/50 rounded p-3 space-y-2" style={{ backgroundColor: i === 0 ? "var(--fm-surface-raised)" : "var(--fm-surface)" }}>
                     <div className="flex items-center justify-between">
                       <span className="text-xs uppercase tracking-wider text-emerald-400/80">{label}</span>
                       <span className="text-sm font-semibold text-white">{scoreZeile}</span>
@@ -21425,7 +21480,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             </div>{/* /Frame 2 */}
 
             {/* FRAME 3 — der aktuell geöffnete Tab, unterhalb von Frame 2 */}
-            <div className="border border-emerald-800 rounded p-3" style={{backgroundColor: "#0e2818"}}>
+            <div className="border border-emerald-800 rounded p-3" style={{backgroundColor: "var(--fm-surface-raised)"}}>
           {tab === "tabelle" && <TabelleView division={division} managerTeam={profile.team} managerBonus={begrenzeBonus(coachBonus + zufriedenheitsBonus + (campBonus ? campBonus.wert : 0) + formBonus + assistentBonus + standardBonus + trainingsBonus + teamgeistBonus + eingespieltheitBonus) + formationsBonus} />}
           {tab === "vereinsinfos" && <VereinsinfosView careerState={careerState} />}
           {tab === "nationalmannschaft" && bundestrainerAmt && <NationalmannschaftView divisions={divisions} bundestrainerAmt={bundestrainerAmt} onNationalkaderSetzen={onNationalkaderSetzen} onNationalformationSetzen={onNationalformationSetzen} managerDivId={managerDivId} season={season} trophaeen={trophaeen} />}
@@ -21580,7 +21635,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                 <JahresberichtInhalt bericht={letzterJahresbericht.bericht} />
               </div>
             ) : (
-              <div className="border border-emerald-800 rounded p-4 text-center text-emerald-600 text-xs" style={{ backgroundColor: "#0b1f14" }}>
+              <div className="border border-emerald-800 rounded p-4 text-center text-emerald-600 text-xs" style={{ backgroundColor: "var(--fm-surface)" }}>
                 Noch kein Jahresbericht vorhanden — der erste erscheint am Ende dieser Saison.
               </div>
             )
@@ -21782,8 +21837,8 @@ class FehlerAnzeige extends Component {
   render() {
     if (this.state.fehler) {
       return (
-        <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>
-          <div className="w-full max-w-md border border-red-500/50 rounded-lg p-6 space-y-3" style={{backgroundColor: "#0e2818"}}>
+        <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
+          <div className="w-full max-w-md border border-red-500/50 rounded-lg p-6 space-y-3" style={{backgroundColor: "var(--fm-surface-raised)"}}>
             <div className="text-red-300 font-bold text-sm">Es ist ein Anzeigefehler aufgetreten</div>
             <div className="text-[11px] text-emerald-500 break-words">{String(this.state.fehler && this.state.fehler.message)}</div>
             <pre className="text-[9px] text-emerald-700 overflow-auto max-h-40 whitespace-pre-wrap">{String(this.state.fehler && this.state.fehler.stack)}</pre>
@@ -22087,7 +22142,7 @@ function App() {
   };
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-emerald-400 font-mono text-sm" style={{background: "linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%)"}}>Lade Karriere…</div>;
+    return <div className="min-h-screen flex items-center justify-center text-emerald-400 font-mono text-sm" style={{background: "var(--fm-bg)"}}>Lade Karriere…</div>;
   }
 
   if (startBildschirmGezeigt) {

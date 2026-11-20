@@ -4,8 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
 <title>Fussball Manager 26/27</title>
-<meta name="description" content="Amiga-Bundesliga-Manager-Stil: von der Oberliga bis zur Bundesliga — mit Aufstieg, Abstieg, Transfers, Pokal und Europapokal." />
-<meta name="theme-color" content="#0b1f14" />
+<meta name="description" content="Fussball-Manager: von der Oberliga bis zur Bundesliga — mit Aufstieg, Abstieg, Transfers, Pokal und Europapokal." />
+<meta name="theme-color" content="#0a0f1a" />
 
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png" />
@@ -18,6 +18,25 @@
 
 <!-- Tailwind (Play-CDN, JIT im Browser — kein Build-Schritt nötig) -->
 <script src="https://cdn.tailwindcss.com"></script>
+<script>
+  /* Modernes dunkles Theme: die bisherige "emerald"-Palette wird auf eine kühle Blau-Grau-Skala umgelegt
+     (Flächen, Rahmen, gedämpfte Texte); nur 400 bleibt als frischer Grün-Akzent. So ändert sich das
+     gesamte Erscheinungsbild an einer Stelle, ohne die ~2000 Klassen im Code anzufassen. */
+  tailwind.config = {
+    theme: { extend: {
+      fontFamily: {
+        sans: ["-apple-system","BlinkMacSystemFont","SF Pro Text","Inter","system-ui","Segoe UI","Roboto","sans-serif"],
+        mono: ["-apple-system","BlinkMacSystemFont","SF Pro Text","Inter","system-ui","Segoe UI","Roboto","sans-serif"]
+      },
+      colors: {
+        emerald: {
+          50:"#f1f5fb",100:"#e6edf6",200:"#d3dcea",300:"#b6c4d8",400:"#43d9a0",500:"#94a3b8",
+          600:"#6b7a90",700:"#3a475c",800:"#263247",900:"#172033",950:"#0d1423"
+        }
+      }
+    } }
+  };
+</script>
 
 <!-- React/ReactDOM/lucide-react als ESM direkt aus dem CDN, damit app.jsx unverändert die
      gewohnten "import ... from react/lucide-react" Statements benutzen kann. -->
@@ -35,12 +54,12 @@
 <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
 
 <style>
-  html, body { height: 100%; margin: 0; background: #050e08; }
+  html, body { height: 100%; margin: 0; background: #0a0f1a; }
   #root { min-height: 100%; }
   #boot-loading {
     min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    color: #6ee7b7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px;
-    background: linear-gradient(135deg, #050e08 0%, #0b1f14 35%, #123322 65%, #08160e 100%);
+    color: #8a99b0; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; font-size: 14px;
+    background: #0a0f1a;
   }
 </style>
 </head>
