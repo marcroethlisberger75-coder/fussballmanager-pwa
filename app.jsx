@@ -946,6 +946,37 @@ const PHILOSOPHIE_PAKETE = {
   }
 };
 
+// Passung zwischen Vereinsphilosophie und Trainerstil: Der Sportdirektor setzt seine Spielidee im echten
+// Fussball vor allem über die Trainerwahl durch. Passt der Stil, zieht der Trainer voll mit; steht er im
+// Gegensatz zur Philosophie, gibt es Reibung (kleiner Stärkemalus, die Zufriedenheit sinkt langsam).
+const PAKET_STIL_PASST = {
+  ballbesitz: ["Taktik-Fuchs", "Motivator"],
+  defensiv: ["Defensive Stabilität", "Konditionsexperte"],
+  offensivspektakel: ["Offensiv-Fokus", "Motivator"],
+  umschaltfussball: ["Offensiv-Fokus", "Konditionsexperte"],
+  jugendfokus: ["Jugendförderung", "Motivator"]
+};
+const PAKET_STIL_REIBUNG = {
+  ballbesitz: [],
+  defensiv: ["Offensiv-Fokus"],
+  offensivspektakel: ["Defensive Stabilität"],
+  umschaltfussball: ["Defensive Stabilität"],
+  jugendfokus: []
+};
+// Rotationsprinzip als Vereinslinie: Jugendförderer und Motivatoren tragen es gern mit, ein Defensiv-Trainer
+// will lieber mit der stärksten Elf spielen.
+function rotationPassung(stil) {
+  if (stil === "Jugendförderung" || stil === "Motivator") return 1;
+  if (stil === "Defensive Stabilität") return -1;
+  return 0;
+}
+function paketPassung(paketId, stil) {
+  if (!stil) return 0;
+  if ((PAKET_STIL_PASST[paketId] || []).includes(stil)) return 1;
+  if ((PAKET_STIL_REIBUNG[paketId] || []).includes(stil)) return -1;
+  return 0;
+}
+
 // Kennzahlen aus den letzten (max. 5) Ligaspielen des eigenen Teams — Basis für die Vorgaben-Bewertung
 function berechneTaktikKennzahlen(results, squad, managerTeam) {
   const eigene = results
@@ -1207,6 +1238,14 @@ function berechneGehaltsvorschlag(altesSalaer, platz, anzahlTeams, aufgestiegen,
 // Je grosszügiger das Angebot über dem Marktgehalt, je erfolgreicher der Verein und je älter
 // (sicherheitsbedürftiger) der Spieler, desto eher unterschreibt er. Topspieler sind schwerer zu
 // halten, sehr lange Laufzeiten unbeliebter.
+// Maximale Vertragslaufzeit nach Alter: Berufsspieler-Verträge laufen höchstens 5 Jahre (FIFA-Regel), unter
+// 18 höchstens 3 Jahre; ältere Spieler bekommen aus Risikogründen nur kurze Verträge.
+function maxVertragsLaufzeit(alter) {
+  if (alter < 18) return 3;
+  if (alter >= 34) return 1;
+  if (alter >= 31) return 2;
+  return 5;
+}
 function berechneVertragsAkzeptanz(spieler, angebotsSalaer, marktSalaer, tabellenPlatz, anzahlTeams, laufzeit, jahreVerbleibendVorAngebot = 0) {
   const angebotsFaktor = angebotsSalaer / marktSalaer;
   let chance = 0.25 + (angebotsFaktor - 1) * 1.3;
@@ -1216,6 +1255,8 @@ function berechneVertragsAkzeptanz(spieler, angebotsSalaer, marktSalaer, tabelle
   const erfolgsFaktor = 1 - (tabellenPlatz - 1) / Math.max(1, anzahlTeams - 1);
   chance += erfolgsFaktor * 0.18;
   chance -= Math.max(0, laufzeit - 2) * 0.04;
+  // Ein starker Spieler in der Blüte bindet sich gern langfristig an einen Verein, der ihm etwas bietet.
+  if (spieler.alter <= 29 && spieler.rating >= 75 && laufzeit > 2) chance += (laufzeit - 2) * 0.03;
   // Persönlichkeit: ein Loyaler ist deutlich leichter zu halten, ein Ehrgeiziger pokert härter
   const haertegrad = PERSOENLICHKEITEN[spieler.persoenlichkeit]?.vertragsHaertegrad || 0;
   chance -= haertegrad * 0.008;
@@ -1231,14 +1272,18 @@ function berechneVertragsAkzeptanz(spieler, angebotsSalaer, marktSalaer, tabelle
 // die auch berechneVertragsAkzeptanz am stärksten gewichtet: das Gehalt relativ zum Marktwert
 // (angebotsFaktor, Gewicht 1.3) und eine zu lange Laufzeit (Abzug ab über 2 Jahren). Rein informativ,
 // verändert die eigentliche Chance nicht — reine Rückmeldung, worauf ein neues Angebot abzielen sollte.
-function ermittleVertragsForderungen(angebotsSalaer, marktSalaer, laufzeit) {
+function ermittleVertragsForderungen(angebotsSalaer, marktSalaer, laufzeit, alter = null) {
   const forderungen = [];
   const angebotsFaktor = angebotsSalaer / marktSalaer;
   if (angebotsFaktor < 1.15) {
     const zielGehalt = Math.round((marktSalaer * Math.min(2, angebotsFaktor + 0.35)) / 100) * 100;
     forderungen.push(`mehr Gehalt — mindestens rund ${zielGehalt.toLocaleString("de-CH")} €/Jahr`);
   }
-  if (laufzeit > 2) {
+  // Das Laufzeit-Argument hängt vom Alter: Ältere wollen sich nicht lange binden, junge Spieler in der
+  // Blüte dagegen Sicherheit durch eine längere Bindung.
+  if (alter != null && alter <= 27 && laufzeit <= 2) {
+    forderungen.push("eine längere Vertragslaufzeit (3 Jahre oder mehr)");
+  } else if (laufzeit > 2 && (alter == null || alter >= 29)) {
     forderungen.push(`eine kürzere Vertragslaufzeit (${laufzeit - 1} Jahr${laufzeit - 1 === 1 ? "" : "e"} oder weniger)`);
   }
   if (!forderungen.length) forderungen.push("insgesamt ein spürbar attraktiveres Angebot");
@@ -1260,9 +1305,9 @@ const FORMATIONEN = [
 ];
 
 const PHILOSOPHIE_OPTIONEN = [
-  { id: "defensiv", label: "Defensiv & stabil", score: -2 },
-  { id: "ausgeglichen", label: "Ausgeglichen", score: 0 },
-  { id: "offensiv", label: "Offensiv & mutig", score: 2 }
+  { id: "defensiv", label: "Sicherheit zuerst", score: -2 },
+  { id: "ausgeglichen", label: "Ausgewogen", score: 0 },
+  { id: "offensiv", label: "Mutig auftreten", score: 2 }
 ];
 
 const TRAINER_STIL_BIAS = {
@@ -1277,7 +1322,7 @@ const TRAINER_STIL_BIAS = {
 function waehleFormation(philosophieId, coachStil) {
   const managerScore = PHILOSOPHIE_OPTIONEN.find(p => p.id === philosophieId)?.score ?? 0;
   const coachBias = TRAINER_STIL_BIAS[coachStil] ?? 0;
-  const ziel = managerScore * 0.35 + coachBias * 0.65;
+  const ziel = managerScore * 0.2 + coachBias * 0.8; // Der Trainer entscheidet; die Ambition des Vereins ist nur ein Hinweis
   let beste = FORMATIONEN[0];
   let bestDiff = Infinity;
   FORMATIONEN.forEach(f => {
@@ -1366,7 +1411,7 @@ function waehleStartelf(squad, formation) {
   return { elf, bank, staerke };
 }
 
-// Rotationsprinzip (Schalter im Trainer-Tab, bei der Vereinsphilosophie): Bewusst nicht immer die statistisch stärkste Elf aufstellen,
+// Rotationsprinzip (Schalter im Taktik-Tab): Bewusst nicht immer die statistisch stärkste Elf aufstellen,
 // sondern gelegentlich einem jüngeren Spieler (≤23) an derselben Position den Vorzug vor einem älteren
 // Stammspieler (>23) geben — ein echter Trade-off (leicht schwächer an diesem Spieltag), der über die
 // Zeit hinweg mehr jungen Spielern Einsatzzeit gibt und so von selbst einer zu eng gedrängten
@@ -1569,6 +1614,64 @@ const BELASTUNGSSTUFEN = {
 function schwerpunktFuerSpieler(spielerId, spielerSchwerpunkt, squadSchwerpunkt) {
   const gewaehlt = spielerSchwerpunkt?.[spielerId];
   return TRAININGSSCHWERPUNKTE[gewaehlt] || TRAININGSSCHWERPUNKTE[squadSchwerpunkt] || TRAININGSSCHWERPUNKTE.technik;
+}
+
+// TRAININGSPLANUNG DURCH DEN TRAINER: Im echten Fussball plant der Cheftrainer mit seinem Stab die
+// Trainingswoche (Schwerpunkt, Belastung, individuelle Pläne). Der Manager setzt nur den Rahmen und kann
+// Wünsche äussern. Die Funktion ermittelt den tatsächlichen Plan aus Trainerstil, Stab und Kaderzustand
+// und prüft, ob der Trainer dem Wunsch des Managers folgt.
+const TRAINER_STIL_TRAINING = { "Offensiv-Fokus": "technik", "Defensive Stabilität": "taktik", "Taktik-Fuchs": "taktik", "Motivator": "technik", "Jugendförderung": "technik", "Konditionsexperte": "kondition" };
+function ermittleTrainingsplan({ coach, stab = {}, squad = [], wunschSchwerpunkt = "trainer", wunschBelastung = "trainer", spielerWunsch = {}, zufriedenheit = 70, philosophiePaket = "ballbesitz", spieltag = 0 }) {
+  const hatTrainer = !!coach;
+  const verletzte = squad.filter(p => p.verletzung).length;
+  const quote = verletzte / Math.max(1, squad.length);
+  const warner = stab.arzt ? "Der Vereinsarzt" : "Der Trainer";
+
+  // 1) Eigener Plan des Trainers
+  let schwerpunkt = TRAINER_STIL_TRAINING[coach?.stil] || "technik";
+  let grund = hatTrainer ? `${coach.name} (${coach.stil}) plant die Woche nach seinem Stil.` : "Ohne Cheftrainer läuft nur ein einfaches Standardprogramm.";
+  if (hatTrainer && stab.standard && spieltag % 5 === 4) { schwerpunkt = "standards"; grund = "Der Standardtrainer lässt diese Woche Eckbälle und Freistösse üben."; }
+  let belastung = "standard";
+  if (hatTrainer && coach.stil === "Offensiv-Fokus" && (philosophiePaket === "offensivspektakel" || philosophiePaket === "umschaltfussball") && quote < 0.1) belastung = "vollgas";
+  let warnung = null;
+  if (quote >= 0.2) {
+    schwerpunkt = "regeneration"; belastung = "schonen";
+    warnung = `${warner} warnt: ${verletzte} Verletzte im Kader. Die Woche steht ganz im Zeichen von Erholung.`;
+    grund = "Wegen der vielen Verletzten schaltet der Trainer auf Regeneration.";
+  } else if (quote >= 0.12) {
+    belastung = "schonen";
+    warnung = `${warner} warnt: ${verletzte} Verletzte im Kader. Die Belastung wird reduziert.`;
+  }
+
+  // 2) Wunsch des Managers: Der Trainer folgt, solange er zufrieden ist und es sportlich vertretbar ist
+  const folgt = !hatTrainer || zufriedenheit >= 55;
+  let wunschStatus = null;
+  if (wunschSchwerpunkt && wunschSchwerpunkt !== "trainer" && TRAININGSSCHWERPUNKTE[wunschSchwerpunkt]) {
+    if (!folgt) wunschStatus = "Dein Schwerpunkt-Wunsch wird ignoriert: Der Trainer ist zu unzufrieden und macht sein eigenes Ding.";
+    else if (quote >= 0.2 && wunschSchwerpunkt !== "regeneration" && wunschSchwerpunkt !== "kondition") wunschStatus = "Dein Schwerpunkt-Wunsch wird abgelehnt: Zu viele Verletzte, die Erholung hat Vorrang.";
+    else { schwerpunkt = wunschSchwerpunkt; grund = hatTrainer ? "Der Trainer setzt deinen Wunsch um." : "Dein Wunsch wird ohne Trainer direkt umgesetzt."; wunschStatus = "Der Trainer folgt deinem Schwerpunkt-Wunsch."; }
+  }
+  let belastungStatus = null;
+  if (wunschBelastung && wunschBelastung !== "trainer" && BELASTUNGSSTUFEN[wunschBelastung]) {
+    if (wunschBelastung === "schonen") { belastung = "schonen"; belastungStatus = "Der Trainer schont den Kader wie gewünscht."; }
+    else if (wunschBelastung === "vollgas" && (!folgt || quote >= 0.12)) belastungStatus = !folgt ? "Vollgas wird ignoriert: Der Trainer ist zu unzufrieden." : "Vollgas wird abgelehnt: Zu viele Verletzte, das Risiko wäre zu hoch.";
+    else if (!folgt) belastungStatus = "Dein Belastungs-Wunsch wird ignoriert: Der Trainer ist zu unzufrieden.";
+    else { belastung = wunschBelastung; belastungStatus = "Der Trainer folgt deinem Belastungs-Wunsch."; }
+  }
+
+  // 3) Individuelle Pläne: der Stab (Assistent oder Arzt) betreut Reha-Fälle und Talente selbst;
+  // der Manager kann bei Einzelnen eingreifen (z.B. Rückkehrer nach Verletzung).
+  const individuell = {}, quelle = {};
+  if (hatTrainer && (stab.assistent || stab.arzt)) {
+    squad.forEach(p => {
+      if (p.verletzung) { individuell[p.id] = "regeneration"; quelle[p.id] = "stab"; }
+      else if ((p.alter || 99) <= 21 && (p.potenzial || 0) - (p.rating || 0) >= 8) { individuell[p.id] = "technik"; quelle[p.id] = "stab"; }
+    });
+  }
+  Object.keys(spielerWunsch || {}).forEach(id => {
+    if (TRAININGSSCHWERPUNKTE[spielerWunsch[id]]) { individuell[id] = spielerWunsch[id]; quelle[id] = "manager"; }
+  });
+  return { schwerpunkt, belastung, individuell, quelle, grund, warnung, wunschStatus, belastungStatus };
 }
 
 // Bankfrustration: wer über Wochen unfreiwillig nicht spielt, verliert Form — wie schnell hängt von der
@@ -2044,9 +2147,21 @@ function generiereAngebotFuerGelisteten(alleDivisionen, managerDivId, managerTea
   };
 }
 
+// Aktuelle Saison für die vertragsabhängige Ablöse — wird bei jedem Render des Spielbildschirms gesetzt, damit
+// die zentrale Preisfunktion die Restlaufzeit kennt, ohne jeden Aufruf (rund 25) umzubauen.
+let PREIS_SAISON = null;
+// Restlaufzeit: Wer ohnehin bald ablösefrei gehen kann, kostet deutlich weniger (letztes Vertragsjahr ca. −45 %,
+// ein Jahr Restlaufzeit ca. −20 %). So wie im echten Fussball.
+function vertragsPreisFaktor(player) {
+  if (PREIS_SAISON == null || player.vertragBisSaison == null) return 1;
+  const rest = player.vertragBisSaison - PREIS_SAISON;
+  return rest <= 0 ? 0.55 : rest === 1 ? 0.8 : 1;
+}
 function berechneMarktwert(player, divisionId) {
   const mult = TIER_MULTIPLIKATOR[divisionId] ?? 0.02;
-  const wert = Math.pow(player.rating, 3) * mult * altersFaktor(player.alter);
+  // Wiederholte Nominierungen für die Elf des Tages steigern den Ruf: bis zu +15% Marktwert.
+  const rufFaktor = 1 + Math.min(0.15, (player.elfDesTagesAnzahl || 0) * 0.01);
+  const wert = Math.pow(player.rating, 3) * mult * altersFaktor(player.alter) * rufFaktor * vertragsPreisFaktor(player);
   return Math.max(200, Math.round(wert / 100) * 100);
 }
 
@@ -2068,7 +2183,9 @@ function berechneSpielerlohn(player, divisionId) {
   const [rLo, rHi] = SPIELERLOHN_RATING_BEREICH[divisionId] || SPIELERLOHN_RATING_BEREICH.OL;
   const frakt = Math.max(0, Math.min(1, (player.rating - rLo) / (rHi - rLo)));
   const monatsbasis = lo + Math.pow(frakt, 1.4) * (hi - lo);
-  const monatslohn = Math.max(150, Math.round((monatsbasis * spielerlohnAltersFaktor(player.alter)) / 10) * 10);
+  // Berater rechnen mit Auszeichnungen: bis zu +12% Gehaltsforderung durch Elf-des-Tages-Nominierungen.
+  const rufFaktorLohn = 1 + Math.min(0.12, (player.elfDesTagesAnzahl || 0) * 0.008);
+  const monatslohn = Math.max(150, Math.round((monatsbasis * spielerlohnAltersFaktor(player.alter) * rufFaktorLohn) / 10) * 10);
   return monatslohn * 12; // als Jahreslohn zurückgegeben (Anzeige + Auszahlung teilen intern wie gehabt durch 12)
 }
 // Das TATSÄCHLICH bezahlte Gehalt ist ein fester, im Vertrag hinterlegter Wert (p.gehalt) — er ändert
@@ -2160,6 +2277,23 @@ function berechneJuniorBonus(investition, managerDivId) {
   // erreicht ein Junior bei maximaler Investition genau die eigene Liga-Durchschnittsstärke, statt
   // sie wie bisher um bis zu 20 Punkte zu übertreffen.
   return Math.min(20, (investition / max) * 20);
+}
+
+// Einfluss des Jugend-Mitarbeiterstabs (Chefscout, Akademieleiter, Jugendtrainer, Koordinator):
+// - Chefscout: erhöht die Chance auf eine zusätzliche Talentsichtung pro Saison (bis +50 %).
+// - Akademieleiter + Stufen-Trainer/Koordinator: heben die Stärke der automatisch nachrückenden Kinder
+//   in der jeweiligen Altersstufe an (Leiter bis ca. +6, Trainer bis ca. +8, gesamt max. +12).
+const JUGEND_STUFE_ROLLE = { u19: "jugendtrainer", u17: "jugendtrainer17", u15: "jugendtrainer15", u13: "jugendtrainer13", u11: "jugendkoordinator", u9: "jugendkoordinator", u7: "jugendkoordinator" };
+function jugendScoutZusatzChance(stab) {
+  const r = stab?.scout?.rating || 0;
+  return r ? Math.min(0.5, Math.max(0, (r - 40) / 100)) : 0;
+}
+function jugendNachrueckerBonus(stab, stufe, akademieLevel = 0) {
+  const leiter = stab?.akademieleiter?.rating || 0;
+  const trainer = stab?.[JUGEND_STUFE_ROLLE[stufe]]?.rating || 0;
+  const bonus = (leiter ? Math.max(0, (leiter - 30) / 10) : 0) + (trainer ? Math.max(0, (trainer - 30) / 8) : 0);
+  // Die Akademie (Infrastruktur) wirkt zusätzlich: +1 Stärke pro Ausbaustufe für alle Nachrücker.
+  return Math.round(Math.min(12, bonus)) + Math.max(0, akademieLevel || 0);
 }
 
 // Erzeugt eine Auswahl gescouteter Talente statt automatisch EINEN Junior — der Manager wählt selbst.
@@ -3536,7 +3670,7 @@ function entwickleU7Kader(kader, jugendkoordinatorRating, juniorAssistentenBonus
 
 // Verteilt 2-3 Aufrückzeitpunkte zufällig, aber gleichmässig über die Saison
 // (ein Zeitpunkt pro Saisondrittel/-hälfte, damit sie nicht alle auf einmal kommen).
-function planeJuniorTermine(gesamtSpieltage, akademieLevel = 0) {
+function planeJuniorTermine(gesamtSpieltage, akademieLevel = 0, scoutZusatzChance = 0, mindestensEine = false) {
   // Realistisch kalibriert: laut Studien schaffen nur rund 3% eines NLZ-Jahrgangs überhaupt den
   // Sprung in den Profifussball — selbst Top-Ausbildungsvereine (Freiburg, Hoffenheim) kommen im
   // Schnitt nur auf 1-2 echte Aufrücker pro Saison, ein durchschnittlicher Verein oft auf gar keinen.
@@ -3545,6 +3679,10 @@ function planeJuniorTermine(gesamtSpieltage, akademieLevel = 0) {
   if (akademieLevel >= 3) anzahl = wuerfel < 0.15 ? 0 : wuerfel < 0.75 ? 1 : 2; // Top-Akademie: meist 1, selten 2
   else if (akademieLevel >= 1) anzahl = wuerfel < 0.35 ? 0 : wuerfel < 0.9 ? 1 : 2; // ausgebaute Akademie: meist 1
   else anzahl = wuerfel < 0.55 ? 0 : 1; // keine/kleine Akademie: meist 0, manchmal 1
+  // Chefscout: kann eine zusätzliche Sichtung herausholen. Wer Budget bereitstellt, bekommt mindestens
+  // eine Sichtung — das Geld wird nie mehr für "nichts" ausgegeben.
+  if (anzahl < 3 && Math.random() < scoutZusatzChance) anzahl += 1;
+  if (mindestensEine && anzahl === 0) anzahl = 1;
   if (anzahl === 0) return [];
   const segmentGroesse = gesamtSpieltage / anzahl;
   const termine = [];
@@ -3749,6 +3887,14 @@ function generiereVorstandsZiele(managerDivId, season, salt = 0, frischeSituatio
     gewaehlt.push({ id: z.id, text: z.text, provision });
   }
   return gewaehlt;
+}
+
+// Reingewinn der Saison über ALLE Ertrags- und Aufwandsposten (wie in der Buchhaltung) — Grundlage für das
+// Vorstandsziel "Bilanz positiv". Früher zählten nur Tickets, Transfers und Sponsoring gegen vier Aufwandsposten.
+function berechneSaisonReingewinn(f) {
+  const ertrag = (f.ertragTicketing || 0) + (f.ertragFanartikel || 0) + (f.ertragImbiss || 0) + (f.ertragTransfers || 0) + (f.ertragSponsoring || 0) + (f.ertragTV || 0) + (f.ertragEuropapokal || 0) + (f.ertragLaenderspiel || 0) + (f.ertragEvents || 0) + (f.ertragFanclub || 0);
+  const aufwand = (f.aufwandGehalt || 0) + (f.aufwandMitarbeiterstab || 0) + (f.aufwandManagerlohn || 0) + (f.aufwandSpielerloehne || 0) + (f.aufwandReisen || 0) + (f.aufwandTransfers || 0) + (f.aufwandBerater || 0) + (f.aufwandFanartikel || 0) + (f.aufwandImbiss || 0) + (f.aufwandStadion || 0) + (f.aufwandStadionmiete || 0) + (f.aufwandMaterial || 0) + (f.aufwandPersonal || 0) + (f.aufwandTrainingslager || 0) + (f.aufwandJugend || 0) + (f.aufwandSicherheit || 0) + (f.aufwandBetrieb || 0) + (f.aufwandSchiedsrichter || 0) + (f.aufwandZinsen || 0) + (f.aufwandSonstiges || 0);
+  return ertrag - aufwand;
 }
 
 function bewerteZiel(zielId, kontext) {
@@ -4669,14 +4815,26 @@ function berechneGegnerAttraktivitaet(gegnerStaerke, eigeneStaerke) {
   return Math.max(0, Math.min(0.25, diff / 200));
 }
 
-function berechneHeimspielEinnahmen(stadion, tabellenplatz, anzahlTeams, derby = false, gegnerAttraktivitaet = 0) {
+// Preis-Nachfrage-Wirkung: Preise über dem Richtwert kosten Nachfrage, günstige Preise füllen das Stadion bzw.
+// den Verkaufsstand etwas besser. Ein starker Markenwert macht die Fans preistoleranter. Der Umsatz ist
+// damit bei einem moderaten Aufschlag am höchsten — extreme Preise rentieren sich nicht mehr.
+function preisNachfrageFaktor(preis, referenz, markenwert = 50, staerke = 0.8) {
+  if (!referenz || referenz <= 0 || !preis) return 1;
+  const r = preis / referenz;
+  const e = staerke * Math.max(0.5, 1 - (markenwert - 50) / 300);
+  return Math.max(0.05, Math.min(1.12, 1 - e * (r - 1)));
+}
+const TICKET_KATEGORIE_FAKTOR = { stehplaetze: 1, sitzplaetze: 1.8, logen: 20 };
+
+function berechneHeimspielEinnahmen(stadion, tabellenplatz, anzahlTeams, derby = false, gegnerAttraktivitaet = 0, kontext = null) {
   // Derbys ziehen unabhängig von der Tabellensituation deutlich mehr Zuschauer — echte Fussballkultur.
   // Ein attraktiver Gegner (starkes Team, grosser Name, internationale Bühne) zieht zusätzlich mehr
   // Zuschauer, unabhängig von der eigenen Tabellenposition — genau wie im echten Fussball.
   // Flutlicht (Abendspiele bei jedem Wetter) und Familienbereich heben die Grundauslastung leicht an,
   // unabhängig von Tabellenplatz oder Gegner — echte Infrastruktur-Investitionen zahlen sich so aus.
   const infraFormBonus = infrastrukturWirkung(stadion, "flutlicht") * 0.02 + infrastrukturWirkung(stadion, "familienbereich") * 0.03;
-  const formFaktor = Math.min(1, (0.5 + 0.4 * (1 - (tabellenplatz - 1) / Math.max(1, anzahlTeams - 1))) + (derby ? 0.25 : 0) + gegnerAttraktivitaet + infraFormBonus);
+  const formFaktor = Math.min(1, (0.5 + 0.4 * (1 - (tabellenplatz - 1) / Math.max(1, anzahlTeams - 1))) + (derby ? 0.25 : 0) + gegnerAttraktivitaet + infraFormBonus + (kontext?.fanBonus || 0));
+  const ticketRichtwert = kontext ? (STADION_BEREICHE[kontext.tierId] || STADION_BEREICHE.OL).ticket[1] : 0;
   let zuschauer = 0;
   let ticketeinnahmen = 0;
   const kategorien = {};
@@ -4688,7 +4846,9 @@ function berechneHeimspielEinnahmen(stadion, tabellenplatz, anzahlTeams, derby =
     const rauschbreite = kat === "logen" ? 0.05 : 0.12;
     const mindestauslastung = kat === "logen" ? 0.55 : 0.25;
     const zufall = (Math.random() - 0.5) * rauschbreite;
-    const auslastungKat = Math.max(mindestauslastung, Math.min(1, formFaktor + zufall));
+    // Der Ticketpreis wirkt auf die Nachfrage (siehe preisNachfrageFaktor); Logen reagieren schwächer.
+    const preisFaktor = kontext ? preisNachfrageFaktor(k.ticketpreis, ticketRichtwert * (TICKET_KATEGORIE_FAKTOR[kat] || 1), kontext.markenwert ?? 50, kat === "logen" ? 0.4 : 0.8) : 1;
+    const auslastungKat = Math.max(mindestauslastung, Math.min(1, formFaktor * preisFaktor + zufall));
     // Saisonkarten-Inhaber sind immer da (schon bezahlt), Rest der Plätze wird einzeln verkauft
     const tagesticketsKat = Math.round(restKapazitaet * auslastungKat);
     const zuschauerKat = saisonkartenKat + tagesticketsKat;
@@ -4813,7 +4973,7 @@ function verkaufeFanartikel(fanshop, anzahlFans, auswaertsFaktor = 1, infraMulti
   FANARTIKEL_TYPEN.forEach(t => {
     const item = fanshop[t.id] || { bestand: 0, verkaufspreis: t.einkaufspreis * 2 };
     const boost = t.id === "shirts" ? trikotBoost : 1;
-    const nachfrage = Math.round(anzahlFans * t.nachfrageAnteil * kommerzFaktor * auswaertsFaktor * infraMultiplikator * boost * (0.7 + Math.random() * 0.6));
+    const nachfrage = Math.round(anzahlFans * t.nachfrageAnteil * kommerzFaktor * auswaertsFaktor * infraMultiplikator * boost * preisNachfrageFaktor(item.verkaufspreis, t.einkaufspreis * 2, 50, 0.7) * (0.7 + Math.random() * 0.6));
     const verkauft = Math.max(0, Math.min(nachfrage, item.bestand));
     einnahmen += verkauft * item.verkaufspreis;
     neuerFanshop[t.id] = {
@@ -4875,7 +5035,7 @@ function verkaufeImbiss(imbiss, anzahlFans, anzahlVerkaufsstaende = 2, infraMult
   const verkaeufe = {};
   IMBISS_ARTIKEL_TYPEN.forEach(t => {
     const item = imbiss[t.id] || { bestand: 0, verkaufspreis: Math.round(t.einkaufspreis * 3.5 * 10) / 10 };
-    const nachfrage = Math.round(anzahlFans * t.nachfrageAnteil * kommerzFaktor * standBonus * infraMultiplikator * (0.7 + Math.random() * 0.6));
+    const nachfrage = Math.round(anzahlFans * t.nachfrageAnteil * kommerzFaktor * standBonus * infraMultiplikator * preisNachfrageFaktor(item.verkaufspreis, t.einkaufspreis * 3.5, 50, 0.7) * (0.7 + Math.random() * 0.6));
     const verkauft = Math.max(0, Math.min(nachfrage, item.bestand));
     einnahmen += verkauft * item.verkaufspreis;
     neuerImbiss[t.id] = {
@@ -4919,7 +5079,7 @@ function verkaufeVereinsheim(vereinsheim, anzahlFans, kapazitaet, infraMultiplik
   const verkaeufe = {};
   IMBISS_ARTIKEL_TYPEN.forEach(t => {
     const item = vereinsheim[t.id] || { bestand: 0, verkaufspreis: Math.round(t.einkaufspreis * 3.5 * 10) / 10 };
-    const nachfrage = Math.round(anzahlFans * t.nachfrageAnteil * VEREINSHEIM_NACHFRAGE_FAKTOR * kommerzFaktor * groesse * infraMultiplikator * (0.7 + Math.random() * 0.6));
+    const nachfrage = Math.round(anzahlFans * t.nachfrageAnteil * VEREINSHEIM_NACHFRAGE_FAKTOR * kommerzFaktor * groesse * infraMultiplikator * preisNachfrageFaktor(item.verkaufspreis, t.einkaufspreis * 3.5, 50, 0.7) * (0.7 + Math.random() * 0.6));
     const verkauft = Math.max(0, Math.min(nachfrage, item.bestand));
     einnahmen += verkauft * item.verkaufspreis;
     neuesVereinsheim[t.id] = {
@@ -5510,7 +5670,20 @@ function initialerFanclub(managerDivId) {
     groesse: FANCLUB_BASIS_GROESSE[managerDivId] || FANCLUB_BASIS_GROESSE.OL,
     aktivitaeten: [],
     anliegen: null,
-    unterstuetzungsBonus: 0
+    unterstuetzungsBonus: 0,
+    sprecher: FANCLUB_SPRECHER_NAMEN[Math.floor(Math.random() * FANCLUB_SPRECHER_NAMEN.length)],
+    fanhausStufe: 0,
+    vorschlag: null,
+    atmosphaere: null,
+    besuchSperre: 0,
+    lieblingZusage: null,
+    kalenderErledigt: [],
+    saisonStartGroesse: FANCLUB_BASIS_GROESSE[managerDivId] || FANCLUB_BASIS_GROESSE.OL,
+    saisonAktionen: 0,
+    stimmungSumme: 0,
+    stimmungAnzahl: 0,
+    letzterVorschlagId: null,
+    rueckblick: null
   };
 }
 
@@ -5530,8 +5703,9 @@ function berechnePressekonferenzEffekte(antworten) {
 // naechsterSpieltag) und lässt nur Fragen zu, deren Bedingung gerade wirklich zutrifft — sonst könnte
 // z.B. nach Verletzungen gefragt werden, obwohl noch gar keine passiert sind. Fragen ohne besondere
 // Bedingung (bedingung: () => true) sind immer im Topf, als verlässliche Grundmenge.
-function waehlePressekonferenzFragen(rng, kontext, bereitsGestelltIds = []) {
-  const fragenPool = PRESSEKONFERENZ_FRAGEN.filter(f => (!f.bedingung || f.bedingung(kontext)) && !bereitsGestelltIds.includes(f.id));
+const PK_EREIGNIS_IDS = ["verein_titel_saison", "verein_pokalsieg", "verein_europapokalsieg", "verein_torschuetzenkoenig", "verein_wm_em_sieg", "verein_wm_em_final_verloren", "verein_aufstieg", "verein_abstieg", "verein_pokalfinale_verloren", "verein_europapokalfinale_verloren"];
+function waehlePressekonferenzFragen(rng, kontext, bereitsGestelltIds = [], nurEreignisse = false) {
+  const fragenPool = PRESSEKONFERENZ_FRAGEN.filter(f => (!f.bedingung || f.bedingung(kontext)) && !bereitsGestelltIds.includes(f.id) && (!nurEreignisse || PK_EREIGNIS_IDS.includes(f.id)));
   const journalistenPool = [...JOURNALISTEN_POOL];
   const gewaehlt = [];
   for (let i = 0; i < 1 && fragenPool.length; i++) {
@@ -5570,6 +5744,122 @@ const FANCLUB_AKTIVITAETEN_POOL = [
   "Sammlung für den neuen Fanclub-Grill gestartet",
   "Stammtisch mit dem Vorstand abgehalten"
 ];
+
+/* =========================================================================
+   FANCLUB — Sprecher, Aktionen mit Folgen, Kalender, Fanliebling, Fanhaus, Wirkung aufs Spiel
+   ========================================================================= */
+const FANCLUB_SPRECHER_NAMEN = ["Hans-Peter Imhof", "Klaus Brandt", "Uwe Hartmann", "Dieter Kowalski", "Sabine Vogel", "Jürgen Schramm", "Monika Reuter", "Frank Lehmann", "Gerd Wellmann", "Petra Krüger"];
+// Mitgliedsbeiträge je Mitglied und Saison (fliessen anteilig bei jedem Heimspiel an den Verein)
+const FANCLUB_BEITRAG_PRO_SAISON = { OL: 12, RL: 18, L3: 24, L2: 30, BL: 40 };
+const FANHAUS_STUFEN = [
+  { name: "Kein Fanhaus", faktor: 0, beschreibung: "" },
+  { name: "Fanraum", faktor: 8, beschreibung: "Ein fester Treffpunkt für den Fanclub." },
+  { name: "Fanhaus", faktor: 20, beschreibung: "Eigene Räume, Fanshop-Ecke und Platz für Feste." },
+  { name: "Fankultur-Zentrum", faktor: 40, beschreibung: "Das Herz der Fanszene — Archiv, Werkstatt für Choreos, Vereinsgaststätte." }
+];
+function fanhausKosten(managerDivId, stufe) {
+  const bus = (FAN_UNTERSTUETZUNG_KOSTEN[managerDivId] || FAN_UNTERSTUETZUNG_KOSTEN.OL).bus;
+  return Math.round(bus * (FANHAUS_STUFEN[stufe]?.faktor || 0) / 10) * 10;
+}
+// Heimvorteil durch den Fanclub: Stimmung (±1.5), Fanhaus (+0.3 je Stufe) und eine aktive Aktion
+// (z.B. Choreografie) wirken zusammen auf die Atmosphäre im Stadion.
+function berechneFanAtmosphaere(fanclub, gesamtStimmung) {
+  const stimmung = ((gesamtStimmung - 50) / 50) * 1.5;
+  const haus = (fanclub.fanhausStufe || 0) * 0.3;
+  const aktion = fanclub.atmosphaere && fanclub.atmosphaere.heimspiele > 0 ? fanclub.atmosphaere.bonus : 0;
+  return Math.max(-2, Math.min(3.5, stimmung + haus + aktion));
+}
+// Fanliebling: wer lange im Verein ist, trifft, vorlegt, in der Elf des Tages steht oder Kapitän ist.
+function fanlieblingScore(p, season, kapitaenId) {
+  const jahre = Math.min(10, Math.max(0, season - (p.beimVereinSeitSaison ?? season)));
+  return jahre * 3 + Math.min(40, ((p.karriereTore || 0) + (p.tore || 0)) * 0.6) + Math.min(15, ((p.karriereVorlagen || 0) + (p.vorlagen || 0)) * 0.3)
+    + (p.elfDesTagesAnzahl || 0) * 2 + (p.motmAnzahl || 0) * 2.5 + (p.rating || 0) * 0.3 + (p.id === kapitaenId ? 5 : 0);
+}
+function ermittleFanliebling(squad, season, kapitaenId) {
+  if (!squad || !squad.length) return null;
+  return [...squad].sort((a, b) => fanlieblingScore(b, season, kapitaenId) - fanlieblingScore(a, season, kapitaenId))[0];
+}
+// Reaktion des Fanclubs auf einen Verkauf: Fanliebling = Unmut, gebrochene Zusage = Wut
+function fanclubNachVerkauf(fanclub, squadVorVerkauf, spieler, datum, season, kapitaenId) {
+  if (!fanclub) return fanclub;
+  const lieb = ermittleFanliebling(squadVorVerkauf, season, kapitaenId);
+  const zusageGebrochen = fanclub.lieblingZusage === spieler.id;
+  let delta = 0, text = null;
+  if (zusageGebrochen) { delta = -14; text = `Wortbruch: ${spieler.name} wurde trotz Zusage verkauft — der Fanclub ist wütend`; }
+  else if (lieb && lieb.id === spieler.id) { delta = -8; text = `Fanliebling ${spieler.name} verkauft — grosser Unmut im Fanclub`; }
+  if (!delta) return fanclub;
+  return {
+    ...fanclub,
+    unterstuetzungsBonus: Math.max(-25, (fanclub.unterstuetzungsBonus || 0) + delta),
+    lieblingZusage: zusageGebrochen ? null : fanclub.lieblingZusage,
+    aktivitaeten: [{ text, datum }, ...(fanclub.aktivitaeten || [])].slice(0, 8)
+  };
+}
+const FANCLUB_AKTIONEN = {
+  choreo: { titel: "Grosse Choreografie", text: "Der Fanclub möchte beim nächsten Heimspiel eine riesige Choreografie zeigen. Material und Aufbau kosten Geld.", kostenFaktor: 0.6, unterstuetzung: 4, atmo: { heimspiele: 3, bonus: 1.2 }, mitglieder: 0.005, log: "Choreografie im Stadion — die Kurve brannte" },
+  fanmarsch: { titel: "Fanmarsch zum Stadion", text: "Der Fanclub plant einen Fanmarsch mit Fahnen und Gesängen zum nächsten Heimspiel.", kostenFaktor: 0.2, unterstuetzung: 3, atmo: { heimspiele: 2, bonus: 0.6 }, mitglieder: 0.01, log: "Fanmarsch zum Stadion — die Stimmung kochte schon vor Anpfiff" },
+  spendenaktion: { titel: "Spendenaktion für die Jugend", text: "Der Fanclub sammelt Spenden für die Jugendabteilung. Der Verein kann die Aktion bewerben und aufstocken.", kostenFaktor: 0.1, unterstuetzung: 3, budgetFaktor: 0.35, mitglieder: 0.005, log: "Spendenaktion für die Jugend — ein schöner Betrag kam zusammen" },
+  fanfest: { titel: "Fanfest", text: "Der Fanclub möchte ein grosses Fest für alle Mitglieder und Neugierige veranstalten.", kostenFaktor: 0.8, unterstuetzung: 5, mitglieder: 0.03, log: "Fanfest gefeiert — viele neue Mitglieder" },
+  auswaertsfahrt: { titel: "Sonderfahrt zum Auswärtsspiel", text: "Der Fanclub möchte mit einem Sonderbus und einem Sonderzug zum nächsten wichtigen Auswärtsspiel reisen.", kostenFaktor: 0.5, unterstuetzung: 4, mitglieder: 0.01, log: "Sonderfahrt zum Auswärtsspiel — die Fans waren überall" }
+};
+function fanclubKalender(gesamtSpieltage) {
+  return [
+    { id: "saisonstart", spieltag: 2, aktion: "fanfest", titel: "Saisoneröffnungsfest", text: "Zum Saisonstart lädt der Fanclub zum Eröffnungsfest ein — mit Grill, Musik und Spielervorstellung." },
+    { id: "weihnachtsfeier", spieltag: Math.max(3, Math.round(gesamtSpieltage * 0.45)), aktion: "fanfest", titel: "Weihnachtsfeier des Fanclubs", text: "Die traditionelle Weihnachtsfeier des Fanclubs steht an. Der Vorstand ist herzlich eingeladen." },
+    { id: "fruehjahrsfahrt", spieltag: Math.max(4, Math.round(gesamtSpieltage * 0.7)), aktion: "auswaertsfahrt", titel: "Frühjahrs-Auswärtsfahrt", text: "Die grosse Frühjahrsfahrt des Fanclubs steht an — ein Auswärtsspiel mit Sonderbus." },
+    { id: "saisonabschluss", spieltag: Math.max(5, gesamtSpieltage - 1), aktion: "fanfest", titel: "Saisonabschlussfeier", text: "Zum Saisonabschluss möchte der Fanclub mit Team und Verein feiern — egal wie die Saison lief." }
+  ];
+}
+function baueFanclubVorschlag(id, ctx, termin = null) {
+  const bus = (FAN_UNTERSTUETZUNG_KOSTEN[ctx.managerDivId] || FAN_UNTERSTUETZUNG_KOSTEN.OL).bus;
+  const kostenVon = f => Math.max(10, Math.round(f * bus / 10) * 10);
+  const fmt = n => n.toLocaleString("de-CH");
+  const basis = { id: termin ? termin.id : id, ablaufSpieltag: ctx.spNr + 4 };
+  const a = FANCLUB_AKTIONEN[id];
+  if (a) {
+    const kosten = kostenVon(a.kostenFaktor);
+    const titel = termin ? termin.titel : a.titel;
+    return {
+      ...basis, art: termin ? "termin" : "aktion", titel, text: termin ? termin.text : a.text,
+      optionen: [
+        { label: `Unterstützen — ${fmt(kosten)} €`, kosten, aktion: true, log: termin ? `${titel} mit Unterstützung des Vereins gefeiert` : a.log,
+          wirkung: { unterstuetzung: a.unterstuetzung, mitglieder: a.mitglieder || 0, atmosphaere: a.atmo || null, budget: Math.round((a.budgetFaktor || 0) * bus) } },
+        { label: "Nur erlauben (kostenlos, kleinere Wirkung)", kosten: 0, aktion: true, log: `${titel} in kleinem Rahmen — ohne Unterstützung des Vereins`,
+          wirkung: { unterstuetzung: Math.max(1, Math.round(a.unterstuetzung * 0.4)), atmosphaere: a.atmo ? { heimspiele: Math.max(1, a.atmo.heimspiele - 1), bonus: Math.round(a.atmo.bonus * 40) / 100 } : null } },
+        { label: "Ablehnen", kosten: 0, log: `${titel} abgelehnt — die Fans sind enttäuscht`, wirkung: { unterstuetzung: -2 } }
+      ]
+    };
+  }
+  if (id === "stehplaetze") {
+    return { ...basis, art: "thema", titel: "Preise für Stammgäste", text: "Der Sprecher bittet um ein Gespräch: Viele Stammgäste in der Kurve können sich die Karten kaum noch leisten. Der Fanclub wünscht sich eine Preissenkung um 10 %.",
+      optionen: [
+        { label: "Ticketpreise um 10 % senken", kosten: 0, log: "Ticketpreise gesenkt — der Fanclub bedankt sich", wirkung: { unterstuetzung: 5, ticketSenken: 0.10 } },
+        { label: "Preise beibehalten", kosten: 0, log: "Ticketpreise bleiben — der Fanclub zeigt wenig Begeisterung", wirkung: { unterstuetzung: -2 } }
+      ] };
+  }
+  if (id === "trikot") {
+    const kosten = kostenVon(0.6);
+    return { ...basis, art: "thema", titel: "Trikotdesign mit den Fans", text: "Der Sprecher fragt an, ob die Fans beim nächsten Trikotdesign mitreden dürfen — Entwürfe, Abstimmung und eine Fan-Edition.",
+      optionen: [
+        { label: `Fans einbinden — ${fmt(kosten)} €`, kosten, aktion: true, log: "Fans durften beim Trikotdesign mitreden — grosse Begeisterung", wirkung: { unterstuetzung: 6, mitglieder: 0.01 } },
+        { label: "Das macht der Verein allein", kosten: 0, log: "Trikotdesign bleibt Vereinssache — der Fanclub ist enttäuscht", wirkung: { unterstuetzung: -2 } }
+      ] };
+  }
+  if (id === "liebling" && ctx.liebling) {
+    return { ...basis, art: "thema", titel: `Sorge um ${ctx.liebling.name}`, text: `Im Fanclub kursiert die Sorge, dass Fanliebling ${ctx.liebling.name} verkauft werden könnte. Der Sprecher bittet um ein klares Zeichen. Wer eine Zusage macht und den Spieler später doch verkauft, verliert viel Vertrauen.`,
+      optionen: [
+        { label: `Zusichern: ${ctx.liebling.name} bleibt`, kosten: 0, log: `Der Verein sichert dem Fanclub zu: ${ctx.liebling.name} bleibt`, wirkung: { unterstuetzung: 5, zusage: ctx.liebling.id } },
+        { label: "Keine Zusage", kosten: 0, log: "Der Verein gibt keine Zusage zum Fanliebling — die Fans bleiben beunruhigt", wirkung: { unterstuetzung: -2 } }
+      ] };
+  }
+  return null;
+}
+function waehleFanclubVorschlag(ctx) {
+  const ids = ["choreo", "fanmarsch", "spendenaktion", "fanfest", "auswaertsfahrt", "stehplaetze", "trikot"];
+  if (ctx.liebling && !ctx.lieblingZusage) ids.push("liebling");
+  const frei = ids.filter(i => i !== ctx.letzteId);
+  return baueFanclubVorschlag(frei[Math.floor(Math.random() * frei.length)], ctx);
+}
 
 /* =========================================================================
    MARKENWERT — Die Marketingabteilung baut kontinuierlich die Aussenwirkung des
@@ -6129,7 +6419,7 @@ function generiereJahresbericht(kontext) {
 
   const ertragGesamt = (finanzen.ertragTicketing || 0) + (finanzen.ertragFanartikel || 0) + (finanzen.ertragImbiss || 0)
     + (finanzen.ertragTransfers || 0) + (finanzen.ertragSponsoring || 0) + (finanzen.ertragTV || 0)
-    + (finanzen.ertragEuropapokal || 0) + (finanzen.ertragLaenderspiel || 0) + (finanzen.ertragEvents || 0);
+    + (finanzen.ertragEuropapokal || 0) + (finanzen.ertragLaenderspiel || 0) + (finanzen.ertragEvents || 0) + (finanzen.ertragFanclub || 0);
   const aufwandGesamt = (finanzen.aufwandGehalt || 0) + (finanzen.aufwandMitarbeiterstab || 0) + (finanzen.aufwandManagerlohn || 0) + (finanzen.aufwandSpielerloehne || 0)
     + (finanzen.aufwandReisen || 0) + (finanzen.aufwandTransfers || 0) + (finanzen.aufwandBerater || 0) + (finanzen.aufwandFanartikel || 0)
     + (finanzen.aufwandImbiss || 0) + (finanzen.aufwandStadion || 0) + (finanzen.aufwandMaterial || 0) + (finanzen.aufwandPersonal || 0) + (finanzen.aufwandTrainingslager || 0) + (finanzen.aufwandJugend || 0) + (finanzen.aufwandSicherheit || 0) + (finanzen.aufwandBetrieb || 0) + (finanzen.aufwandSchiedsrichter || 0) + (finanzen.aufwandZinsen || 0) + (finanzen.aufwandSonstiges || 0);
@@ -7158,9 +7448,13 @@ function generateBannerAngebot(divisionId, tabellenplatz, anzahlTeams, existiere
    SPIELKALENDER & TRANSFERFENSTER (Saison 1.7.–30.6., feste Fenster wie im echten Profifussball)
    ========================================================================= */
 
+// WICHTIG: durchgehend in UTC rechnen. Früher wurde lokal geparst ("T00:00:00") und mit toISOString()
+// (UTC) zurückgegeben — in jeder Zeitzone östlich von Greenwich (Schweiz, Deutschland, ...) rutschte das
+// Ergebnis dadurch um einen Tag zurück: "+7 Tage" ergab real +6, und jeder Spieltag landete einen
+// Wochentag früher als der vorherige (Sonntag, Samstag, Freitag, Donnerstag, ...).
 function addTage(datumStr, tage) {
-  const d = new Date(datumStr + "T00:00:00");
-  d.setDate(d.getDate() + tage);
+  const d = new Date(datumStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + tage);
   return d.toISOString().slice(0, 10);
 }
 function formatDatum(datumStr) {
@@ -7175,10 +7469,10 @@ function formatDatum(datumStr) {
 // fort — inklusive Pokal (Sonntag-5) und Europapokal (Sonntag-4), die beide relativ zum Liga-Sonntag
 // berechnet werden.
 function naechstgelegenerSonntag(datumStr) {
-  const d = new Date(datumStr + "T00:00:00");
-  const wochentag = d.getDay(); // 0 = Sonntag ... 6 = Samstag
+  const d = new Date(datumStr + "T00:00:00Z");
+  const wochentag = d.getUTCDay(); // 0 = Sonntag ... 6 = Samstag
   const verschiebung = wochentag <= 3 ? -wochentag : 7 - wochentag;
-  d.setDate(d.getDate() + verschiebung);
+  d.setUTCDate(d.getUTCDate() + verschiebung);
   return d.toISOString().slice(0, 10);
 }
 // Wie oben, aber IMMER vorwärts (nie zurück) — für Anker, die nicht vor ein bestimmtes Datum rutschen
@@ -7186,16 +7480,20 @@ function naechstgelegenerSonntag(datumStr) {
 // transferfensterStatus() erst ab genau diesem Tag, ein Rückwärts-Rutsch in den Dezember würde
 // Testspiele/Trainingslager wieder vor den Fensterbeginn legen).
 function naechsterSonntagAbDatum(datumStr) {
-  const d = new Date(datumStr + "T00:00:00");
-  const wochentag = d.getDay();
+  const d = new Date(datumStr + "T00:00:00Z");
+  const wochentag = d.getUTCDay();
   const verschiebung = wochentag === 0 ? 0 : 7 - wochentag;
-  d.setDate(d.getDate() + verschiebung);
+  d.setUTCDate(d.getUTCDate() + verschiebung);
   return d.toISOString().slice(0, 10);
 }
 // Saisonstart Anfang August: 2 Testspielwochen davor bringen den echten 1. Ligaspieltag auf
 // Mitte August — realistisch für den deutschen Fussballkalender (statt bisher 1. Juli).
+// Beginn der Vorbereitung (erste Testspielwoche) Mitte Juli: zwei Testwochen davor bringen den 1. Ligaspieltag
+// auf Anfang August. Nur so endet die Hinrunde der Bundesliga (17 Spieltage + 3 Länderspielwochen) wie im
+// echten Kalender Mitte Dezember und die Winterpause liegt wirklich im Dezember/Anfang Januar — mit dem
+// früheren Start Mitte August lief die Hinrunde bis in den Januar, eine Winterpause gab es praktisch nicht.
 function saisonStartDatum(season) {
-  return naechstgelegenerSonntag(`${2000 + season}-08-02`);
+  return naechstgelegenerSonntag(`${2000 + season}-07-19`);
 }
 function transferfensterStatus(datumStr) {
   const monat = Number(datumStr.slice(5, 7));
@@ -7669,7 +7967,7 @@ function pokalRundenName(teilnehmerVorRunde) {
 
 function leereSaisonFinanzen() {
   return {
-    ertragTicketing: 0, ertragFanartikel: 0, ertragImbiss: 0, ertragTransfers: 0, ertragSponsoring: 0, ertragTV: 0, ertragEuropapokal: 0, ertragLaenderspiel: 0, ertragEvents: 0,
+    ertragTicketing: 0, ertragFanartikel: 0, ertragImbiss: 0, ertragTransfers: 0, ertragSponsoring: 0, ertragTV: 0, ertragEuropapokal: 0, ertragLaenderspiel: 0, ertragEvents: 0, ertragFanclub: 0,
     aufwandGehalt: 0, aufwandMitarbeiterstab: 0, aufwandManagerlohn: 0, aufwandSpielerloehne: 0, aufwandReisen: 0, aufwandTransfers: 0, aufwandBerater: 0, aufwandFanartikel: 0, aufwandImbiss: 0, aufwandStadion: 0, aufwandStadionmiete: 0, aufwandMaterial: 0, aufwandPersonal: 0, aufwandTrainingslager: 0, aufwandJugend: 0, aufwandSicherheit: 0, aufwandBetrieb: 0, aufwandSchiedsrichter: 0, aufwandZinsen: 0, aufwandSonstiges: 0
   };
 }
@@ -7920,7 +8218,6 @@ function TeamgeistRadar({ teamgeist }) {
 const TAB_GRUPPEN = [
   { id: "kadertaktik", label: "Kader & Taktik", icon: Users, tabs: [
     { id: "kader", label: "Kader", icon: Users },
-    { id: "vertraege", label: "Spielerverträge", icon: FileText },
     { id: "taktik", label: "Taktik", icon: ClipboardList },
     { id: "material", label: "Training", icon: Dumbbell },
     { id: "trainingslager", label: "Trainingslager", icon: Tent }
@@ -7928,46 +8225,41 @@ const TAB_GRUPPEN = [
   { id: "personal", label: "Personal & Transfers", icon: UserCog, tabs: [
     { id: "trainer", label: "Trainer", icon: UserCog },
     { id: "stab", label: "Mitarbeiter", icon: UserPlus },
+    { id: "vertraege", label: "Spielerverträge", icon: FileText },
     { id: "transfermarkt", label: "Transfermarkt", icon: Repeat }
   ]},
   { id: "wettbewerbe", label: "Wettbewerbe", icon: Trophy, tabs: [
     { id: "tabelle", label: "Tabelle", icon: Shield },
+    { id: "spielplan", label: "Spielplan", icon: CalendarDays },
     { id: "pokal", label: "Pokal", icon: Medal },
     { id: "europa", label: "Europapokal", icon: Trophy },
-    { id: "spielplan", label: "Spielplan", icon: CalendarDays },
     { id: "nationalmannschaft", label: "DFB Team", icon: Flag, bedingung: "bundestrainerAmt" }
   ]},
   { id: "infrastruktur", label: "Infrastruktur", icon: Building2, tabs: [
     { id: "stadion", label: "Stadion", icon: Building2 },
-    { id: "trainingsmaterial", label: "Material", icon: Package },
-    { id: "verpflegung", label: "Verpflegung", icon: Coffee },
-    { id: "fanshop", label: "Fanshop", icon: ShoppingBag },
-    { id: "marketing", label: "Marketingabteilung", icon: Radio }
+    { id: "trainingsmaterial", label: "Trainingsmaterial", icon: Package }
   ]},
-  { id: "finanzen", label: "Finanzen", icon: Wallet, tabs: [
+  { id: "finanzen", label: "Finanzen & Vermarktung", icon: Wallet, tabs: [
     { id: "sponsoring", label: "Sponsoring", icon: Megaphone },
+    { id: "marketing", label: "Marketingabteilung", icon: Radio },
+    { id: "fanshop", label: "Fanshop", icon: ShoppingBag },
+    { id: "verpflegung", label: "Verpflegung", icon: Coffee },
     { id: "buchhaltung", label: "Buchhaltung", icon: Wallet }
   ]},
   { id: "jugendabteilung", label: "Jugendabteilung", icon: Sprout, tabs: [
-    { id: "jugend-investition", label: "Investition", icon: Sprout },
-    { id: "jugend-akademie", label: "Jugendakademie", icon: Building2 },
-    { id: "jugend-u7", label: "U7 Team", icon: Users },
-    { id: "jugend-u9", label: "U9 Team", icon: Users },
-    { id: "jugend-u11", label: "U11 Team", icon: Users },
-    { id: "jugend-u13", label: "U13 Team", icon: Users },
-    { id: "jugend-u15", label: "U15 Team", icon: Users },
-    { id: "jugend-u17", label: "U17 Team", icon: Users },
-    { id: "jugend-u19", label: "U19 Team", icon: Users }
+    { id: "jugend-investition", label: "Übersicht", icon: Sprout },
+    { id: "jugend-teams", label: "Mannschaften", icon: Users }
   ]},
   { id: "historie", label: "Historie", icon: TrendingUp, tabs: [
     { id: "statistik", label: "Statistik", icon: TrendingUp },
     { id: "trophaeen", label: "Trophäen", icon: Trophy },
-    { id: "karriere", label: "Karriere", icon: Medal },
-    { id: "jahresbericht", label: "Jahresbericht", icon: Info }
+    { id: "karriere", label: "Karriere", icon: Medal }
   ]},
   { id: "vereinfans", label: "Verein/Fans", icon: Heart, tabs: [
     { id: "vereinsinfos", label: "Vereinsinfos", icon: Newspaper },
-    { id: "fanclub", label: "Fanclub", icon: Heart }
+    { id: "vorstand", label: "Vorstand & Presse", icon: Megaphone },
+    { id: "fanclub", label: "Fanclub", icon: Heart },
+    { id: "jahresbericht", label: "Jahresbericht", icon: Info }
   ]}
 ];
 const TAB_ZU_GRUPPE = {};
@@ -8255,11 +8547,19 @@ function simulateDivisionMatchday(division, coachBonuses = {}, managerTeam = nul
   if (elfDesTagesSpieler.length) {
     const elfIdsProTeam = {};
     elfDesTagesSpieler.forEach(sp => { (elfIdsProTeam[sp.team] = elfIdsProTeam[sp.team] || new Set()).add(sp.id); });
-    Object.keys(elfIdsProTeam).forEach(team => {
+    [...new Set(tageskandidaten.map(k => k.team))].forEach(team => {
+      if (!elfIdsProTeam[team]) elfIdsProTeam[team] = new Set();
       if (!neueSquads[team]) return;
-      neueSquads[team] = neueSquads[team].map(p =>
-        elfIdsProTeam[team].has(p.id) ? { ...p, elfDesTagesAnzahl: (p.elfDesTagesAnzahl || 0) + 1 } : p
-      );
+      // Auswirkung auf den Spieler: Formschub (+4, mit Serie bis +8 — wer mehrere Spieltage in Folge in der
+      // Elf des Tages steht, hat einen Lauf), sonst reisst die Serie ab. Marktwert & Gehaltsforderung
+      // steigen zusätzlich mit der Anzahl der Nominierungen (siehe berechneMarktwert/berechneSpielerlohn).
+      neueSquads[team] = neueSquads[team].map(p => {
+        if (elfIdsProTeam[team].has(p.id)) {
+          const serie = (p.elfSerie || 0) + 1;
+          return { ...p, elfDesTagesAnzahl: (p.elfDesTagesAnzahl || 0) + 1, elfSerie: serie, form: Math.min(99, (p.form ?? 60) + 4 + Math.min(4, (serie - 1) * 2)) };
+        }
+        return p.elfSerie ? { ...p, elfSerie: 0 } : p;
+      });
     });
   }
 
@@ -8980,7 +9280,9 @@ function TabelleView({ division, managerTeam, managerBonus = 0 }) {
 }
 
 function VertragsKarte({ spieler, managerDivId, season, onVerlaengern, ergebnis, gesperrt, frueh = false }) {
-  const [laufzeit, setLaufzeit] = useState(2);
+  const maxLaufzeit = maxVertragsLaufzeit(spieler.alter);
+  const [laufzeitRoh, setLaufzeit] = useState(2);
+  const laufzeit = Math.min(laufzeitRoh, maxLaufzeit);
   const gehaltsOptionen = frueh ? [85, 95, 105, 120] : [95, 105, 120, 140];
   const [gehaltsFaktor, setGehaltsFaktor] = useState(frueh ? 95 : 105);
   const marktLohn = berechneSpielerlohn(spieler, managerDivId);
@@ -9012,9 +9314,10 @@ function VertragsKarte({ spieler, managerDivId, season, onVerlaengern, ergebnis,
       )}
       <div className="flex items-center gap-2">
         <span className="text-emerald-500">Laufzeit:</span>
-        {[1, 2, 3, 4].map(j => (
+        {Array.from({ length: maxLaufzeit }, (_, i) => i + 1).map(j => (
           <button key={j} disabled={gesperrt} onClick={() => setLaufzeit(j)} className={`px-2 py-1 rounded border text-[11px] ${laufzeit === j ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-400"} ${gesperrt ? "opacity-50 cursor-not-allowed" : ""}`}>{j}J</button>
         ))}
+        {maxLaufzeit < 5 && <span className="text-[10px] text-emerald-600">max. {maxLaufzeit} {maxLaufzeit === 1 ? "Jahr" : "Jahre"} in diesem Alter</span>}
       </div>
       <div className="flex items-center gap-2">
         <span className="text-emerald-500">Gehalt:</span>
@@ -9931,12 +10234,40 @@ function CoachScreen({ profile, onCoachChosen }) {
   );
 }
 
+// Kleine Sortierleiste für Transfermarkt und eigenen Kader: ein Tipp wählt das Kriterium, ein zweiter Tipp
+// auf dasselbe Kriterium dreht die Richtung um.
+const SORT_STANDARD_RICHTUNG = { staerke: true, preis: false, marktwert: true, alter: false, potenzial: true, position: true, vertrag: false };
+function SortierLeiste({ optionen, aktuell, onWahl }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 mb-2">
+      <span className="text-[10px] text-emerald-600 mr-0.5">Sortieren:</span>
+      {optionen.map(([key, label]) => {
+        const aktiv = aktuell.key === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onWahl(aktiv ? { key, desc: !aktuell.desc } : { key, desc: SORT_STANDARD_RICHTUNG[key] ?? true })}
+            className={`text-[10px] rounded border px-2 py-1 ${aktiv ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500"}`}
+          >
+            {label}{aktiv && key !== "position" ? (aktuell.desc ? " ▼" : " ▲") : ""}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId, budget, datum, onTransfer, onLeihe, coachName, trainerVorschlaege, onAntwort, eingehendeAngebote, onAngebotAnnehmen, onAngebotAblehnen, spielerberaterAngebote, onSpielerberaterAngebotAnnehmen, onSpielerberaterAngebotAblehnen, ehemaligeEigengewaechse, meineAusgeliehenenSpieler, verkaufsliste, onAufMarktSetzen, onVonMarktNehmen, transferGesperrt, onTransferVerhandlungErgebnis, season, trophaeen }) {
   const fenster = transferfensterStatus(datum);
   const [modus, setModus] = useState("kaufen");
   const [kaufAnsicht, setKaufAnsicht] = useState("markt"); // "markt" | "verein"
   const [positionsFilter, setPositionsFilter] = useState("ALLE");
   const [suchbegriff, setSuchbegriff] = useState("");
+  const [marktSort, setMarktSort] = useState({ key: "staerke", desc: true });
+  const [nurBezahlbar, setNurBezahlbar] = useState(false);
+  const [altersFilter, setAltersFilter] = useState("alle");
+  const [eigenSort, setEigenSort] = useState({ key: "position", desc: true });
   const [verhandlung, setVerhandlung] = useState(null); // { spieler, teamName, richtung, angebot, nachricht, sourceDivId }
   const [spielerFuerDetail, setSpielerFuerDetail] = useState(null);
 
@@ -9979,8 +10310,17 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
   const gefilterteMarktSpieler = marktSpieler.filter(k => {
     if (positionsFilter !== "ALLE" && k.p.pos !== positionsFilter) return false;
     if (suchbegriff && !k.p.name.toLowerCase().includes(suchbegriff.toLowerCase()) && !k.team.toLowerCase().includes(suchbegriff.toLowerCase())) return false;
+    if (altersFilter === "u23" && k.p.alter >= 23) return false;
+    if (altersFilter === "mittel" && (k.p.alter < 23 || k.p.alter > 29)) return false;
+    if (altersFilter === "ab30" && k.p.alter < 30) return false;
+    if (nurBezahlbar && berechneMarktwert(k.p, k.divId) > budget) return false;
     return true;
-  });
+  }).map(k => ({ k, wert: berechneMarktwert(k.p, k.divId) })).sort((a, b) => {
+    const wert = { staerke: x => x.k.p.rating, preis: x => x.wert, alter: x => x.k.p.alter, potenzial: x => x.k.p.potenzial ?? x.k.p.rating }[marktSort.key];
+    const d = wert(a) - wert(b);
+    if (d !== 0) return marktSort.desc ? -d : d;
+    return (b.k.p.rating - a.k.p.rating) || (a.wert - b.wert); // gleiche Werte: stärker zuerst, dann günstiger
+  }).map(x => x.k);
   const verkaufsVorschlaege = trainerVorschlaege?.verkaufen || [];
   const kaufVorschlaege = trainerVorschlaege?.kaufen || [];
 
@@ -9989,7 +10329,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
     const wert = berechneMarktwert(spieler, sourceDivId || managerDivId);
     // Sinnvoller Startwert je nach Alter: bei einem älteren Spieler macht ein langer Vertrag ohnehin
     // selten Sinn, ein kürzerer Vorschlag passt daher besser als Ausgangspunkt.
-    const laufzeitVorschlag = spieler.alter >= 32 ? 1 : spieler.alter >= 28 ? 2 : 3;
+    const laufzeitVorschlag = Math.min(maxVertragsLaufzeit(spieler.alter), spieler.alter >= 32 ? 1 : spieler.alter >= 28 ? 2 : 3);
     setVerhandlung({ spieler, teamName, richtung, wert, quote: gelistet ? 100 : 130, laufzeit: laufzeitVorschlag, nachricht: null, sourceDivId: sourceDivId || managerDivId, gelistet });
   };
 
@@ -10195,6 +10535,14 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
                   {POSITIONEN.map(pos => <option key={pos.code} value={pos.code}>{pos.code}</option>)}
                 </select>
               </div>
+              <SortierLeiste optionen={[["staerke", "Stärke"], ["preis", "Preis"], ["alter", "Alter"], ["potenzial", "Potenzial"]]} aktuell={marktSort} onWahl={setMarktSort} />
+              <div className="flex flex-wrap items-center gap-1 mb-2">
+                <span className="text-[10px] text-emerald-600 mr-0.5">Filter:</span>
+                {[["alle", "Alle Alter"], ["u23", "unter 23"], ["mittel", "23–29"], ["ab30", "ab 30"]].map(([id, label]) => (
+                  <button key={id} type="button" onClick={() => setAltersFilter(id)} className={`text-[10px] rounded border px-2 py-1 ${altersFilter === id ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500"}`}>{label}</button>
+                ))}
+                <button type="button" onClick={() => setNurBezahlbar(v => !v)} className={`text-[10px] rounded border px-2 py-1 ${nurBezahlbar ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500"}`}>nur bezahlbar</button>
+              </div>
               <div className="max-h-72 overflow-y-auto space-y-1">
                 {gefilterteMarktSpieler.map(k => {
                   const gesperrt = !!transferGesperrt?.[k.p.id];
@@ -10317,14 +10665,29 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
               ))}
             </div>
           )}
+          <SortierLeiste optionen={[["position", "Position"], ["staerke", "Stärke"], ["alter", "Alter"], ["marktwert", "Marktwert"], ["vertrag", "Vertrag"]]} aktuell={eigenSort} onWahl={setEigenSort} />
           <div className="max-h-72 overflow-y-auto space-y-1">
-            {[...eigenesSquad].filter(sp => !sp.leihspieler).sort((a, b) => (verkaufsVorschlaege.some(v => v.playerId === b.id) ? 1 : 0) - (verkaufsVorschlaege.some(v => v.playerId === a.id) ? 1 : 0)).map(sp => {
+            {(() => {
+              const POS_REIHE = { TW: 0, IV: 1, AV: 2, ZM: 3, OM: 4, ST: 5 };
+              const istEmpfohlen = sp => verkaufsVorschlaege.some(v => v.playerId === sp.id);
+              const wertVon = { staerke: sp => sp.rating, alter: sp => sp.alter, marktwert: sp => berechneMarktwert(sp, managerDivId), vertrag: sp => sp.vertragBisSaison ?? 9999 }[eigenSort.key];
+              return [...eigenesSquad].filter(sp => !sp.leihspieler).sort((a, b) => {
+                const e = (istEmpfohlen(b) ? 1 : 0) - (istEmpfohlen(a) ? 1 : 0);
+                if (e !== 0) return e; // vom Trainer empfohlene Verkäufe bleiben oben
+                if (eigenSort.key === "position") return ((POS_REIHE[a.pos] ?? 9) - (POS_REIHE[b.pos] ?? 9)) || (b.rating - a.rating);
+                const d = wertVon(a) - wertVon(b);
+                if (d !== 0) return eigenSort.desc ? -d : d;
+                return b.rating - a.rating;
+              });
+            })().map((sp, idx, liste) => {
               const empfohlen = verkaufsVorschlaege.some(v => v.playerId === sp.id);
+              const zeigeKopf = eigenSort.key === "position" && !empfohlen && (idx === 0 || liste[idx - 1].pos !== sp.pos || verkaufsVorschlaege.some(v => v.playerId === liste[idx - 1].id));
               const gelistet = (verkaufsliste || []).includes(sp.id);
               const anzahlAngebote = (eingehendeAngebote || []).filter(a => a.spielerId === sp.id).length;
               return (
+                <div key={sp.id}>
+                {zeigeKopf && <div className="text-[10px] uppercase tracking-wider text-emerald-500 mt-2 mb-1">{POSITIONEN.find(pp => pp.code === sp.pos)?.name || sp.pos}</div>}
                 <div
-                  key={sp.id}
                   className={`w-full flex items-center justify-between text-xs px-3 py-1.5 rounded border ${gelistet ? "border-sky-400/50" : empfohlen ? "border-orange-400/50" : "border-emerald-900"}`}
                   style={{ backgroundColor: "var(--fm-surface)" }}
                 >
@@ -10350,6 +10713,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
                       {gelistet ? "Vom Markt nehmen" : "Auf Markt setzen"}
                     </button>
                   </div>
+                </div>
                 </div>
               );
             })}
@@ -10391,9 +10755,10 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
               <div className="text-[11px] text-emerald-500 mb-1.5">
                 Vertragsdauer beim Wechsel: <span className="text-white font-semibold">{verhandlung.laufzeit} Jahr{verhandlung.laufzeit === 1 ? "" : "e"}</span>
                 {verhandlung.spieler.alter >= 32 && <span className="text-amber-400"> — bei diesem Alter lieber kurz halten?</span>}
+                {maxVertragsLaufzeit(verhandlung.spieler.alter) < 5 && <span className="text-emerald-600"> (max. {maxVertragsLaufzeit(verhandlung.spieler.alter)} {maxVertragsLaufzeit(verhandlung.spieler.alter) === 1 ? "Jahr" : "Jahre"} in diesem Alter)</span>}
               </div>
               <div className="flex gap-1.5">
-                {[1, 2, 3, 4, 5].map(j => (
+                {Array.from({ length: maxVertragsLaufzeit(verhandlung.spieler.alter) }, (_, i) => i + 1).map(j => (
                   <button
                     key={j}
                     onClick={() => setVerhandlung(v => ({ ...v, laufzeit: j }))}
@@ -10880,7 +11245,7 @@ function ElfDesTagesSpielfeld({ elfDesTages, titel, managerTeam }) {
   );
 }
 
-function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophiePaket, onPhilosophiePaketChange, results, managerTeam, managerDivId, season, trophaeen, eingespieltheitStreak = 0 }) {
+function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, squad, coach, philosophie, onPhilosophieChange, philosophiePaket, onPhilosophiePaketChange, results, managerTeam, managerDivId, season, trophaeen, eingespieltheitStreak = 0 }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   const formation = useMemo(() => waehleFormation(philosophie, coach?.stil), [philosophie, coach]);
   const { elf, bank, staerke } = useMemo(() => waehleStartelf(squad, formation), [squad, formation]);
@@ -10900,7 +11265,17 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
   return (
     <div>
       <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
-        <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Philosophie-Paket wählen — bestimmt die Leitplanken UND wirkt sich spürbar auf Spielstärke, Entwicklung und Verletzungsrisiko aus</div>
+        <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Philosophie des Vereins — die Spielidee, die du über die Trainerwahl durchsetzt. Wirkt auf Spielstärke, Entwicklung und Verletzungsrisiko</div>
+        {coach && (() => {
+          const pa = paketPassung(philosophiePaket, coach.stil);
+          return (
+            <div className={`text-[11px] mb-2 rounded border px-2.5 py-1.5 ${pa > 0 ? "border-emerald-700 text-emerald-300" : pa < 0 ? "border-red-500/50 text-red-400" : "border-emerald-900 text-emerald-500"}`}>
+              {pa > 0 ? `Dein Trainer (${coach.stil}) passt zu dieser Spielidee und zieht voll mit: kleiner Stärkebonus, die Zufriedenheit steigt leicht.`
+                : pa < 0 ? `Dein Trainer (${coach.stil}) steht im Gegensatz zu dieser Spielidee: Reibung, kleiner Stärkemalus, die Zufriedenheit sinkt langsam. Besser ein anderes Paket oder ein passender Trainer.`
+                : `Dein Trainer (${coach.stil}) ist neutral zu dieser Spielidee.`}
+            </div>
+          );
+        })()}
         <div className="space-y-1.5 mb-3">
           {Object.entries(PHILOSOPHIE_PAKETE).map(([id, paket]) => (
             <button
@@ -10909,7 +11284,7 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
               className={`w-full text-left text-xs rounded border px-3 py-2 ${id === philosophiePaket ? "border-amber-400/60" : "border-emerald-900 hover:border-emerald-700"}`}
               style={id === philosophiePaket ? { backgroundColor: "rgba(251,191,36,0.06)" } : undefined}
             >
-              <div className={`font-semibold ${id === philosophiePaket ? "text-amber-300" : "text-emerald-200"}`}>{paket.name}{id === philosophiePaket && " (aktuell)"}</div>
+              <div className={`font-semibold ${id === philosophiePaket ? "text-amber-300" : "text-emerald-200"}`}>{paket.name}{id === philosophiePaket && " (aktuell)"}{coach && paketPassung(id, coach.stil) > 0 && <span className="text-emerald-400 font-normal text-[10px]"> · passt zu deinem Trainer</span>}{coach && paketPassung(id, coach.stil) < 0 && <span className="text-red-400 font-normal text-[10px]"> · Reibung mit deinem Trainer</span>}</div>
               <div className="text-emerald-500 text-[11px] mt-0.5">{paket.beschreibung}</div>
             </button>
           ))}
@@ -10927,6 +11302,7 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
             <span className="text-emerald-700 shrink-0">{aktuellesPaket.vorgaben.length + 1}.</span> Trainer hat innerhalb dieser Leitplanken Freiheit bei Formation, Rollenverteilung & Umsetzung
           </div>
         </div>
+        <div className="text-[10px] text-emerald-600 mt-2">Ein Wechsel der Spielidee mitten in der Saison kostet das Vertrauen des Trainers (Zufriedenheit −8). Vor dem 1. Spieltag ist er kostenlos.</div>
         <div className="text-[10px] text-emerald-700 mt-2">
           {taktikKennzahlen
             ? `Bewertung anhand der letzten ${taktikKennzahlen.spiele} Ligaspiele: Ø ${taktikKennzahlen.toreProSpiel.toFixed(1)} Tore, Ø ${taktikKennzahlen.gegentoreProSpiel.toFixed(1)} Gegentore.`
@@ -10934,8 +11310,33 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
         </div>
       </div>
 
+      <div className="border border-emerald-700/50 rounded p-3 mb-4" style={{ backgroundColor: "rgba(16,185,129,0.05)" }}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">Rotationsprinzip (Vereinslinie: Jugend einbinden)</div>
+            <p className="text-[11px] text-emerald-600 leading-relaxed">
+              Aktiv: Gelegentlich (~1 von 5 Spieltagen) spielt bewusst ein jüngerer Spieler (≤23) anstelle eines älteren (&gt;23) an derselben Position — leicht schwächer an diesem Spieltag, dafür mehr Einsatzzeit für den Nachwuchs und über die Zeit eine ausgeglichenere Alterspyramide. Nur unter bereits im Kader vorhandenen Spielern, nicht aus der U19.
+            </p>
+            {coach && (() => {
+              const rp = rotationPassung(coach.stil);
+              return <p className={`text-[11px] mt-1 ${rp > 0 ? "text-emerald-300" : rp < 0 ? "text-red-400" : "text-emerald-500"}`}>
+                {rp > 0 ? `${coach.name} (${coach.stil}) setzt gern auf junge Spieler: Aktiviert, steigt seine Zufriedenheit leicht.`
+                  : rp < 0 ? `${coach.name} (${coach.stil}) will mit der stärksten Elf spielen: Aktiviert, sinkt seine Zufriedenheit langsam.`
+                  : `${coach.name} (${coach.stil}) trägt die Linie neutral mit.`}
+              </p>;
+            })()}
+          </div>
+          <button
+            onClick={onRotationsprinzipUmschalten}
+            className={`shrink-0 px-3 py-1.5 rounded text-xs font-semibold border ${rotationsprinzipAktiv ? "bg-emerald-600 border-emerald-500 text-white" : "border-emerald-700 text-emerald-500"}`}
+          >
+            {rotationsprinzipAktiv ? "Aktiv" : "Inaktiv"}
+          </button>
+        </div>
+      </div>
+
       <div className="mb-4">
-        <label className="block text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Wie soll der Verein spielen? (Vorgabe an den Trainer)</label>
+        <label className="block text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Ambition des Vereins (Erwartung an den Trainer, er entscheidet die Formation selbst)</label>
         <div className="flex gap-1.5">
           {PHILOSOPHIE_OPTIONEN.map(p => (
             <button
@@ -10961,8 +11362,8 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
           {!coach
             ? "Ohne Cheftrainer setzt du die Formation faktisch selbst um — sobald du wieder einen Trainer hast, übernimmt er die Entscheidung."
             : folgtManager
-            ? "Der Trainer teilt deine Einschätzung weitgehend und setzt sie so um."
-            : `Der Trainer hat deinen Wunsch (${managerOption?.label}) gehört, entscheidet aber nach eigenem Stil — das letzte Wort hat immer er.`}
+            ? "Die Ambition des Vereins passt zum Stil des Trainers, er setzt sie so um."
+            : `Der Trainer kennt die Ambition des Vereins (${managerOption?.label}), entscheidet die Formation aber nach eigenem Stil — das letzte Wort hat immer er.`}
         </div>
       </div>
 
@@ -11055,8 +11456,18 @@ function TaktikView({ squad, coach, philosophie, onPhilosophieChange, philosophi
   );
 }
 
+// Abfindung bei vorzeitiger Entlassung eines Mitarbeiters: Läuft der Vertrag über das Saisonende hinaus,
+// kostet es die Hälfte des Gehalts der verbleibenden vollen Vertragsjahre (mindestens ein Vierteljahresgehalt).
+// Läuft er zum Saisonende ohnehin aus, entfällt die Abfindung.
+function stabAbfindung(mitglied, season) {
+  if (!mitglied) return 0;
+  const restJahre = (mitglied.vertragBisSaison ?? season) - season;
+  if (restJahre <= 0) return 0;
+  return Math.round(Math.max(0.25, 0.5 * restJahre) * (mitglied.jahresgehalt || 0) / 100) * 100;
+}
 function StabView({ stab, budget, managerDivId, season, matchday, onVerpflichten, onEntlassen, stadion, onPersonalstufeSetzen, personalabteilungen, onPersonalabteilungSetzen }) {
   const [offeneRolle, setOffeneRolle] = useState(null);
+  const [entlassenBestaetigung, setEntlassenBestaetigung] = useState(null);
   const [dauerProRolle, setDauerProRolle] = useState({});
 
   return (
@@ -11127,7 +11538,20 @@ function StabView({ stab, budget, managerDivId, season, matchday, onVerpflichten
                   <div className="text-[11px] text-emerald-600">{rolle.beschreibung}</div>
                 </div>
                 {besetzt ? (
-                  <button onClick={() => onEntlassen(rolle.id)} className="text-[10px] border border-red-500/50 text-red-400 rounded px-2 py-1 shrink-0 ml-2">Entlassen</button>
+                  (() => {
+                    const abfindung = stabAbfindung(besetzt, season);
+                    const bestaetigt = entlassenBestaetigung === rolle.id;
+                    return (
+                      <div className="flex flex-col items-end shrink-0 ml-2 gap-0.5">
+                        <button disabled={abfindung > budget}
+                          onClick={() => { if (abfindung > 0 && !bestaetigt) { setEntlassenBestaetigung(rolle.id); } else { setEntlassenBestaetigung(null); onEntlassen(rolle.id); } }}
+                          className="text-[10px] border border-red-500/50 text-red-400 rounded px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed">
+                          {bestaetigt ? `Wirklich entlassen — ${abfindung.toLocaleString("de-CH")} €` : "Entlassen"}
+                        </button>
+                        <span className="text-[9px] text-emerald-700">{abfindung > 0 ? `Abfindung ${abfindung.toLocaleString("de-CH")} € (Vertrag bis ${besetzt.vertragBisSaison})` : "Vertrag läuft zum Saisonende aus — keine Abfindung"}</span>
+                      </div>
+                    );
+                  })()
                 ) : (
                   <button onClick={() => setOffeneRolle(offeneRolle === rolle.id ? null : rolle.id)} className="text-[10px] border border-amber-400/50 text-amber-300 rounded px-2 py-1 shrink-0 ml-2">
                     {offeneRolle === rolle.id ? "Schliessen" : "Verpflichten"}
@@ -11258,7 +11682,7 @@ function TrainerDetailModal({ coach, teamName, season, trophaeen, onClose }) {
   );
 }
 
-function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, matchday, managerDivId, onFeuern, onVerpflichten, onInterim, vorschlaege, zufriedenheit: zufriedenheitRoh, onAntwort, trainerZiele, ziele, philosophiePaket, philosophiePaketSeitSaison, rotationsprinzipAktiv, onRotationsprinzipUmschalten, trophaeen }) {
+function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, matchday, managerDivId, onFeuern, onVerpflichten, onInterim, vorschlaege, zufriedenheit: zufriedenheitRoh, onAntwort, trainerZiele, philosophiePaket, philosophiePaketSeitSaison, trophaeen }) {
   // trainerZufriedenheit wird intern als Fliesskommazahl geführt (viele kleine Deltas pro Ereignis) —
   // angezeigt wird sie aber immer als ganze Zahl, wie alle anderen %-/von-100-Werte im Spiel auch.
   const zufriedenheit = Math.round(zufriedenheitRoh ?? 70);
@@ -11305,7 +11729,7 @@ function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, m
         <div className="text-[11px] text-emerald-500 leading-relaxed">
           {(PHILOSOPHIE_PAKETE[philosophiePaket] || PHILOSOPHIE_PAKETE.ballbesitz).name} — {(PHILOSOPHIE_PAKETE[philosophiePaket] || PHILOSOPHIE_PAKETE.ballbesitz).vorgaben.map(id => TAKTIK_DOKTRIN_TEXTE[id]).join(" · ")}
         </div>
-        <div className="text-[10px] text-emerald-700 mt-1">Details & laufende Bewertung im Taktik-Tab.</div>
+        <div className="text-[10px] text-emerald-700 mt-1">Wechsel, Details und laufende Bewertung im Taktik-Tab.</div>
         {(() => {
           const philosophieJahre = season - (philosophiePaketSeitSaison ?? season);
           if (philosophieJahre < 4) return null;
@@ -11316,23 +11740,6 @@ function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, m
             </div>
           );
         })()}
-      </div>
-
-      <div className="border border-emerald-700/50 rounded p-3 mb-4" style={{ backgroundColor: "rgba(16,185,129,0.05)" }}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">Rotationsprinzip</div>
-            <p className="text-[11px] text-emerald-600 leading-relaxed">
-              Aktiv: Gelegentlich (~1 von 5 Spieltagen) spielt bewusst ein jüngerer Spieler (≤23) anstelle eines älteren (&gt;23) an derselben Position — leicht schwächer an diesem Spieltag, dafür mehr Einsatzzeit für den Nachwuchs und über die Zeit eine ausgeglichenere Alterspyramide im Kader. Nur unter bereits im Kader vorhandenen Spielern, nicht aus der U19.
-            </p>
-          </div>
-          <button
-            onClick={onRotationsprinzipUmschalten}
-            className={`shrink-0 px-3 py-1.5 rounded text-xs font-semibold border ${rotationsprinzipAktiv ? "bg-emerald-600 border-emerald-500 text-white" : "border-emerald-700 text-emerald-500"}`}
-          >
-            {rotationsprinzipAktiv ? "Aktiv" : "Inaktiv"}
-          </button>
-        </div>
       </div>
 
       {coach ? (
@@ -11414,21 +11821,6 @@ function TrainerView({ coach, interimTrainer, budget, teamName, season, datum, m
               Selbst vorübergehend übernehmen (4 Spieltage)
             </button>
           )}
-        </div>
-      )}
-
-      {ziele && ziele.length > 0 && (
-        <div className="border border-amber-500/40 rounded p-3 mb-4" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
-          <div className="text-[11px] uppercase tracking-wider text-amber-400/80 mb-2">Vorstandsziele diese Saison</div>
-          <div className="space-y-1.5">
-            {ziele.map(z => (
-              <div key={z.id} className="text-xs text-amber-200 flex items-center justify-between">
-                <span>{z.text}</span>
-                <span className="text-amber-400">{z.provision.toLocaleString("de-CH")} €</span>
-              </div>
-            ))}
-          </div>
-          <div className="text-[10px] text-emerald-600 mt-2">Am Saisonende entscheidet die Vereinsversammlung anhand der Erfüllung über deine Wiederwahl.</div>
         </div>
       )}
 
@@ -11710,7 +12102,7 @@ function BuchhaltungTabView({ saisonFinanzen, finanzenHistorie = [], season }) {
 
 function FinanzAbrechnungView({ finanzen, live }) {
   const f = finanzen || leereSaisonFinanzen();
-  const ertragGesamt = f.ertragTicketing + (f.ertragFanartikel || 0) + (f.ertragImbiss || 0) + f.ertragTransfers + f.ertragSponsoring + (f.ertragTV || 0) + (f.ertragEuropapokal || 0) + (f.ertragLaenderspiel || 0) + (f.ertragEvents || 0);
+  const ertragGesamt = f.ertragTicketing + (f.ertragFanartikel || 0) + (f.ertragImbiss || 0) + f.ertragTransfers + f.ertragSponsoring + (f.ertragTV || 0) + (f.ertragEuropapokal || 0) + (f.ertragLaenderspiel || 0) + (f.ertragEvents || 0) + (f.ertragFanclub || 0);
   const aufwandGesamt = f.aufwandGehalt + (f.aufwandMitarbeiterstab || 0) + (f.aufwandManagerlohn || 0) + (f.aufwandSpielerloehne || 0) + f.aufwandReisen + f.aufwandTransfers + (f.aufwandBerater || 0) + (f.aufwandFanartikel || 0) + (f.aufwandImbiss || 0) + (f.aufwandStadion || 0) + (f.aufwandStadionmiete || 0) + (f.aufwandMaterial || 0) + (f.aufwandPersonal || 0) + (f.aufwandTrainingslager || 0) + (f.aufwandJugend || 0) + (f.aufwandSicherheit || 0) + (f.aufwandBetrieb || 0) + (f.aufwandSchiedsrichter || 0) + (f.aufwandZinsen || 0) + f.aufwandSonstiges;
   const reingewinn = ertragGesamt - aufwandGesamt;
   return (
@@ -11719,6 +12111,7 @@ function FinanzAbrechnungView({ finanzen, live }) {
       <div className="text-xs text-emerald-400 font-semibold">Ertrag</div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Ticketing</span><span>{f.ertragTicketing.toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Fanartikel-Verkauf</span><span>{(f.ertragFanartikel || 0).toLocaleString("de-CH")} €</span></div>
+      {(f.ertragFanclub || 0) > 0 && <div className="text-[11px] text-emerald-300 flex justify-between"><span>Fanclub-Beiträge</span><span>{(f.ertragFanclub || 0).toLocaleString("de-CH")} €</span></div>}
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Verkaufsstände &amp; Vereinsheim</span><span>{(f.ertragImbiss || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Spielerverkäufe</span><span>{f.ertragTransfers.toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Sponsoring</span><span>{f.ertragSponsoring.toLocaleString("de-CH")} €</span></div>
@@ -11738,7 +12131,7 @@ function FinanzAbrechnungView({ finanzen, live }) {
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Beraterprovisionen</span><span>{(f.aufwandBerater || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Fanartikel-Einkauf</span><span>{(f.aufwandFanartikel || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Verkaufsstände &amp; Vereinsheim (Einkauf)</span><span>{(f.aufwandImbiss || 0).toLocaleString("de-CH")} €</span></div>
-      <div className="text-[11px] text-emerald-300 flex justify-between"><span>Stadion (Umbauten)</span><span>{(f.aufwandStadion || 0).toLocaleString("de-CH")} €</span></div>
+      <div className="text-[11px] text-emerald-300 flex justify-between"><span>Stadion (Umbauten, Kauf, Infrastruktur)</span><span>{(f.aufwandStadion || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Trainingsmaterial</span><span>{(f.aufwandMaterial || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Personal (Verkauf/Verwaltung)</span><span>{(f.aufwandPersonal || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Trainingslager</span><span>{(f.aufwandTrainingslager || 0).toLocaleString("de-CH")} €</span></div>
@@ -12084,344 +12477,187 @@ function StatistikView({ squad, managerDivId }) {
 // vollständigen Erklärung), damit es tatsächlich gelesen wird statt überwältigend zu wirken.
 const SPIELREGELN_KATEGORIEN = [
   {
-    icon: Newspaper, farbe: "#7dd3fc", titel: "Vereinsinfos",
+    icon: Flag, farbe: "#fcd34d", titel: "Start & Überblick",
+    kurz: "Erste Schritte, Tabs, Vereinsinfos",
     punkte: [
-      "Alle Meldungen zum Vereinsgeschehen (Einnahmen, Gehälter, Vertragsabläufe, Spielberichte, Kaderentwicklung, Trainerentwicklung, Ausbildungsentschädigung, Derby-Ergebnisse, Jugend-Aufstiege usw.) erscheinen gesammelt im eigenen Vereinsinfos-Tab, nicht mehr auf der Hauptseite.",
-      "Ein roter Punkt am Tab zeigt an, wenn es seit dem letzten Öffnen etwas Neues gibt."
+      "Die Tabs sind in 8 Hauptgruppen gebündelt. Ein Punkt an einer Gruppe heisst: In einem Unter-Tab gibt es etwas Neues.",
+      "Meldungen zum Vereinsgeschehen (Einnahmen, Verträge, Berichte, Jugend-Aufstiege usw.) sammeln sich im Tab Vereinsinfos. Ein roter Punkt zeigt Neues an.",
+      "Erste Schritte: Kader und Taktik prüfen, Trainer-Wünsche ansehen, auslaufende Verträge verlängern, Transferfenster nutzen, dann den nächsten Spieltag simulieren.",
+      "Karrierestart: Der Verein hat schon einen Cheftrainer (2 Jahre Vertrag), Startkapital in der Oberliga 100'000 €. In der ersten Saison gibt es noch keine Ziele."
     ]
   },
   {
-    icon: Award, farbe: "#fcd34d", titel: "Spieler des Spieltages",
+    icon: Shield, farbe: "#6ee7b7", titel: "Ligen, Pokal & Relegation",
+    kurz: "Auf-/Abstieg, Kalender, Wettbewerbe",
     punkte: [
-      "Bei Liga, Pokal und Testspiel kann auch ein gegnerischer Spieler zum Spieler des Spieltages gewählt werden — aber ausschliesslich über eigene Tore/Vorlagen (z.B. ein Hattrick trotz Niederlage), nie einfach weil er insgesamt der bessere Spieler ist.",
-      "Die eigene Startelf sammelt zusätzlich Punkte nach Spielstärke, einem kleinen Tagesform-Zufallsanteil sowie einem Zu-Null-Bonus für Torwart/Abwehr — diese Zusatzpunkte stehen einem Gegenspieler nicht zu.",
-      "Beim Europapokal bleibt der Gegner rein abstrakt (kein echter Kader) — dort kann daher weiterhin nur ein eigener Spieler gewählt werden."
+      "Fünf Ligen: Oberliga → Regionalliga → 3. Liga → 2. Bundesliga → Bundesliga. Auf- und Abstieg am Saisonende, in den oberen drei Ligen zusätzlich per Relegation (Hin- und Rückspiel, bei Gleichstand Elfmeterschiessen).",
+      "Betrifft die Relegation deinen Verein, werden beide Spiele einzeln gespielt. Der Saisonabschluss wartet darauf.",
+      "Zwei Transferfenster: Sommer (Juni–August) und Winter (Januar). Der Kalender im Spielplan-Tab zeigt Spiele, Fenster und Trainingslager.",
+      "Alle Vereine spielen den Pokal im K.o.-System. Nur die Bundesliga erreicht den Europapokal. Beide bringen Heimspiel-Einnahmen und Preisgeld."
     ]
   },
   {
-    icon: Flag, farbe: "#fcd34d", titel: "Erste Schritte",
+    icon: Award, farbe: "#fcd34d", titel: "Spieltag & Auszeichnungen",
+    kurz: "Spieler des Spieltages, Elf des Tages, Karten, Trophäen",
     punkte: [
-      "Auf dem Handy sind die Tabs in 9 Hauptgruppen zusammengefasst (z.B. \"Kader & Taktik\", \"Personal & Transfers\", \"Wettbewerbe\") — antippen zeigt darunter die passenden Unter-Tabs. Ein Punkt an einer Hauptgruppe bedeutet, dass mindestens einer ihrer Unter-Tabs etwas Neues hat.",
-      "Kader ansehen: Wer spielt auf welcher Position, wer ist verletzt oder gesperrt?",
-      "Taktik-Tab: Formation wählen und Philosophie-Paket festlegen.",
-      "Trainer-Tab prüfen: Hat der Trainer Wünsche (Positionen, Verkäufe, Material, Mitarbeiter)? Erfüllte Wünsche machen ihn zufriedener.",
-      "Auslaufende Spielerverträge im Kader-Tab verlängern, bevor der Spieler ablösefrei geht.",
-      "Ist ein Transferfenster offen (Sommer oder Winter)? Dann lohnt sich ein Blick auf den Transfermarkt.",
-      "Dann einfach den nächsten Spieltag simulieren — der Rest ergibt sich von selbst."
+      "Spieler des Spieltages: Auch ein Gegner kann es werden, aber nur über eigene Tore und Vorlagen. Im Europapokal ist der Gegner abstrakt, dort zählt nur dein Team.",
+      "Elf des Tages: Nominierte bekommen einen Formschub (+4, bei Serie bis +8). Wiederholte Nominierungen heben Marktwert (bis +15 %) und Gehaltsforderung (bis +12 %). Höchstens 4 Spieler pro Verein.",
+      "Saisonende: Torschützenliste, Elf des Jahres, Spieler des Jahres. Die Torschützenliste zählt nur Liga-Tore.",
+      "Tore, Vorlagen und Karten gehen nur an tatsächlich eingesetzte Spieler.",
+      "Rote Karte: nächstes Spiel gesperrt. Jede 5. gelbe Karte einer Saison ebenfalls. Gesperrte Spieler werden bei der Startelf übersprungen.",
+      "Der Trophäenschrank gehört dem Verein, nicht dir. Bei einem Wechsel siehst du die Historie des neuen Vereins. Deine persönlichen Erfolge stehen im Karriere-Tab.",
+      "Der Spielplan-Tab hat eine Zusammenfassung aller Liga-Spiele mit Torschützen, Karten, Formation, Zuschauern und Finanzen."
     ]
   },
   {
-    icon: Medal, farbe: "#7dd3fc", titel: "Karrierestart",
+    icon: Repeat, farbe: "#fcd34d", titel: "Transfermarkt & Leihe",
+    kurz: "Kaufen, Verkaufen, Verleihen",
     punkte: [
-      "Der Verein hat schon einen durchschnittlichen Cheftrainer (2 Jahre Vertrag) — keine eigene Auswahl nötig.",
-      "In der ersten Saison gibt es noch keine Zielvorgaben von Vorstand oder Trainer.",
-      "Startkapital in der Oberliga: 100'000 €."
-    ]
-  },
-  {
-    icon: Shield, farbe: "#6ee7b7", titel: "Liga-System & Auf-/Abstieg",
-    punkte: [
-      "Fünf Ligen von unten nach oben: Oberliga → Regionalliga → 3. Liga → 2. Bundesliga → Bundesliga.",
-      "Auf- und Absteiger wechseln automatisch am Saisonende; Bundesliga, 2. und 3. Liga zusätzlich über Relegation.",
-      "Nur die Bundesliga qualifiziert sich für den Europapokal."
-    ]
-  },
-  {
-    icon: CalendarDays, farbe: "#6ee7b7", titel: "Kalender & Transferfenster",
-    punkte: [
-      "Der Kalender im Spielplan-Tab zeigt alle Spiele, Transferfenster und Trainingslager auf einen Blick.",
-      "Zwei Transferfenster pro Saison: Sommer (Juni–August) und Winter (Januar). Nur dann sind Transfers und Trainingslager möglich."
-    ]
-  },
-  {
-    icon: Repeat, farbe: "#fcd34d", titel: "Transfermarkt",
-    punkte: [
-      "Angebote nur möglich, während ein Transferfenster offen ist.",
-      "Hoher Markenwert und hohe Manager-Reputation machen den Verein für andere Klubs interessanter: häufigere Abwerbeangebote für eigene Spieler, die sich zunehmend gezielt auf die eigenen Topspieler konzentrieren statt gleichmässig verteilt zu sein.",
-      "Zusätzlich bieten Spielerberater von sich aus gelegentlich eigene Klienten an, die NICHT offiziell auf dem Transfermarkt gelistet sind — genau wie im echten Fussball der häufigste Weg, wie ein Verein überhaupt von wechselwilligen Spielern erfährt, deren Klub sie eigentlich gar nicht verkaufen will. Der geforderte Preis liegt dabei etwas über dem reinen Marktwert (110-160%).",
-      "Zu viele Ablehnungen: Der Verein verhandelt für den Rest des Fensters nicht mehr weiter.",
-      "Durchsucht werden auch die direkt benachbarten Ligen, nicht nur die eigene.",
-      "Vertragsdauer bei einem Neuzugang frei wählbar (1–5 Jahre).",
-      "Ein Kauf/Verkauf, den sich der Trainer gewünscht hat, macht ihn sofort zufriedener.",
-      "Gilt als echter Star-Transfer (rund 6 Wochen spürbarer Trikot-Verkaufsschub im Fanshop), wenn der Neuzugang entweder mind. 15 Stärkepunkte über dem bisherigen Kaderschnitt liegt, oder selbst eine Stärke von mindestens 92 erreicht — Letzteres greift gezielt bei bereits starken Kadern, wo ein Weltklasse-Transfer sonst die relative Schwelle knapp verfehlen könnte. Bei einer normalen Verstärkung passiert das bewusst nicht.",
-      "Ein Verkauf löst je nach Rolle in der Kabine eine Reaktion aus, nicht nach reiner Spielstärke: Der Kapitän oder ein Führungsspieler zu gehen sorgt für Unruhe (Team-Form und Trainerzufriedenheit sinken), ein unzufriedener \"Hitzkopf\" wirkt beim Abgang eher befreiend (beides steigt leicht). Die meisten anderen Verkäufe lösen dagegen gar keine spürbare Reaktion aus. Gilt gleichermassen, egal ob über ein eingehendes Angebot oder eine eigene Verhandlung verkauft wird."
+      "Angebote sind nur bei offenem Transferfenster möglich. Durchsucht werden auch die Nachbarligen. Vertragsdauer bei Neuzugängen: 1–5 Jahre.",
+      "Zu viele Ablehnungen: Der Verein verhandelt im Fenster nicht mehr.",
+      "Berater bieten gelegentlich Spieler abseits des Marktes an (110–160 % Marktwert). Hoher Markenwert und Reputation bringen mehr Abwerbeangebote für deine Topspieler.",
+      "Star-Transfer (Trikot-Boom im Fanshop, ca. 6 Wochen): Neuzugang liegt 15 Punkte über dem Kaderschnitt oder hat selbst mindestens 92.",
+      "Verkäufe wirken je nach Rolle: Kapitän oder Führungsspieler weg bringt Unruhe, ein unzufriedener Hitzkopf weg wirkt befreiend.",
+      "Leihe rein: ca. 15 % des Marktwerts, eine Saison, danach Rückkehr. Leihe raus: kleine Entschädigung, der Zielverein hat Bedarf an der Position. Unter \"Meine Leihspieler\" siehst du Einsätze und Stärke.",
+      "Leihspieler lassen sich nicht weiterverkaufen. Kaufoption: jederzeit fest verpflichten für ca. 120 % Marktwert mit 3-Jahres-Vertrag.",
+      "Verkaufte Eigengewächse laufen unter \"Ehemalige Eigengewächse\" weiter und lassen sich zurückkaufen (Trikot-Ansturm garantiert)."
     ]
   },
   {
     icon: FileText, farbe: "#fcd34d", titel: "Spielerverträge",
+    kurz: "Verlängern, Ablöse, Rotation",
     punkte: [
-      "Eigene Unterseite unter \"Kader & Taktik\": Verträge mit unter zwei Jahren Restlaufzeit sowie die Möglichkeit, alle anderen Spieler frühzeitig zu verlängern.",
-      "Frühzeitige Verlängerung (noch mind. 2 Jahre Vertrag): günstigere Gehaltsoptionen als bei einer dringenden Verlängerung — ein fest gebundener Spieler hat keine Alternative und lässt sich deshalb leichter zu moderaten Konditionen halten, genau wie im echten Fussball. Ein sehr zufriedener, starker Spieler lehnt trotzdem manchmal grundsätzlich ab, weil er erst abwarten will.",
-      "Gelegentlich schlägt stattdessen der Berater eines eigenen Spielers (mit noch mind. 2 Jahren Vertrag) von sich aus eine Verlängerung mit bereits fixen Konditionen vor — anders als bei der eigenen Verhandlung garantiert erfolgreich, sobald du zustimmst.",
-      "Zu viele abgelehnte Angebote: Der Spieler ist für ein paar Wochen frustriert (keine Gespräche, leichter Formabzug) — danach normalisiert sich alles wieder.",
-      "Ohne Verlängerung verlässt der Spieler den Verein nach Vertragsende ablösefrei.",
-      "Klick auf einen Spielernamen öffnet sein Datenblatt mit Statistiken, Karriere, Titeln und sieben positionsabhängigen Fähigkeitswerten (Torhüter haben ein eigenes Set) — geht überall, wo Spieler aufgelistet werden: Kader, Taktik, Training und Transfermarkt.",
-      "Kaderpyramide-Warnung im Kader-Tab: Erscheint, sobald 3 oder mehr deiner wichtigsten Spieler gleichzeitig in derselben Altersgruppe ab 30 stehen — Vorwarnung vor einem gemeinsamen Leistungseinbruch, bevor er tatsächlich eintritt. Das Rotationsprinzip (Schalter im Trainer-Tab, bei der Vereinsphilosophie) wirkt dem aktiv entgegen: gibt jüngeren Spielern (≤23) regelmässig statt eines älteren Stammspielers (>23) an derselben Position den Vorzug — an diesem Spieltag leicht schwächer, dafür mehr Einsatzzeit für den Nachwuchs. Wirkt sich zusätzlich auch auf Einwechslungen während des Spiels aus: junge Spieler (≤23) werden bei aktivem Rotationsprinzip mit dreifachem Gewicht bevorzugt von der Bank eingewechselt statt rein zufällig. Nur unter bereits im Kader vorhandenen Spielern, nicht aus der U19. Bleibt aktiv bis zur manuellen Deaktivierung, auch über Saisonwechsel hinweg.",
-      "Titelverteidiger-Malus: Wird die Meisterschaft gewonnen und während dieser Saison kaum aktiv nachgerüstet (unter 2 Neuzugänge), startet die Mannschaft mit spürbar gedämpfter Form in die neue Saison — baut sich über die ersten Wochen von selbst wieder ab. Unabhängig davon gibt der Vorstand nach einem Titelgewinn in der neuen Saison zusätzlich immer \"Titel verteidigen\" als eines der beiden Saisonziele vor.",
-      "Jede Entwicklung eines Spielers fördert gezielt EIN Attribut — der passende Co-Trainer bestimmt, welches: Torwarttrainer stärkt die Reflexe der Torhüter, Defensivtrainer die Defensive von Verteidigern, Stürmertrainer die Offensive von Offensivspielern, Assistenztrainer das Passspiel der zentralen Mittelfeldspieler."
+      "Unter Personal & Transfers → Spielerverträge: Verträge unter 2 Jahren Restlaufzeit, dazu frühzeitige Verlängerung aller anderen.",
+      "Frühzeitig (noch mind. 2 Jahre) ist günstiger als dringend. Der Berater schlägt manchmal selbst eine Verlängerung vor, dann klappt sie garantiert.",
+      "Zu viele Ablehnungen: Der Spieler ist einige Wochen frustriert (leichter Formabzug).",
+      "Ohne Verlängerung geht er ablösefrei. Die Ablöse sinkt mit der Restlaufzeit: letztes Jahr ca. −45 %, ein Jahr Rest ca. −20 %.",
+      "Kaderpyramide-Warnung: ab 3 wichtigen Spielern über 30 im Kader-Tab. Rotationsprinzip (Taktik-Tab): Junge (≤23) bekommen bei Gleichstand mehr Einsatzzeit, auch bei Einwechslungen.",
+      "Titelverteidiger-Malus: Wer nach dem Titel kaum nachrüstet (unter 2 Neuzugänge), startet gedämpft in die neue Saison.",
+      "Ein Klick auf einen Spielernamen öffnet sein Datenblatt, überall wo Spieler aufgelistet sind."
     ]
   },
   {
-    icon: Repeat, farbe: "#fb923c", titel: "Leihgeschäft",
+    icon: Heart, farbe: "#f87171", titel: "Teamgeist & Zufriedenheit",
+    kurz: "Kapitän, Eingespieltheit, Spielerlaune",
     punkte: [
-      "Im Transfermarkt-Tab lässt sich ein gelisteter Spieler eines anderen Vereins statt kaufen auch für eine Saison ausleihen (ca. 15% des Marktwerts als Leihgebühr) — er ist im Kader-Tab klar mit \"🔄 Leihe von [Verein]\" gekennzeichnet.",
-      "Umgekehrt lässt sich im Verkaufen-Modus ein eigener Spieler an einen anderen Verein (eigene, höhere oder tiefere Liga) verleihen — dafür gibt es eine kleine Entschädigung. Der Ziel-Verein wird gezielt danach gewählt, wo an der Position des Spielers Bedarf besteht (einer der dort schwächsten Vereine), damit er dort realistisch auch tatsächlich zum Einsatz kommt und sich weiterentwickelt.",
-      "Auch bei allen anderen (KI-)Vereinen wird jetzt jede Woche eine echte Startelf berechnet (statt nur einer abstrakten Stärkezahl) — nur so zählen Spieleinsätze überhaupt, was gerade für verliehene oder verkaufte eigene Spieler bei ihrem neuen Verein wichtig ist.",
-      "Jede Leihe läuft genau eine Saison und kehrt beim Saisonübergang automatisch zum Stammverein zurück — sein ursprünglicher Vertrag lebt dabei wieder auf.",
-      "Im Transfermarkt-Tab unter \"Meine Leihspieler\" siehst du jederzeit den aktuellen Stand deiner verliehenen Spieler: aktueller Verein, Einsätze und Stärkeveränderung seit dem Verleih.",
-      "Leihspieler gehören nicht wirklich zum Verein: sie lassen sich nicht selbst weiterverkaufen oder -verleihen, erscheinen nicht auf dem Transfermarkt und werden vom Trainer nicht als Verkaufskandidaten vorgeschlagen.",
-      "Kaufoption: ein aktueller Leihspieler lässt sich im Kader-Tab jederzeit fest verpflichten (ca. 120% des aktuellen Marktwerts) statt am Saisonende automatisch zurückzukehren — er bekommt dann einen regulären 3-Jahres-Vertrag."
+      "Teamgeist besteht aus sechs Faktoren: Kontinuität, Persönlichkeitsmix, Gehaltsgleichheit, Bankzufriedenheit, Form, Kapitän. Er wirkt direkt auf die Spielstärke.",
+      "Der Kapitän wird automatisch bestimmt. Ein Führungstyp stabilisiert, ein Hitzkopf kann schaden.",
+      "Eingespieltheit: Bleiben mind. 8 von 11 Startelf-Spielern gleich, wächst ein Bonus bis +2. Grosse Umstellungen halbieren die Serie.",
+      "Jeder Spieler hat eine eigene Zufriedenheit (0–100): Startelf hebt sie, Bank senkt sie, je nach Persönlichkeit schnell oder langsam. Auch ein auslaufender Vertrag drückt sie.",
+      "Unter 40 Punkten sinkt seine tatsächliche Spielstärke."
     ]
   },
   {
-    icon: Shield, farbe: "#fcd34d", titel: "Teamgeist, Kapitän & Eingespieltheit",
+    icon: UserCog, farbe: "#7dd3fc", titel: "Trainer & Mitarbeiterstab",
+    kurz: "Cheftrainer, Stab, Wünsche, Entlassung",
     punkte: [
-      "Teamgeist setzt sich aus sechs Faktoren zusammen: Kaderkontinuität, Persönlichkeitsmix, Gehaltsgleichheit, Bankzufriedenheit, aktuelle Form und Kapitänsführung — sichtbar im Kader-Tab, wirkt sich direkt auf die Spielstärke aus.",
-      "Der Kapitän wird automatisch bestimmt (Rating, Alter, Persönlichkeit) und ist kein reines Label mehr: eine echte Führungspersönlichkeit (z.B. Führungsspieler-Typ) stabilisiert die Kabine spürbar, ein schlecht geeigneter Typ (z.B. Hitzkopf) kann sogar schaden.",
-      "Eingespieltheit: bleibt die Startelf über mehrere Spieltage weitgehend gleich (mind. 8 von 11 identische Spieler), baut sich ein echter Spielstärke-Bonus auf (bis +2). Grössere Umstellungen halbieren die Serie, statt sie komplett zu löschen — ein, zwei Wechsel sind normal.",
-      "Sichtbar im Taktik-Tab als eigene Anzeige mit aktueller Serienlänge und Bonushöhe."
+      "15 Mitarbeiterrollen (Assistent, Scout, Arzt, Psychologe usw.) plus 5 Personalabteilungen (Junior-Assistenten, Sicherheit, Medizin, Sichtung, Platzpflege). Sie ergänzen die Einzelrollen und wirken auch allein. Qualität und Gehalt hängen von der Liga ab.",
+      "Gegnerische Vereine entwickeln sich mit: Ab der 3. Liga wird die Konkurrenz professioneller, ganz ohne Stab gerätst du ins Hintertreffen.",
+      "Entlassung von Mitarbeitern: Läuft der Vertrag über das Saisonende hinaus, kostet es die Hälfte des Gehalts der verbleibenden vollen Jahre (mind. ein Quartal). Zum Saisonende kostenlos.",
+      "Der Trainer äussert zweimal pro Saison Wünsche (Position, Verkauf, Material, Personal). Erfüllen macht ihn zufriedener. Verkaufsvorschläge betreffen nur Spieler klar unter dem Kaderschnitt (0–3). Lehnst du ab, ist der Spieler für die Saison geschützt.",
+      "Den Cheftrainer vorzeitig entlassen kostet 25–150 % des Restvertragswerts, je mehr, desto sicherer nimmt er an.",
+      "Er entwickelt sich einmal pro Saison (Erfolg beschleunigt, Abstieg bremst, ab 62 Abbau). Folgt auf einen langjährigen Erfolgstrainer (4+ Saisons, 2+ Titel) ein Nachfolger, gibt es vorübergehend einen Formdämpfer.",
+      "Jede Spielerentwicklung fördert ein Attribut, je nach Co-Trainer: Torwarttrainer Reflexe, Defensivtrainer Defensive, Stürmertrainer Offensive, Assistent Passspiel."
     ]
   },
   {
-    icon: Heart, farbe: "#f87171", titel: "Individuelle Spielerzufriedenheit",
+    icon: ClipboardList, farbe: "#7dd3fc", titel: "Taktik & Training",
+    kurz: "Formation, Philosophie, Material, Lager",
     punkte: [
-      "Getrennt von der teambezogenen Teamgeist-Zahl: jeder Spieler hat eine eigene Zufriedenheit (0-100), die auf tatsächliche Einsatzzeit reagiert — wer regelmässig in der Startelf steht, wird zufriedener, wer auf der Bank sitzt, unzufriedener.",
-      "Die eigene Persönlichkeit moderiert das stark: ein \"Ehrgeiziger\" wird auf der Bank schnell unzufrieden, ein \"Eigenbrötler\" oder \"Professioneller\" deutlich langsamer (siehe Kader-Tab, Persönlichkeits-Icon).",
-      "Eine ungeklärte Vertragssituation (letztes Vertragsjahr ohne Verlängerung) drückt zusätzlich auf die Zufriedenheit.",
-      "Wirkt sich unter 40 Punkten spürbar auf die tatsächliche Spielstärke aus (Abzug auf effektivesRating in der Aufstellung) — ein ignorierter Spieler kostet also wirklich Punkte, nicht nur eine abstrakte Statistik. Im Kader-Tab und im Spieler-Detailpopup jederzeit einsehbar."
+      "Sechs Formationen, fehlbesetzte Spieler erscheinen rot. Den Rahmen setzt du (ca. 20 %), die Formation wählt überwiegend der Trainer (ca. 80 %).",
+      "Fünf Philosophie-Pakete beeinflussen Stärke, Verletzungsrisiko und Entwicklung. Passt das Paket zum Trainerstil, gibt es einen Bonus, sonst Reibung. Ein Wechsel mitten in der Saison kostet 8 Trainervertrauen, und bleibt ein Paket jahrelang gleich, stellen sich Gegner darauf ein.",
+      "Training plant der Cheftrainer. Du äusserst Wünsche, bei Unzufriedenheit oder vielen Verletzten lehnt er ab. Einzelpläne schlägt der Stab vor, du kannst pro Spieler übersteuern.",
+      "Trainingsmaterial: 15 Kategorien, nur 6 sind anfangs vorhanden. Guter Zustand senkt das Verletzungsrisiko und verbessert die Entwicklung.",
+      "Trainingslager: nur bei offenem Transferfenster, einmal pro Saisonhälfte, gibt einen temporären Stärkebonus."
     ]
   },
   {
-    icon: ArrowDown, farbe: "#f87171", titel: "Relegation",
+    icon: Sprout, farbe: "#6ee7b7", titel: "Jugend",
+    kurz: "Akademie, Sichtung, Ligen U7–U19",
     punkte: [
-      "Bundesliga-16. gegen 2.-Liga-3. sowie 2.-Liga-16. gegen 3.-Liga-3.: Hin- und Rückspiel entscheiden über Auf-/Abstieg, bei Gesamtgleichstand ein Elfmeterschiessen.",
-      "Ist der eigene Verein selbst betroffen, werden beide Spiele jetzt als echte, individuell simulierte Partien ausgetragen — mit der eigenen Formation, echten Torschützen und Karten, statt einer sofortigen Hintergrund-Berechnung.",
-      "Der Saisonabschluss wird so lange zurückgehalten, bis beide Relegationsspiele gespielt sind. Sind nicht die eigenen Vereine betroffen, entscheidet die Relegation weiterhin sofort im Hintergrund."
-    ]
-  },
-  {
-    icon: UserCog, farbe: "#7dd3fc", titel: "Cheftrainer & Mitarbeiterstab",
-    punkte: [
-      "15 Mitarbeiterrollen (Assistenztrainer, Scout, Arzt, Psychologe usw.), jede mit eigenem Nutzen.",
-      "Zusätzlich 5 weitere Personalabteilungen (Junior-Assistenten, Sicherheitsdienst, medizinische Abteilung, Sichtungsnetzwerk, Platzpflege-Team) — keine Einzelperson wie oben, sondern eine wählbare Personalstufe wie beim Verwaltungspersonal, mit Kosten nach Liga-Ebene. Jede ergänzt eine bestehende Einzelrolle, wirkt aber auch ganz ohne sie: Junior-Assistenten verstärken die Wirkung aller Jugendtrainer/des Jugendkoordinators (U7-U19), medizinische Abteilung ergänzt den Vereinsarzt (besonders stark mit ihm zusammen), Sichtungsnetzwerk hebt die Kandidatenqualität bei Talentsichtungen an, Platzpflege-Team verlangsamt die Rasenabnutzung zusätzlich zum Platzwart, Sicherheitsdienst dämpft das Risiko/die Busse bei einem Vorfall im Fanblock zusätzlich zum baulichen Sicherheitssystem.",
-      "Die gegnerischen Vereine entwickeln sich automatisch mit einer Basis-Chance weiter — ab der 3. Liga wird diese Konkurrenz zunehmend professioneller. Wer dort dauerhaft ganz ohne eigenen Mitarbeiterstab auskommen will, gerät bei der Kaderentwicklung ins Hintertreffen. In Oberliga und Regionalliga bleibt die Konkurrenz bewusst milder, damit zuerst Erfahrung mit den laufenden Fixkosten gesammelt werden kann.",
-      "Mitarbeiter lassen sich jederzeit sofort und kostenlos entlassen — kein Abfindungsangebot nötig.",
-      "Verfügbare Qualität und Gehälter richten sich nach der eigenen Liga.",
-      "Der Trainer äussert zweimal pro Saison Wünsche zu Position, Verkauf, Material und Mitarbeitern — abhängig von seinem persönlichen Stil und Alter. Erfüllen erhöht seine Zufriedenheit.",
-      "Verkaufsvorschläge betreffen nur Spieler, die spürbar unter dem Kaderschnitt liegen — je nach Kaderqualität können das 0 bis 3 sein, nicht mehr zwingend immer drei. Lehnst du einen Vorschlag ab (\"Er bleibt im Verein\"), ist dieser Spieler für den Rest der Saison vor erneuten Verkaufsvorschlägen geschützt.",
-      "Den Cheftrainer während laufendem Vertrag zu entlassen kostet dagegen ein Abfindungsangebot (25-150% des Restvertragswerts) — je höher das Angebot, desto sicherer nimmt er an.",
-      "Der Cheftrainer entwickelt sich einmal pro Saison weiter, abhängig von Alter und sportlichem Erfolg (Aufstieg, obere Tabellenhälfte, Titel beschleunigen; Abstieg bremst). Ab 62 Jahren baut er stattdessen zunehmend altersbedingt ab.",
-      "War der scheidende Trainer lange (4+ Saisons) UND erfolgreich (2+ Meistertitel während seiner Amtszeit) im Amt, braucht die Mannschaft unter seinem Nachfolger etwas Zeit, sich auf die neue Spielidee einzustellen — ein vorübergehender Formdämpfer, der sich über die ersten Wochen von selbst wieder abbaut.",
-      "Klick auf den Trainer öffnet sein Datenblatt mit Bilanz und Titeln."
-    ]
-  },
-  {
-    icon: Tent, farbe: "#5eead4", titel: "Trainingslager",
-    punkte: [
-      "Buchbar nur während eines offenen Transferfensters, einmal pro Saisonhälfte.",
-      "Gibt dem Kader einen temporären Stärkebonus."
-    ]
-  },
-  {
-    icon: Package, farbe: "#94a3b8", titel: "Trainingsmaterial",
-    punkte: [
-      "15 Kategorien — nur 6 Grundausstattungen sind von Anfang an vorhanden, der Rest muss angeschafft werden.",
-      "Guter Zustand senkt das Verletzungsrisiko und verbessert die Trainings-Entwicklung des Kaders — Material rechtzeitig erneuern.",
-      "Trainingsschwerpunkt (Kondition/Technik/Taktik/Standardsituationen/Regeneration) gilt kaderweit — einzelne Spieler lassen sich aber individuell übersteuern, z.B. ein Talent auf Technik oder ein verletzungsanfälliger Spieler auf Regeneration. Taktik- und Standard-Fokus bleiben bewusst nur kaderweit wählbar."
-    ]
-  },
-  {
-    icon: ClipboardList, farbe: "#7dd3fc", titel: "Taktik & Philosophie",
-    punkte: [
-      "Sechs Formationen zur Wahl — fehlbesetzte Spieler werden im Spielfeld-Diagramm rot markiert.",
-      "Fünf Philosophie-Pakete beeinflussen Spielstärke, Verletzungsrisiko und Talententwicklung unterschiedlich — z.B. Offensiv-Spektakel für mehr Stärke bei höherem Risiko, Jugend & Zukunft für bessere Entwicklung."
-    ]
-  },
-  {
-    icon: Sprout, farbe: "#6ee7b7", titel: "Jugendakademie",
-    punkte: [
-      "5 Ausbaustufen — Kosten, Bauzeit und die maximal erreichbare Stufe hängen von der eigenen Liga ab.",
-      "Nach jeder Fertigstellung gilt eine Wartezeit von rund einer Saison bis zur nächsten Stufe.",
-      "Ein Talent erreicht nie mehr als die Liga-Durchschnittsstärke — auch bei maximaler Investition.",
-      "Höheres Akademie-Level erhöht zusätzlich leicht die wöchentliche Entwicklungschance ALLER Spieler in U13/U15/U17/U19 (bessere Infrastruktur hilft nicht nur bei der Sichtung neuer Talente, sondern auch beim Training der bereits vorhandenen) — ergänzt den jeweiligen Jugendtrainer-Bonus, ersetzt ihn aber nicht.",
-      "Verkaufst du ein eigenes Eigengewächs, landet es bei einem echten anderen Verein und entwickelt sich dort normal weiter (Alterung, Rating) — im Transfermarkt-Tab unter \"Ehemalige Eigengewächse\" siehst du seinen aktuellen Stand und kannst ihn jederzeit zurückkaufen. Eine Rückkehr sorgt garantiert für einen Trikot-Ansturm im Fanshop, unabhängig vom aktuellen Rating."
-    ]
-  },
-  {
-    icon: Sprout, farbe: "#6ee7b7", titel: "U19-Jugendliga",
-    punkte: [
-      "Eigenes U19-Team in einer echten dreistufigen Liga (U19-Bundesliga, U19-Regionalliga, U19-Landesliga) mit echtem Auf- und Abstieg für ALLE Teams — der eigene Verein startet zu Karrierebeginn immer in der tiefsten Stufe.",
-      "Der Kader besteht durchgehend aus echten, dauerhaften Spielern zwischen 17 und 18 Jahren — zu Karrierestart wie auch danach immer je zur Hälfte beider Jahrgänge, damit die Durchmischung stabil bleibt. Wird ein 18-Jähriger nicht rechtzeitig hochgezogen, wird er beim nächsten Saisonübergang freigestellt und wechselt zu einem echten anderen Verein (wie ein verkauftes Eigengewächs) — ein sehr vielversprechender Spieler (hohes Potenzial) bringt dabei noch eine kleine Ablöse ein, ein durchschnittlicher geht ablösefrei. Neue 17-Jährige rücken automatisch nach.",
-      "Spiele laufen automatisch im Hintergrund mit (ein Spieltag pro eigenem Spieltag) — kein zusätzliches Klicken nötig. Die eigene Stärke wird dabei jede Woche frisch aus dem aktuellen U19-Kader berechnet.",
-      "Frisch gesichtete Eigengewächse aus der Jugendakademie (Sichtung im Jugend-Tab) landen jetzt im U19-Kader statt direkt in der ersten Mannschaft — von dort aus lässt sich jeder Spieler jederzeit (nicht nur am Saisonende) über \"Hochziehen\" in die erste Mannschaft befördern.",
-      "Maximal 1-3 Beförderungen pro Saison: Basis 1, +1 ab Akademie-Level 3, +1 bei einem U19-Trainer mit Stärke 60 oder mehr — der Zähler wird bei jedem Saisonübergang wieder auf 0 zurückgesetzt.",
-      "Abwerbungen und internationale Scouting-Kandidaten (schon etwas ältere, etablierte Talente) bleiben weiterhin direkte Verpflichtungen für die erste Mannschaft.",
-      "U19-Spieler entwickeln sich jede Woche mit deutlich höherer Grundchance als im Erwachsenenkader (17-18 ist die prägendste Entwicklungsphase) — die neue Mitarbeiterrolle \"U19-Trainer\" beschleunigt das zusätzlich, unabhängig vom Akademieleiter (der eher für die Qualität der Neuzugänge sorgt statt für die Entwicklung bereits vorhandener Spieler).",
-      "Am Saisonende erscheint eine eigene Vereinsinfos-Meldung, ob das U19-Team auf-, abgestiegen oder in seiner Stufe geblieben ist, inkl. Tabellenplatz.",
-      "Jeder U19-Spieler hat ein festes Potenzial (sichtbar als Sterne, 1-5) — die Obergrenze, bis zu der er sich über die Zeit entwickeln kann. Ein Spieler mit niedrigem aktuellem Rating aber hoher Sternezahl ist ein echter Rohdiamant.",
-      "Trifft ein eigener U19-Spieler mehrfach in Folge (mindestens 3 Tore in den letzten bis zu 5 Spielen), erscheint eine eigene Vereinsinfos-Meldung dazu — die U19 bleibt so auch ohne eigene Spielsimulation spürbar lebendig.",
-      "Auf- und Abstieg des U19-Teams sowie eine kürzlich vorgenommene Beförderung eines Spielers in die erste Mannschaft können auch als Thema in der nächsten Pressekonferenz aufkommen."
-    ]
-  },
-  {
-    icon: Sprout, farbe: "#6ee7b7", titel: "U17-Jugendliga",
-    punkte: [
-      "Eigenes U17-Team, spiegelbildlich zur U19-Liga aufgebaut: dieselbe dreistufige Struktur (U17-Bundesliga, U17-Regionalliga, U17-Landesliga) mit echtem Auf- und Abstieg, automatischer Hintergrund-Simulation und eigenen Vereinsinfos-Meldungen bei Auf-/Abstieg und Torserien.",
-      "Der U17-Kader besteht aus 15- und 16-Jährigen — genau gleich gross wie der U19-Kader und ebenfalls von Karrierestart an je zur Hälfte beider Jahrgänge. Wird ein Spieler 17, wechselt er automatisch und ohne jedes Zutun in den U19-Kader — volle Durchlässigkeit zwischen den beiden Jugendstufen, kein manuelles Hochziehen nötig (anders als beim Übergang U19 → erste Mannschaft). Ab 16 Jahren lässt sich ein U17-Spieler aber auch schon direkt in die erste Mannschaft ziehen, realistischerweise nicht mit 15 — teilt sich dabei dasselbe Saison-Kontingent mit der U19.",
-      "Bei jeder Talentsichtung (im Investitions-Tab) findet der Chefscout jetzt zusätzlich 1-2 jüngere Kandidaten (15-16 Jahre) speziell für die U17 — nutzt dieselbe Investition, denselben Scout und dieselbe Akademie wie die U19-Kandidaten, keine separate Sichtung nötig.",
-      "Ist der jeweilige Jugendkader bereits voll (18 Spieler), macht beim Auswählen eines gescouteten Kandidaten automatisch der schwächste Spieler desselben Jahrgangs Platz — wechselt zu einem echten anderen Verein, wie ein freigestellter U19-Spieler. So bleiben Kadergrösse und die gleichmässige 9/9-Jahrgangsverteilung immer erhalten.",
-      "Eigene Mitarbeiterrolle \"U17-Trainer\", unabhängig vom U19-Trainer — beschleunigt gezielt die Entwicklung der U17-Spieler, nicht die der U19."
-    ]
-  },
-  {
-    icon: Sprout, farbe: "#6ee7b7", titel: "U15- und U13-Jugendliga",
-    punkte: [
-      "Zwei weitere Jugendstufen unterhalb der U17, nach demselben Prinzip: eigene dreistufige Liga (Bundesliga/Regionalliga/Landesliga), automatische Hintergrund-Simulation, eigene Vereinsinfos-Meldungen. Die U15 besteht aus 13- und 14-Jährigen, die U13 aus 11- und 12-Jährigen — beide genau gleich gross wie U19/U17 und ebenfalls von Karrierestart an je zur Hälfte beider Jahrgänge.",
-      "Volle Durchlässigkeit die ganze Kette hinauf: U13 → U15 → U17 → U19, jeweils automatisch beim Erreichen des nächsten Altersjahrgangs, ohne jedes Zutun.",
-      "Anders als ab der U17 (dort ab 16 möglich) gibt es aus der U15 oder U13 KEIN vorzeitiges direktes Hochziehen in die erste Mannschaft — mit 11-14 Jahren realistischerweise nicht sinnvoll. Der einzige Weg nach oben führt über die nächste Jugendstufe.",
-      "Die Talentsichtung findet jetzt zusätzlich je einen Kandidaten für die U15 und die U13 — dieselbe Sichtung, dasselbe Prinzip wie bei U17. Ist der jeweilige Kader bereits voll, macht auch hier automatisch der schwächste Spieler desselben Jahrgangs Platz.",
-      "Zwei weitere eigene Mitarbeiterrollen: \"U15-Trainer\" und \"U13-Trainer\", unabhängig von den Trainern der älteren Jugendstufen."
-    ]
-  },
-  {
-    icon: Sprout, farbe: "#6ee7b7", titel: "U11-, U9- und U7-Jugendliga",
-    punkte: [
-      "Anders als U13-U19: KEINE dreistufige Pyramide, sondern nur EINE einzige, rein regionale Gruppe pro Stufe (wie im echten Fussball ab der E-Jugend üblich — Kreisliga, kein Landes- oder Bundesniveau) — entsprechend auch kein Auf-/Abstieg. Die U11 besteht aus 9- und 10-Jährigen, die U9 aus 7- und 8-Jährigen, beide genau gleich gross wie die älteren Stufen und ebenfalls von Karrierestart an je zur Hälfte beider Jahrgänge.",
-      "Die U7 (5- und 6-Jährige) hat bewusst GAR KEINEN Ligabetrieb — keine Tabelle, keine Ergebnisse. Im echten Fussball ist das reine Bewegungsförderung ohne Wettkampf (die meisten Landesverbände führen für die G-Jugend gar keine Ergebnisse). Die Entwicklung läuft trotzdem jede Woche mit, nur eben ohne Spiele.",
-      "Volle Durchlässigkeit die ganze Kette hinauf: U7 → U9 → U11 → U13 → U15 → U17 → U19, jeweils automatisch beim Erreichen des nächsten Altersjahrgangs, ohne jedes Zutun. Kein vorzeitiges Hochziehen in die erste Mannschaft aus diesen drei Stufen — realistischerweise nicht sinnvoll.",
-      "Statt drei einzelner Trainer teilen sich U7, U9 und U11 eine gemeinsame neue Mitarbeiterrolle: \"Jugendkoordinator U7-U11\" — wie im echten Kinderfussball üblich kümmert sich hier eine Person um mehrere Jahrgänge gleichzeitig."
+      "Akademie: 5 Ausbaustufen, Kosten und Maximalstufe hängen von der Liga ab, zwischen den Stufen etwa eine Saison Wartezeit. Höhere Stufe: +1 Stärke für Nachrücker und leicht mehr Entwicklung in U13–U19. Ein Talent erreicht nie mehr als die Liga-Durchschnittsstärke.",
+      "Sichtung: Das Jugendbudget wird erst bei jeder Sichtung bezahlt. Mit Budget gibt es mindestens eine Sichtung, der Chefscout erhöht die Chance auf mehr. Jede Sichtung bringt Kandidaten für U19 bis U13. Ist der Kader voll, wechselt der Schwächste des Jahrgangs zu einem anderen Verein.",
+      "Jugendstab: Akademieleiter und Stufentrainer (U19, U17, U15, U13) bringen bis +12 Stärke für Nachrücker. U7–U11 teilen sich einen Jugendkoordinator. Das Panel \"Dein Jugendstab und seine Wirkung\" zeigt die Effekte.",
+      "Ligen: U19, U17, U15 und U13 spielen in dreistufigen Ligen mit Auf- und Abstieg. U11 und U9 haben nur eine regionale Gruppe, die U7 hat keinen Spielbetrieb. Alles läuft automatisch im Hintergrund.",
+      "Jahrgänge: je 9 + 9 Spieler, Aufrücken automatisch bis zur U19. Ein 18-Jähriger in der U19, der nicht hochgezogen wird, verlässt den Verein (bei hohem Potenzial mit kleiner Ablöse).",
+      "Hochziehen in die erste Mannschaft: aus der U19 jederzeit, aus der U17 ab 16 Jahren, aus U15 und tiefer nicht. Maximal 1–3 pro Saison (Basis 1, +1 ab Akademie-Stufe 3, +1 mit U19-Trainer ab Stärke 60).",
+      "Potenzial: Sterne (1–5) zeigen die Obergrenze, Rohdiamanten haben niedriges Rating bei hohen Sternen. Torserien, Auf- und Abstiege der Jugend landen in den Vereinsinfos und können Thema der Pressekonferenz werden."
     ]
   },
   {
     icon: Building2, farbe: "#6ee7b7", titel: "Stadion",
+    kurz: "Kauf, Ausbau, Rasen, Infrastruktur",
     punkte: [
-      "Drei Bereiche (Stehplätze, Sitzplätze, Logen), jeweils mit eigener Kapazität und eigenem Ticketpreis.",
-      "Das Stadion wird anfangs gemietet und kann jederzeit gekauft werden.",
-      "Erweiterungen, Logen-Ausbau und Namensrechte sind erst nach dem Kauf möglich.",
-      "Nach dem Kauf lassen sich zusätzlich Konzerte & andere Grossveranstaltungen vermieten — gelegentliche Anfragen mit gutem Geld, kosten aber spürbar Rasenzustand durch Bühnenaufbau und Publikum.",
-      "Zuschauerzahl hängt von Tabellenplatz, Gegner, Derby-Status und Stadion-Infrastruktur ab.",
-      "11 Infrastruktur-Investitionen (Flutlicht, Rasenheizung, Videowürfel usw.) nutzen sich über die Zeit ab und sollten gewartet werden, sonst lässt ihre Wirkung nach.",
-      "Der Rasen nutzt sich mit jedem Heimspiel ab (ohne guten Platzwart schneller) — bei schlechtem Zustand lässt er sich im Stadion-Tab kostenpflichtig sanieren, Kosten richten sich nach Stadiongrösse und Schadensausmass.",
-      "Solange das Stadion noch nicht dem Verein gehört, kann der Eigentümer (die Kommune) von sich aus erweitern — nach einem Aufstieg oder bei nachhaltigem Erfolg (Top 3 ab Spieltag 10). Er trägt die Kosten selbst, verlangt danach aber mehr Miete; die Erweiterung ist frühestens nach rund 5 Monaten fertig, nicht schon zum nächsten Spieltag."
+      "Drei Bereiche (Steh-, Sitzplätze, Logen) mit eigener Kapazität und eigenem Ticketpreis. Zuschauer hängen von Tabelle, Gegner, Derby und Infrastruktur ab.",
+      "Das Stadion ist anfangs gemietet. Erweiterungen, Logen, Infrastruktur-Kauf, Namensrechte und Konzerte gibt es erst nach dem Kauf. Konzerte bringen gutes Geld, kosten aber Rasenzustand.",
+      "Solange es gemietet ist, kann die Kommune nach Aufstieg oder Erfolg selbst erweitern. Das dauert rund 5 Monate und erhöht danach die Miete.",
+      "11 Infrastruktur-Investitionen (Flutlicht, Rasenheizung, Videowürfel usw.) nutzen sich ab und müssen gewartet werden.",
+      "Der Rasen nutzt sich mit jedem Heimspiel ab (mit Platzwart langsamer) und lässt sich kostenpflichtig sanieren."
     ]
   },
   {
-    icon: Wallet, farbe: "#fcd34d", titel: "Finanzen & Buchhaltung",
+    icon: Wallet, farbe: "#fcd34d", titel: "Finanzen, Preise & Verpflegung",
+    kurz: "Buchhaltung, Dispo, Preise, Fanshop",
     punkte: [
-      "Die Buchhaltung schlüsselt alle Erträge und Aufwände einzeln auf.",
-      "TV-Gelder gibt es ab der 3. Liga aufwärts — die Oberliga bekommt keine.",
-      "Der Reingewinn einer Saison wird automatisch zum Startkapital der neuen Saison.",
-      "Ein Dispo-Rahmen erlaubt ein begrenztes Minus (gestaffelt nach Liga-Niveau) gegen wöchentliche Zinsen. Wird der Rahmen überschritten, verkauft der Vorstand automatisch Spieler, um das Konto zu stabilisieren — passiert das ein zweites Mal, entlässt die Vereinsversammlung den Manager sofort."
+      "Die Buchhaltung schlüsselt alle Erträge und Aufwände auf. TV-Gelder gibt es ab der 3. Liga. Der Reingewinn wird zum Startkapital der neuen Saison.",
+      "Dispo: begrenztes Minus gegen wöchentliche Zinsen. Bei Überschreitung verkauft der Vorstand Spieler, beim zweiten Mal wirst du entlassen.",
+      "Preise wirken auf die Nachfrage: Über dem Richtwert kommen und kaufen weniger, darunter mehr. Logen reagieren schwächer, hoher Markenwert macht tolerant. Meist ist ein moderater Aufschlag am besten.",
+      "Fanshop, Verpflegung und Vereinsheim: Pro Artikel legst du einen Ziel-Bestand fest, nach jedem Spiel wird automatisch nachbestellt. Das Maximum liegt beim 3-Fachen der höchstmöglichen Nachfrage und wächst mit dem Stadion. Verkaufspreise sind frei einstellbar."
     ]
   },
   {
-    icon: Megaphone, farbe: "#f0abfc", titel: "Marketing & Markenwert",
+    icon: Heart, farbe: "#f87171", titel: "Fanclub",
+    kurz: "Stimmung, Aktionen, Fanliebling, Fanhaus",
     punkte: [
-      "Der Markenwert (0-100) wirkt sich auf Fanartikel-/Verpflegungsumsatz, Sponsoring-Angebote, Fanclub-Wachstum, Ticketpreis-Toleranz und Transferverhandlungen aus.",
-      "Fanclub-Grösse startet je nach Liga bei einer realistischen Basis (Oberliga ~180, Regionalliga ~590, 3. Liga ~1'000, 2. Liga ~3'500, Bundesliga ~12'000) und wächst/schrumpft normalerweise langsam mit der Fanzufriedenheit. Bei einem Liga-Wechsel springt die Grösse zusätzlich spürbar Richtung der neuen Liga-Basis — ein Aufstieg zieht sofort viele neue Fans an, ein Abstieg kostet nur einen kleineren Teil (die meisten bleiben loyal).",
-      "Baut sich durch Marketing-Kampagnen, sportlichen Erfolg, digitale Stadion-Infrastruktur und Teamgeist auf — sinkt ohne Pflege langsam wieder.",
-      "Fünf Marketingmassnahmen stehen zur Wahl: vier feste Kampagnen (Social-Media, Plakatwerbung, Merchandise-Launch, Kooperationen) sowie ein Spielerauftritt beim Sponsor, für den du gezielt einen Spieler aus deinem Kader auswählst — Kosten und Markenwert-Bonus richten sich nach seiner Spielstärke, \"ehrgeizige\" Spieler verlieren dabei etwas Zufriedenheit.",
-      "Wird der Spieler eines laufenden Spielerauftritts verkauft, ist der Sponsor düpiert: der komplette Bonus geht sofort verloren, dazu ein zusätzlicher kleiner Ansehensverlust — die Massnahme wird aber sofort wieder buchbar, statt erst nach Ablauf der regulären Laufzeit.",
-      "Jede Massnahme wirkt 3 Saisons lang, danach lässt die Reichweite nach: der Bonus verschwindet automatisch wieder und die Massnahme wird erneut buchbar (mit eigener Vereinsinfos-Meldung, sobald das passiert). Es gibt kein zusätzliches laufendes Marketingbudget mehr — dieses eine System deckt alles ab.",
-      "Der Markenwert ist pro Liga gedeckelt (siehe oben) — steht er schon auf dem Höchstwert, wirkt eine neu gebuchte Massnahme nur bis zu diesem Deckel.",
-      "Nach oben gedeckelt je nach Liga-Niveau: Oberliga/Regionalliga/3. Liga erreichen realistischerweise nie \"national bekannt\" oder \"Weltmarke\" — das ist erst ab der 2. Bundesliga möglich.",
-      "Trikotsponsor-Verträge laufen über mehrere Saisons — bei einem Auf- oder Abstieg wird der Vertrag aber immer sofort aufgelöst, egal wie lange er noch gegangen wäre, und muss in der neuen Liga zu deren (höheren bzw. tieferen) Beträgen neu verhandelt werden.",
-      "Zusätzlich zum Trikotsponsor lassen sich im Sponsoring-Tab jederzeit optional ein Ärmelsponsor und ein Trainingsanzug-Sponsor abschliessen — beide unabhängig vom Trikotsponsor, kleiner dimensioniert, aber ebenfalls mehrjährig und bei Liga-Wechsel neu zu verhandeln.",
-      "Stadion-Werbebanner-Verträge sind ebenfalls mehrjährig (1-3 Jahre) — sie verlängern sich automatisch mit erneuter Zahlung, solange die Liga nicht wechselt. Bei einem Liga-Wechsel werden alle Bandenverträge aufgelöst, da sich die Preise stark nach der Liga richten.",
-      "Ausbildungsentschädigung: für selbst ausgebildete Spieler, die den Verein verlassen haben und später bei ihrem neuen Verein weiterverkauft werden, gibt es eine anteilige Solidaritätszahlung — Jugendarbeit zahlt sich so auch nach dem Weggang eines Talents noch aus."
+      "Stimmung (7 Bereiche), Fanhaus und Aktionen ergeben die Atmosphäre: Heimvorteil von −2 bis +3.5. Dazu kommen Mitgliedsbeiträge bei jedem Heimspiel.",
+      "Der Sprecher legt Aktionen (Choreo, Fanmarsch, Spendenaktion, Fanfest, Sonderfahrt) und Anliegen (Preise, Trikot, Fanliebling) vor. Du kannst voll unterstützen, nur erlauben oder ablehnen. Ohne Antwort verfällt der Vorschlag und gilt als Desinteresse.",
+      "Fester Kalender: Saisoneröffnung, Weihnachtsfeier, Frühjahrsfahrt, Saisonabschluss.",
+      "Fanliebling: ergibt sich aus Treue, Toren, Vorlagen, Elf des Tages und Kapitänsamt. Verkauf kostet Rückhalt, nach einer Zusage ist es ein Wortbruch.",
+      "Fanhaus (3 Stufen): je +0.3 Heimvorteil, +3 % Wachstum, +10 % Beiträge. Der Saisonrückblick fasst das Jahr zusammen."
     ]
   },
   {
-    icon: Medal, farbe: "#fcd34d", titel: "Pokal & Europapokal",
+    icon: Megaphone, farbe: "#f0abfc", titel: "Marketing & Sponsoring",
+    kurz: "Markenwert, Kampagnen, Sponsoren",
     punkte: [
-      "Alle Vereine von der Bundesliga bis zur Oberliga nehmen am Pokal teil, K.o.-System über die ganze Saison.",
-      "Nur die Bundesliga qualifiziert sich für einen Europapokal-Wettbewerb.",
-      "Beide Wettbewerbe bringen bei Heimspielen eigene Zuschauereinnahmen und ggf. Preisgeld."
+      "Der Markenwert (0–100) wirkt auf Fanartikel- und Verpflegungsumsatz, Sponsorenangebote, Fanclub-Wachstum, Preistoleranz und Transfers. Er wächst durch Kampagnen, Erfolg, digitale Infrastruktur und Teamgeist, ohne Pflege sinkt er. Obergrenzen je Liga: Oberliga 45, Regionalliga 60, 3. Liga 75, darüber 100.",
+      "Fünf Kampagnen: Social-Media, Plakate, Merchandise-Launch, Kooperationen, Spielerauftritt beim Sponsor (Kosten und Bonus nach Spielstärke, Ehrgeizige verlieren Zufriedenheit). Wirkung 3 Saisons, danach wieder buchbar. Wird der Auftritts-Spieler verkauft, geht der Bonus verloren.",
+      "Fanclub-Grösse startet je nach Liga (Oberliga ~180, Bundesliga ~12'000) und folgt der Zufriedenheit. Ein Aufstieg zieht sofort Fans an, ein Abstieg kostet nur einen Teil.",
+      "Trikot-, Ärmel- und Trainingsanzug-Sponsor laufen mehrjährig. Banden-Verträge dauern 1–3 Jahre und verlängern sich automatisch. Bei Auf- oder Abstieg werden Trikot- und Bandenverträge aufgelöst und neu verhandelt.",
+      "Ausbildungsentschädigung: Wird ein von dir ausgebildeter Spieler später weiterverkauft, bekommst du einen Anteil."
     ]
   },
   {
-    icon: Award, farbe: "#fcd34d", titel: "Elf des Tages, Elf des Jahres & Auszeichnungen",
+    icon: Flag, farbe: "#7dd3fc", titel: "Nationalmannschaft",
+    kurz: "Bundestrainer, Qualifikation, Turnier",
     punkte: [
-      "Nach jedem Spieltag wählt eine Wertung aus der ganzen Liga eine \"Elf des Tages\" — sichtbar im Ergebnis-Popup.",
-      "Höchstens 4 Spieler desselben Vereins gleichzeitig darin, auch bei einem sehr dominanten Sieg.",
-      "Am Saisonende gibt es zusätzlich eine ligaweite Auswertung: Torschützenliste, Elf des Jahres, Spieler des Jahres.",
-      "Die Torschützenliste/der Torschützenkönig zählen nur echte Liga-Tore — Tore aus Testspielen, Pokal und Europapokal fliessen weiterhin in die persönliche und vereinsinterne Statistik des Spielers ein, aber nicht in die Liga-Wertung.",
-      "Tore, Vorlagen und Karten gehen beim eigenen Team ausschliesslich an tatsächlich eingesetzte Spieler (Startelf + realistische Einwechslungen) — nicht an den ganzen Kader. Das gilt für Liga, Pokal, Europapokal, Testspiele, Relegation und Länderspiele gleichermassen.",
-      "Im Spielplan-Tab gibt es einen \"Zusammenfassung\"-Umschalter: Liste aller bisherigen Liga-Spiele dieser Saison mit Resultat, Torschützen, Gelben/Roten Karten, verwendeter Formation, Zuschauerzahl sowie Einnahmen und Ausgaben des jeweiligen Spieltags."
-    ]
-  },
-  {
-    icon: XCircle, farbe: "#f87171", titel: "Gelbe & Rote Karten — Sperren",
-    punkte: [
-      "Eine rote Karte sperrt für genau das nächste Spiel — egal ob eigener Spieler oder Gegner.",
-      "Jede 5. gelbe Karte in der laufenden Saison (5., 10., 15., ...) sperrt ebenfalls für das nächste Spiel.",
-      "Gilt für wirklich jeden Spieler in allen 5 Ligen, nicht nur für deinen eigenen Kader — jede Liga wird komplett mit echten Einzelspieler-Ereignissen simuliert, auch die Spiele anderer Vereine untereinander.",
-      "Ein gesperrter Spieler taucht im Kader- und Taktik-Tab mit einem 🟥-Hinweis auf und wird bei der Startelf-Wahl automatisch übersprungen."
-    ]
-  },
-  {
-    icon: Trophy, farbe: "#fcd34d", titel: "Trophäenschrank & Vereinshistorie",
-    punkte: [
-      "Der Trophäenschrank gehört dem aktuellen Verein, nicht dem Manager persönlich — Meisterschaften und Pokalsiege JEDES Vereins (auch KI-Vereine) werden dauerhaft in dessen eigener Vereinshistorie festgehalten.",
-      "Wechselt der Manager den Verein, zeigt der Trophäenschrank ab sofort die Historie des NEUEN Vereins — inklusive Titeln, die dieser Verein schon vor der Ankunft des Managers gewonnen hat.",
-      "Die eigenen, persönlichen Erfolge über die ganze Laufbahn hinweg (unabhängig vom aktuellen Verein) stehen separat im Karriere-Tab."
-    ]
-  },
-  {
-    icon: Flag, farbe: "#7dd3fc", titel: "Nationalmannschaft (Bundestrainer)",
-    punkte: [
-      "Ab mindestens 2 persönlichen Titeln als Bundesliga-Manager bietet der DFB gelegentlich das Bundestrainer-Amt an — läuft parallel zum Vereinsjob, kein Ersatz dafür.",
-      "Im neuen Nationalmannschaft-Tab wird der Kader (bis zu 23 Spieler) aus ALLEN deutschen Spielern der Liga gewählt, auch von gegnerischen Vereinen.",
-      "Die taktische Formation für alle Länderspiele (Qualifikation und Turnier) ist frei wählbar — die Startelf wird daraus automatisch nach Positionsstärke gebildet, genau wie beim eigenen Verein.",
-      "Ein tatsächlich bestrittenes Länderspiel trägt dasselbe Verletzungsrisiko wie ein Vereinsspiel — eine so entstandene Verletzung betrifft den Spieler danach ganz normal auch bei seinem Verein, egal ob es dein eigener Spieler ist oder der eines anderen Klubs.",
-      "Für die Aufstellung eines DFB-Kaderspielers zählt nur, ob er verletzt oder kartengesperrt ist — nicht, ob er im selben Fenster \"anderswo einberufen\" markiert wurde (das würde sonst gerade die eigenen stärksten, meist einberufenen Spieler von der eigenen Nationalmannschaft ausschliessen).",
-      "Alle zwei Jahre ein Turnier (WM/EM abwechselnd, an den echten Kalender angelehnt — z.B. 2028 EM, 2030 WM, 2032 EM, 2034 WM): Qualifikation in einer echten 5er-Gruppe (Deutschland + 4 feste, ausschliesslich europäische Gegner — sowohl bei EM- als auch WM-Qualifikation, da Deutschland als UEFA-Mitglied für beide Turniere nur gegen europäische Nationen qualifiziert), mit Hin- und Rückspiel gegen jeden Gegner (4 Heim-, 4 Auswärtsspiele). Die vier Gegner spielen auch untereinander, echte Tabelle mit Sp/S/U/N/Tore/Diff/Pkt.",
-      "Die ersten beiden Plätze der Gruppe qualifizieren sich fürs Turnier. Die Anzahl Runden pro Länderspielpause passt sich automatisch an die verbleibende Zeit bis zum Turnierjahr an, damit die letzte Runde möglichst genau im letzten Fenster davor gespielt wird — dadurch keine Pause ohne Partie, auch nicht gegen Ende der Qualifikation.",
-      "Aussereuropäische Gegner (Brasilien, USA, Japan, ...) gibt es erst beim eigentlichen Turnier selbst (K.o.-Runden vom Achtelfinale bis zum Finale mit Elfmeterschiessen bei Unentschieden) — dort dann je nach Turnier (EM nur Europa, WM weltweit).",
-      "Bei erfolgreicher Qualifikation wird das Turnier jetzt VOR dem Saisonabschluss gespielt — ein Spiel pro Klick, genau wie ein normaler Spieltag, mit vorher bekanntem Gegner pro Runde. Der Saisonabschluss wartet, bis das Turnier entweder gewonnen oder das Team ausgeschieden ist.",
-      "Jedes Länderspiel (Qualifikation UND Endrundenspiele) läuft mit echten Einzelspieler-Ereignissen, genau wie ein Vereinsspiel: Torschützen, Vorlagen, Gelbe/Rote Karten, Einwechslungen und Spieler des Spiels — sichtbar im Nationalmannschaft-Tab, in den Vereinsinfos und in der \"Zusammenfassung\" im Spielplan-Tab. Tore/Karten fliessen auch in die persönliche Karrierestatistik ein, aber nicht in die Liga-Torschützenliste.",
-      "Jedes Länderspiel — Qualifikation UND Endrunde — läuft jetzt mit echten Einzelspieler-Ereignissen wie ein Ligaspiel: Torschützen, Vorlagen, Gelbe/Rote Karten, Einwechslungen und Spieler des Spiels, sichtbar im Nationalmannschaft-Tab und im Live-Turnierbildschirm.",
-      "Ein Titelgewinn zählt als persönliche Trophäe in der eigenen Karriere-Historie."
+      "Ab 2 persönlichen Titeln als Bundesliga-Manager bietet der DFB gelegentlich das Bundestrainer-Amt an (parallel zum Verein, kein Ersatz).",
+      "Der Kader (bis 23) kommt aus allen deutschen Spielern der Liga. Die Formation ist frei wählbar, die Startelf entsteht automatisch. Nur Verletzte und Gesperrte fallen aus.",
+      "Länderspiele tragen das normale Verletzungsrisiko, auch bei Spielern anderer Klubs.",
+      "Alle zwei Jahre ein Turnier (EM/WM abwechselnd, 2028 EM, 2030 WM). Qualifikation in einer 5er-Gruppe mit vier europäischen Gegnern, Hin- und Rückspiel. Die ersten zwei qualifizieren sich.",
+      "Das Turnier läuft vor dem Saisonabschluss, ein Spiel pro Klick. K.o.-Runden bis zum Finale mit Elfmeterschiessen. Aussereuropäische Gegner gibt es nur im Turnier.",
+      "Alle Länderspiele haben echte Torschützen, Karten, Einwechslungen und Spieler des Spiels, die auch in die Karrierestatistik zählen. Ein Titel ist eine persönliche Trophäe."
     ]
   },
   {
     icon: Mic, farbe: "#fcd34d", titel: "Pressekonferenz",
+    kurz: "Fragen, Ereignisse, Pressearchiv",
     punkte: [
-      "Erscheint gelegentlich nach einem Spieltag (ca. 45% Chance, keine Obergrenze pro Saison): 1 Frage mit 4 Antwortmöglichkeiten.",
-      "Die Fragen passen zum tatsächlichen Spielgeschehen (z.B. Verletzungsfragen nur bei echten Verletzungen).",
-      "Jede Frage kommt pro Saison höchstens einmal vor — bereits gestellte Fragen fallen für den Rest der Saison aus dem möglichen Pool, unabhängig davon, wie sie beantwortet wurden.",
-      "Fragen zu Meisterschaft, Torschützenkönig, Pokalsieg, Europapokalsieg, WM-/EM-Sieg (als Bundestrainer) sowie einem verlorenen Pokal-/Europapokal- oder WM-/EM-Finale werden bewusst erst ab der DARAUFFOLGENDEN Saison möglich, nicht schon direkt nach dem Ereignis selbst.",
-      "Antworten wirken sich auf Fan-Unterstützung, Kaderform, Trainerzufriedenheit und Markenwert aus — auch auf mehrere Bereiche gleichzeitig."
+      "Nach einem Spieltag mit ca. 45 % Chance, bei offenen Ereignissen sicher: 1 Frage, 4 Antworten. Die Fragen passen zum Spielgeschehen. Jede Frage kommt pro Saison höchstens einmal.",
+      "Ereignisfragen (Titel, Torschützenkönig, Pokal-/Europapokalsieg, verlorene Finals, Auf-/Abstieg, WM-/EM-Titel) haben Vorrang und bleiben bis Spieltag 8 der neuen Saison erhalten.",
+      "Antworten wirken auf Fan-Unterstützung, Kaderform, Trainerzufriedenheit und Markenwert. Das Archiv steht unter Verein/Fans → Vorstand & Presse."
     ]
   },
   {
-    icon: TrendingUp, farbe: "#7dd3fc", titel: "Saisonziele",
+    icon: TrendingUp, farbe: "#7dd3fc", titel: "Saisonziele & Reputation",
+    kurz: "Vorstand, Entlassung, Manager-Ruf",
     punkte: [
-      "Ab der zweiten Saison geben Vorstand und Cheftrainer je eigene Ziele vor.",
-      "Erfüllte bzw. verfehlte Ziele wirken sich auf Trainerzufriedenheit und Vertragsverlängerungen aus.",
-      "Direkt nach einem Aufstieg, direkt nach der Übernahme eines neuen Vereins (freiwilliger Wechsel oder nach Entlassung), oder in der allerersten Saison mit Vorstandszielen einer brandneuen Karriere fordert der Vorstand realistischerweise noch keinen sofortigen Aufstieg — \"Aufstieg schaffen\" fällt in diesen Fällen aus dem Zielkatalog, stattdessen kann \"Klassenerhalt schaffen\" vorkommen.",
-      "Beim Ziel \"Junior etablieren\": Im Kader-Tab lässt sich ein Jugendspieler gezielt \"fördern\" — das gibt ihm einen spürbaren Stärke-Bonus bei der automatischen Startelf-Wahl, damit er auch gegen etablierte Stammspieler eine echte Chance bekommt. Das ist der einzige direkte Hebel, mit dem der Manager dieses Ziel überhaupt beeinflussen kann, da die Aufstellung sonst rein automatisch nach Spielstärke gewählt wird. Enthält der Kader diese Saison gar keinen Junior, fällt das Ziel aus dem Katalog — es soll nie strukturell unerreichbar sein.",
-      "In einer frischen Situation (Karrierestart, frischer Aufstieg oder frischer Vereinswechsel) fällt zusätzlich \"Spielerberater verpflichten\" aus dem Zielkatalog — das Ziel hängt sowohl von einem zufälligen Angebot als auch von ausreichend Budget ab, was bei noch knapper Kasse und fehlender Reputation weniger fair wäre als bei einem etablierten Manager.",
-      "Fünf weitere Ziele mit direktem Bezug zu anderen Bereichen: alle Werbebanner-Plätze vermarkten (Sponsoring-Tab), eine eingespielte Startelf über mindestens 4 Spieltage halten (Taktik-Tab), Markenwert um mindestens 6 Punkte gegenüber dem Saisonstart steigern (Fanshop-Tab/Marketing) — bewusst ein Wachstumsziel statt eines festen Zielwerts, damit es in jeder Liga etwa gleich schwer ist, für mindestens 5 Fanartikel einen Ziel-Bestand festlegen (Fanshop-Tab), sowie einen von einem Spielerberater angebotenen Spieler verpflichten (Transfermarkt-Tab). Der Markenwert ist je nach Liga-Ebene gedeckelt (Oberliga 45, Regionalliga 60, 3. Liga 75, 2. Bundesliga/Bundesliga 100) — ist der Deckel bereits erreicht, taucht das Wachstumsziel gar nicht erst im möglichen Zielpool auf.",
-      "Werden zu wenige Vorstandsziele erfüllt, entlässt dich die Vereinsversammlung — die Karriere geht aber weiter: du bekommst Zwangsangebote von bis zu drei anderen Vereinen zur Wahl (dein alter Verein bekommt einfach eine neue Führung). Nur bei wiederholter Zahlungsunfähigkeit endet die Karriere wirklich. Jede Entlassung bleibt dauerhaft im Karriere-Tab sichtbar.",
-      "Statt auf eine Entlassung zu warten, kannst du im Karriere-Tab jederzeit selbst zurücktreten — funktioniert genau gleich (sofort bis zu drei neue Vereinsangebote zur Wahl), nur eigenständig statt erzwungen."
-    ]
-  },
-  {
-    icon: Award, farbe: "#7dd3fc", titel: "Manager-Reputation",
-    punkte: [
-      "Eine karriereweite Kennzahl (0-100, sichtbar im Karriere-Tab), die über Vereinswechsel hinweg bestehen bleibt — anders als Vereins-Trophäen oder Amtszeit, die an den jeweiligen Verein gebunden sind.",
-      "Steigt durch Meisterschaften, Pokalsiege, Aufstiege, erfüllte Vorstandsziele und Bundestrainer-Turniererfolge (je höher die eigene Liga, desto mehr) — sinkt durch Abstiege, verfehlte Ziele und vor allem eine Entlassung.",
-      "Bestimmt, wie attraktiv man für andere Vereine ist: höhere Reputation bedeutet häufigere und bessere unaufgeforderte Jobangebote sowie bessere Zwangsangebote nach einer Entlassung (die dabei einen spürbaren, aber vorübergehenden Dämpfer bekommt)."
-    ]
-  },
-  {
-    icon: ShoppingBag, farbe: "#94a3b8", titel: "Fanshop, Verpflegung & Vereinsheim",
-    punkte: [
-      "Statt manuell einzukaufen: pro Artikel einen Ziel-Bestand per Schieberegler festlegen. Nach jedem Spiel wird automatisch bis zu dieser Menge nachbestellt — kein manuelles Nachkaufen mehr nötig.",
-      "Der maximale Ziel-Bestand liegt immer mindestens beim 3-fachen der theoretisch höchstmöglichen Nachfrage an einem einzigen Spieltag (inkl. Zufallsspitze und Star-Transfer-Trikotansturm bei Trikots) — eine hohe Einstellung wird also nie zu knapp.",
-      "Der maximale Ziel-Bestand wächst automatisch mit einem Stadionausbau mit, da mehr Zuschauer auch mehr verkaufen können.",
-      "Verkaufspreise weiterhin frei einstellbar."
+      "Ab der 2. Saison geben Vorstand und Trainer eigene Ziele vor. Den Stand siehst du unter Verein/Fans → Vorstand & Presse. Erfüllte und verfehlte Ziele wirken auf Trainerzufriedenheit und Verlängerungen. Nach einem Titel ist \"Titel verteidigen\" immer dabei.",
+      "In frischer Lage (Karrierestart, Aufstieg, Vereinswechsel) fallen unrealistische Ziele aus dem Katalog, etwa \"Aufstieg schaffen\" und \"Spielerberater verpflichten\". Kein Ziel ist strukturell unerreichbar: Ohne Junior im Kader entfällt \"Junior etablieren\", beim Markenwert-Deckel das Wachstumsziel.",
+      "\"Junior etablieren\": Im Kader-Tab kannst du einen Jugendspieler fördern, das gibt ihm einen Bonus bei der Startelf-Wahl.",
+      "Weitere Ziele: alle Banden vermarkten, eingespielte Startelf über 4 Spieltage, Markenwert um 6 steigern, 5 Fanartikel mit Ziel-Bestand, einen Berater-Spieler verpflichten.",
+      "Werden zu wenige Ziele erfüllt, entlässt dich die Versammlung. Du bekommst bis zu drei Angebote anderer Vereine. Nur wiederholte Zahlungsunfähigkeit beendet die Karriere. Rücktritt ist jederzeit im Karriere-Tab möglich und funktioniert gleich.",
+      "Manager-Reputation (0–100, Karriere-Tab) bleibt über Vereinswechsel bestehen. Titel, Aufstiege, erfüllte Ziele und Turniererfolge heben sie, Abstiege, verfehlte Ziele und Entlassung senken sie. Höhere Reputation bringt häufigere und bessere Jobangebote."
     ]
   }
 ];
@@ -13016,6 +13252,17 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
     if (kaderIds.includes(id)) onNationalkaderSetzen(kaderIds.filter(x => x !== id));
     else if (kaderIdsGueltig.length < 23) onNationalkaderSetzen([...kaderIdsGueltig, id]);
   };
+  const kaderStatistik = useMemo(() => {
+    const k = pool.filter(sp => kaderIdsGueltig.includes(sp.id));
+    const schnitt = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    return {
+      alter: schnitt(k.map(sp => sp.alter)),
+      proPosition: POSITIONEN.map(po => {
+        const l = k.filter(sp => sp.pos === po.code);
+        return { code: po.code, name: po.name, soll: po.n, anzahl: l.length, staerke: schnitt(l.map(sp => sp.rating)) };
+      })
+    };
+  }, [pool, kaderIds]);
   const kaderDurchschnitt = kaderIdsGueltig.length
     ? Math.round(pool.filter(p => kaderIdsGueltig.includes(p.id)).reduce((s, p) => s + p.rating, 0) / kaderIdsGueltig.length)
     : 0;
@@ -13188,8 +13435,20 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
 
       <div className="flex items-center justify-between mb-3">
         <div className="text-xs uppercase tracking-wider text-emerald-400/80">Kaderauswahl ({kaderIdsGueltig.length}/23)</div>
-        {kaderIdsGueltig.length > 0 && <div className="text-xs text-emerald-400">Ø Stärke <span className="text-amber-400 font-semibold">{kaderDurchschnitt}</span></div>}
+        {kaderIdsGueltig.length > 0 && <div className="text-xs text-emerald-400">Ø Alter <span className="text-amber-400 font-semibold">{kaderStatistik.alter.toFixed(1).replace(".", ",")}</span> · Ø Stärke <span className="text-amber-400 font-semibold">{kaderDurchschnitt}</span></div>}
       </div>
+      {kaderIdsGueltig.length > 0 && (
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-3">
+          {kaderStatistik.proPosition.map(z => (
+            <div key={z.code} className="border border-emerald-900 rounded-lg p-2 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
+              <PositionsChip pos={z.code} name={z.name} />
+              <div className="text-sm text-white font-semibold mt-1">{z.anzahl} <span className="text-[10px] text-emerald-600 font-normal">Spieler</span></div>
+              <div className="text-[11px] text-emerald-400">{z.anzahl ? <>Ø Stärke <span className="text-amber-300 font-semibold">{Math.round(z.staerke)}</span></> : <span className="text-red-400">niemand</span>}</div>
+              {z.anzahl < z.soll && <div className="text-[9px] text-amber-400 mt-0.5">üblich: {z.soll}</div>}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2 mb-3">
         <input
           type="text"
@@ -13238,25 +13497,35 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
 }
 
 function SpielregelnView() {
+  const [offen, setOffen] = useState(null);
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-emerald-500">Kurzüberblick über die wichtigsten Mechaniken je Bereich — für Details einfach den jeweiligen Tab öffnen.</p>
-      {SPIELREGELN_KATEGORIEN.map((kat, i) => (
-        <div key={i} className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
-          <div className="flex items-center gap-2 mb-2">
-            <kat.icon size={16} style={{ color: kat.farbe }} />
-            <span className="font-semibold text-sm" style={{ color: kat.farbe }}>{kat.titel}</span>
+    <div className="space-y-2">
+      <p className="text-xs text-emerald-500">Kurzüberblick je Bereich — Titel antippen zum Aufklappen.</p>
+      {SPIELREGELN_KATEGORIEN.map((kat, i) => {
+        const istOffen = offen === i;
+        return (
+          <div key={i} className="border border-emerald-800 rounded" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
+            <button onClick={() => setOffen(istOffen ? null : i)} className="w-full flex items-center gap-2 p-3 text-left">
+              <kat.icon size={16} style={{ color: kat.farbe }} className="shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm" style={{ color: kat.farbe }}>{kat.titel}</div>
+                {!istOffen && kat.kurz && <div className="text-[11px] text-emerald-600 truncate">{kat.kurz}</div>}
+              </div>
+              <ChevronRight size={14} className="text-emerald-600 shrink-0 transition-transform" style={{ transform: istOffen ? "rotate(90deg)" : "none" }} />
+            </button>
+            {istOffen && (
+              <ul className="space-y-1 px-3 pb-3">
+                {kat.punkte.map((punkt, j) => (
+                  <li key={j} className="text-xs text-emerald-300 flex gap-1.5">
+                    <span className="text-emerald-700 shrink-0">•</span>
+                    <span>{punkt}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <ul className="space-y-1">
-            {kat.punkte.map((punkt, j) => (
-              <li key={j} className="text-xs text-emerald-300 flex gap-1.5">
-                <span className="text-emerald-700 shrink-0">•</span>
-                <span>{punkt}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -13708,7 +13977,14 @@ function ZuschauerChart({ historie, kapazitaet }) {
   );
 }
 
-function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen, jugendliga17, jugendDivId17, jugendKader17, onJugendspieler17Hochziehen, jugendliga15, jugendDivId15, jugendKader15, jugendliga13, jugendDivId13, jugendKader13, jugendliga11, jugendKader11, jugendliga9, jugendKader9, jugendKader7 }) {
+// Jugendkader immer nach Alter sortiert (ältester Jahrgang zuerst), innerhalb eines Jahrgangs nach Stärke.
+// Wird bei jeder Anzeige frisch angewendet — dadurch stimmt die Reihenfolge auch nach der Rochade zur
+// neuen Saison (Aufrücken, Neuzugänge aus der jüngeren Altersstufe) automatisch.
+function sortiereJugendKader(kader) {
+  return [...kader].sort((a, b) => (b.alter - a.alter) || (b.rating - a.rating) || String(a.name).localeCompare(String(b.name), "de"));
+}
+
+function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen, jugendliga17, jugendDivId17, jugendKader17, onJugendspieler17Hochziehen, jugendliga15, jugendDivId15, jugendKader15, jugendliga13, jugendDivId13, jugendKader13, jugendliga11, jugendKader11, jugendliga9, jugendKader9, jugendKader7 }) {
   const [betrag, setBetrag] = useState(0);
   const level = akademie?.level || 0;
   const umbau = akademie?.umbau || null;
@@ -13729,12 +14005,24 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
   // nie übertrifft (vorher: bis zu +20 Punkte darüber, z.B. Oberliga-Junioren stärker als der eigene
   // Ligadurchschnitt und sogar stärker als die neue Mitarbeiter-Obergrenze) — ein frisch gescoutetes
   // Talent bleibt ein vielversprechendes Entwicklungsprojekt, kein sofortiger Superstar.
-  const erwarteteStaerke = Math.round((baseRating || 46) - 20 + investitionBonus);
+  const scoutB = stab?.scout?.rating ? Math.max(0, (stab.scout.rating - 40) / 3) : 0;
+  const leiterB = stab?.akademieleiter?.rating ? Math.max(0, (stab.akademieleiter.rating - 30) / 5) : 0;
+  const erwarteteStaerke = Math.round((baseRating || 46) - 20 + investitionBonus + scoutB + leiterB + level * 2.5);
   const investitionSterne = Math.max(1, Math.min(5, Math.round((erwarteteStaerke / 99) * 5)));
+  const jugendScoutChance = jugendScoutZusatzChance(stab);
+  const stabZeilen = [
+    { key: "scout", name: "Chefscout", wirkung: s => `+${Math.round(jugendScoutZusatzChance({ scout: s }) * 100)} % Chance auf eine weitere Sichtung, bessere und zuverlässigere Kandidaten` },
+    { key: "akademieleiter", name: "Akademieleiter", wirkung: s => `+${Math.round(Math.max(0, (s.rating - 30) / 10))} Stärke für alle Nachrücker U7–U19, schnellerer Akademie-Ausbau` },
+    { key: "jugendtrainer", name: "U19-Trainer", wirkung: s => `+${Math.round(Math.max(0, (s.rating - 30) / 8))} Stärke für Nachrücker in der U19, schnellere Entwicklung, ab Stärke 60 ein Hochzieh-Platz mehr` },
+    { key: "jugendtrainer17", name: "U17-Trainer", wirkung: s => `+${Math.round(Math.max(0, (s.rating - 30) / 8))} Stärke für Nachrücker in der U17, schnellere Entwicklung` },
+    { key: "jugendtrainer15", name: "U15-Trainer", wirkung: s => `+${Math.round(Math.max(0, (s.rating - 30) / 8))} Stärke für Nachrücker in der U15, schnellere Entwicklung` },
+    { key: "jugendtrainer13", name: "U13-Trainer", wirkung: s => `+${Math.round(Math.max(0, (s.rating - 30) / 8))} Stärke für Nachrücker in der U13, schnellere Entwicklung` },
+    { key: "jugendkoordinator", name: "Jugendkoordinator U7–U11", wirkung: s => `+${Math.round(Math.max(0, (s.rating - 30) / 8))} Stärke für Nachrücker in U7, U9 und U11, schnellere Entwicklung` }
+  ];
 
   return (
     <div>
-      {abschnitt === "investition" && (<>
+      {(abschnitt === "investition" || abschnitt === "uebersicht") && (<>
       {jugend?.sichtung && (
         <div className="mb-4">
           <TalentSichtungBanner sichtung={jugend.sichtung} budget={budget} onWaehlen={onTalentWaehlen} onAblehnen={onTalentAblehnen} />
@@ -13742,10 +14030,10 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
       )}
       {jugend?.investition == null ? (
         <div className="border border-amber-400/40 rounded p-4 mb-4" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
-          <div className="text-xs uppercase tracking-wider text-amber-400/80 mb-1">Investition — {saisonLabel}</div>
-          <p className="text-[11px] text-emerald-600 mb-3">Zu Saisonbeginn ohne Akademie meist 0, gelegentlich 1 Junior (17-19 Jahre) — mit ausgebauter Akademie später bis zu 2 pro Saison.</p>
+          <div className="text-xs uppercase tracking-wider text-amber-400/80 mb-1">Jugendbudget pro Sichtung — {saisonLabel}</div>
+          <p className="text-[11px] text-emerald-600 mb-3">Das Budget wird erst fällig, wenn eine Talentsichtung tatsächlich stattfindet — nicht im Voraus. Wer Budget bereitstellt, bekommt mindestens eine Sichtung pro Saison. Akademie und Chefscout erhöhen die Anzahl.</p>
           <div>
-            <label className="block text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Investitionsbetrag</label>
+            <label className="block text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Budget pro Sichtung</label>
             <input
               type="range"
               min={0}
@@ -13779,24 +14067,39 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
               <span className="text-amber-400 text-sm tracking-tight">{"★".repeat(investitionSterne)}<span className="text-emerald-800">{"★".repeat(5 - investitionSterne)}</span></span>
               <span className="text-emerald-300 text-xs">Stärke ca. {erwarteteStaerke}</span>
             </div>
-            <div className="text-[11px] text-emerald-600 mt-1.5">Je höher der Betrag, desto stärker die Junioren und desto mehr Kandidaten stehen bei jeder Sichtung zur Wahl. Wie viele Sichtungstermine es diese Saison gibt, hängt vom Ausbaustand deiner Akademie ab.</div>
+            <div className="text-[11px] text-emerald-600 mt-1.5">Je höher der Betrag, desto stärker die Junioren und desto mehr Kandidaten stehen bei jeder Sichtung zur Wahl. Mit {jugendScoutChance > 0 ? `deinem Chefscout (+${Math.round(jugendScoutChance * 100)} % Chance auf eine weitere Sichtung)` : "einem Chefscout"} und ausgebauter Akademie gibt es mehr Sichtungen. Die Kosten fallen bei jeder Sichtung neu an.</div>
           </div>
           <button
             onClick={() => onJugendInvestition(betrag)}
             className="w-full mt-3 bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold rounded py-2.5 flex items-center justify-center gap-2"
           >
-            <Sprout size={16} /> Investition bestätigen
+            <Sprout size={16} /> Budget festlegen
           </button>
         </div>
       ) : (
         <div className="border border-emerald-800 rounded p-3 mb-4 text-xs text-emerald-400 flex items-center justify-between" style={{ backgroundColor: "var(--fm-surface)" }}>
-          <span>Investition {saisonLabel}</span>
+          <span>Budget pro Sichtung {saisonLabel} · geplante Sichtungen: {(jugend.termine || []).length}{jugend?.sichtung ? " (eine läuft gerade)" : ""}</span>
           <span className="text-amber-300 font-semibold">{jugend.investition.toLocaleString("de-CH")} €</span>
         </div>
       )}
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
+        <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Dein Jugendstab und seine Wirkung</div>
+        <div className="space-y-1.5">
+          {stabZeilen.map(z => {
+            const m = stab?.[z.key];
+            return (
+              <div key={z.key} className="text-[11px] flex items-start justify-between gap-3">
+                <span className="text-emerald-300 shrink-0">{z.name}</span>
+                {m ? <span className="text-emerald-500 text-right">{m.name} ({m.rating}): {z.wirkung(m)}</span> : <span className="text-amber-400/80 text-right">nicht besetzt</span>}
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-emerald-600 mt-2">Die Nachrücker-Boni gelten beim Saisonwechsel für neu aufgefüllte Kinder der jeweiligen Altersstufe (Akademieleiter und Stufen-Trainer addieren sich, höchstens +12; die Akademie gibt zusätzlich +1 pro Ausbaustufe, aktuell +{level}).</p>
+      </div>
       </>)}
 
-      {abschnitt === "akademie" && (<>
+      {(abschnitt === "akademie" || abschnitt === "uebersicht") && (<>
       <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs uppercase tracking-wider text-emerald-400/80">Jugendakademie</span>
@@ -13806,7 +14109,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
         <div className="text-sm text-emerald-500 mb-1">Stufe {level} / {akademieMaxLevelLiga}</div>
         <p className="text-[11px] text-emerald-600">
           Eine dauerhafte Infrastruktur wie La Masia oder der Bayern Campus — wirkt zusätzlich zur jährlichen
-          Jugendinvestition: mehr und bessere Sichtungskandidaten, engere Rating-Spanne, ab Stufe 3 eine echte
+          Jugendinvestition: +1 Stärke pro Stufe für alle Nachrücker in U7 bis U19, mehr und bessere Sichtungskandidaten, engere Rating-Spanne, ab Stufe 3 eine echte
           Chance auf ein Ausnahmetalent ("Wunderkind").
         </p>
       </div>
@@ -13919,7 +14222,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
             <div className="text-[10px] text-emerald-500">Beförderungen diese Saison: {jugendbefoerderungenDieseSaison}/{maxJugendbefoerderungen}</div>
           </div>
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {(jugendKader || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+            {sortiereJugendKader(jugendKader || []).map(p => {
               const potenzial = p.potenzial || p.rating;
               const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
               return (
@@ -13988,7 +14291,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
             <div className="text-[10px] text-emerald-500">Beförderungen diese Saison: {jugendbefoerderungenDieseSaison}/{maxJugendbefoerderungen}</div>
           </div>
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {(jugendKader17 || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+            {sortiereJugendKader(jugendKader17 || []).map(p => {
               const potenzial = p.potenzial || p.rating;
               const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
               return (
@@ -14056,7 +14359,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
           </div>
           <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U15-Kader ({(jugendKader15 || []).length})</div>
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {(jugendKader15 || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+            {sortiereJugendKader(jugendKader15 || []).map(p => {
               const potenzial = p.potenzial || p.rating;
               const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
               return (
@@ -14114,7 +14417,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
           </div>
           <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U13-Kader ({(jugendKader13 || []).length})</div>
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {(jugendKader13 || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+            {sortiereJugendKader(jugendKader13 || []).map(p => {
               const potenzial = p.potenzial || p.rating;
               const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
               return (
@@ -14170,7 +14473,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
           </div>
           <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U11-Kader ({(jugendKader11 || []).length})</div>
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {(jugendKader11 || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+            {sortiereJugendKader(jugendKader11 || []).map(p => {
               const potenzial = p.potenzial || p.rating;
               const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
               return (
@@ -14226,7 +14529,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
           </div>
           <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U9-Kader ({(jugendKader9 || []).length})</div>
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {(jugendKader9 || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+            {sortiereJugendKader(jugendKader9 || []).map(p => {
               const potenzial = p.potenzial || p.rating;
               const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
               return (
@@ -14251,7 +14554,7 @@ function JugendAkademieView({ abschnitt, akademie, budget, managerDivId, teamNam
           </div>
           <div className="text-[11px] uppercase tracking-wider text-sky-400/80 mb-1.5">U7-Kader ({(jugendKader7 || []).length})</div>
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {(jugendKader7 || []).slice().sort((a, b) => b.rating - a.rating).map(p => {
+            {sortiereJugendKader(jugendKader7 || []).map(p => {
               const potenzial = p.potenzial || p.rating;
               const sterne = potenzial >= 85 ? 5 : potenzial >= 75 ? 4 : potenzial >= 65 ? 3 : potenzial >= 55 ? 2 : 1;
               return (
@@ -14822,49 +15125,68 @@ function EuropapokalView({ europapokal, teamName }) {
   );
 }
 
-function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, onZurKenntnis, onHandeln, onBusBezuschussen, onJugendfahrtSponsern }) {
+function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, onZurKenntnis, onHandeln, onBusBezuschussen, onJugendfahrtSponsern, squad = [], season, kapitaenId, spielNr = 0, gesamtSpieltage = 34, onEntscheidung, onFanhausAusbauen, onBesuch }) {
   const gesamt = Math.max(0, Math.min(100, Math.round(Object.values(zufriedenheit).reduce((s, v) => s + v, 0) / Object.values(zufriedenheit).length)));
   const labels = { spieler: "Spieler", trainer: "Trainer", manager: "Manager", stadion: "Stadion", fanartikel: "Fanartikel", ticketpreise: "Ticketpreise", verpflegung: "Verpflegung" };
+  const sprecher = fanclub.sprecher || "Der Sprecher";
+  const atmo = berechneFanAtmosphaere(fanclub, gesamt);
+  const fanliebling = useMemo(() => ermittleFanliebling(squad, season, kapitaenId), [squad, season, kapitaenId]);
+  const besuchsKandidaten = useMemo(() => {
+    const sortiert = [...squad].sort((a, b) => b.rating - a.rating).slice(0, 12);
+    return fanliebling && !sortiert.some(p => p.id === fanliebling.id) ? [fanliebling, ...sortiert] : sortiert;
+  }, [squad, fanliebling]);
+  const [besuchId, setBesuchId] = useState(null);
+  const gewaehlterBesuch = besuchId && besuchsKandidaten.some(p => p.id === besuchId) ? besuchId : (fanliebling?.id || besuchsKandidaten[0]?.id);
+  const kosten = FAN_UNTERSTUETZUNG_KOSTEN[managerDivId] || FAN_UNTERSTUETZUNG_KOSTEN.OL;
+  const stufe = fanclub.fanhausStufe || 0;
+  const naechsteStufe = FANHAUS_STUFEN[stufe + 1];
+  const ausbauKosten = naechsteStufe ? fanhausKosten(managerDivId, stufe + 1) : 0;
+  const kalender = fanclubKalender(gesamtSpieltage);
+  const erledigt = fanclub.kalenderErledigt || [];
+  const rb = fanclub.rueckblick;
+  const beitragSaison = Math.round(fanclub.groesse * (FANCLUB_BEITRAG_PRO_SAISON[managerDivId] || 12) * (1 + 0.1 * stufe));
+  const karte = { backgroundColor: "var(--fm-surface)" };
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="border border-emerald-800 rounded p-4 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="border border-emerald-800 rounded p-4 text-center" style={karte}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Offizieller Fanclub</div>
           <div className="text-2xl font-bold text-amber-400">{fanclub.groesse.toLocaleString("de-CH")}</div>
-          <div className="text-[10px] text-emerald-600 mt-0.5">Mitglieder</div>
+          <div className="text-[10px] text-emerald-600 mt-0.5">Mitglieder · Beiträge ca. {beitragSaison.toLocaleString("de-CH")} €/Saison</div>
         </div>
-        <div className="border border-emerald-800 rounded p-4 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
+        <div className="border border-emerald-800 rounded p-4 text-center" style={karte}>
           <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Gesamtstimmung</div>
           <div className={`text-2xl font-bold ${gesamt >= 65 ? "text-emerald-300" : gesamt >= 40 ? "text-amber-400" : "text-red-400"}`}>{gesamt}%</div>
           <div className="text-[10px] text-emerald-600 mt-0.5">bei {teamName}</div>
         </div>
-      </div>
-
-      <div className="border border-sky-500/40 rounded p-4 mb-4 space-y-2.5" style={{ backgroundColor: "rgba(56,189,248,0.05)" }}>
-        <div className="text-[11px] uppercase tracking-wider text-sky-400/80">Fans aktiv unterstützen</div>
-        <p className="text-[11px] text-emerald-500">Vereine übernehmen in der Realität oft einen Teil der Buskosten für Auswärtsfahrten oder stellen Freikarten für betreute Jugendfahrten — das stärkt spürbar die Bindung zum Verein.</p>
-        <div className="flex gap-1.5">
-          <button
-            disabled={(FAN_UNTERSTUETZUNG_KOSTEN[managerDivId] || FAN_UNTERSTUETZUNG_KOSTEN.OL).bus > budget}
-            onClick={onBusBezuschussen}
-            className="flex-1 border border-sky-400/50 text-sky-300 text-xs rounded py-2 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Auswärtsbus bezuschussen — {(FAN_UNTERSTUETZUNG_KOSTEN[managerDivId] || FAN_UNTERSTUETZUNG_KOSTEN.OL).bus.toLocaleString("de-CH")} €
-          </button>
-          <button
-            disabled={(FAN_UNTERSTUETZUNG_KOSTEN[managerDivId] || FAN_UNTERSTUETZUNG_KOSTEN.OL).jugend > budget}
-            onClick={onJugendfahrtSponsern}
-            className="flex-1 border border-sky-400/50 text-sky-300 text-xs rounded py-2 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Jugendfahrt sponsern — {(FAN_UNTERSTUETZUNG_KOSTEN[managerDivId] || FAN_UNTERSTUETZUNG_KOSTEN.OL).jugend.toLocaleString("de-CH")} €
-          </button>
+        <div className="border border-emerald-800 rounded p-4 text-center" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Atmosphäre im Stadion</div>
+          <div className={`text-2xl font-bold ${atmo >= 0.5 ? "text-emerald-300" : atmo >= -0.5 ? "text-amber-400" : "text-red-400"}`}>{atmo > 0 ? "+" : ""}{atmo.toFixed(1)}</div>
+          <div className="text-[10px] text-emerald-600 mt-0.5">Heimvorteil durch den Fanclub{fanclub.atmosphaere ? ` · Aktion läuft noch ${fanclub.atmosphaere.heimspiele} Heimspiel${fanclub.atmosphaere.heimspiele === 1 ? "" : "e"}` : ""}</div>
         </div>
       </div>
 
+      {fanclub.vorschlag && (
+        <div className="border border-amber-400/50 rounded p-4 mb-4 space-y-2.5" style={{ backgroundColor: "rgba(251,191,36,0.07)" }}>
+          <div className="text-[11px] uppercase tracking-wider text-amber-400/90">{sprecher} (Fanclub-Sprecher) — {fanclub.vorschlag.art === "termin" ? "Termin" : fanclub.vorschlag.art === "thema" ? "Anliegen" : "Idee"}</div>
+          <div className="text-sm font-semibold text-amber-200">{fanclub.vorschlag.titel}</div>
+          <p className="text-xs text-emerald-200">{fanclub.vorschlag.text}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {fanclub.vorschlag.optionen.map((o, i) => (
+              <button key={i} disabled={o.kosten > budget} onClick={() => onEntscheidung(i)}
+                className={`flex-1 min-w-[150px] text-xs rounded py-2 px-2 disabled:opacity-40 disabled:cursor-not-allowed ${i === 0 ? "bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold" : "border border-emerald-700 text-emerald-300"}`}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[10px] text-emerald-600">Ohne Antwort verfällt der Vorschlag in wenigen Spieltagen — das wird als Desinteresse gewertet.</div>
+        </div>
+      )}
+
       {fanclub.anliegen && (
         <div className="border border-red-500/40 rounded p-4 mb-4 space-y-2.5" style={{ backgroundColor: "rgba(239,68,68,0.06)" }}>
-          <div className="text-xs uppercase tracking-wider text-red-400/80 flex items-center gap-1.5"><Megaphone size={13} /> Sprachrohr des Fanclubs</div>
+          <div className="text-xs uppercase tracking-wider text-red-400/80 flex items-center gap-1.5"><Megaphone size={13} /> Sprachrohr des Fanclubs — {sprecher}</div>
           <p className="text-sm text-red-200 italic">„{fanclub.anliegen.text}"</p>
           <div className="flex gap-1.5">
             {fanclub.anliegen.aktion && (
@@ -14877,22 +15199,173 @@ function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, o
         </div>
       )}
 
-      <div className="border border-emerald-800 rounded p-4 mb-4 space-y-3" style={{ backgroundColor: "var(--fm-surface)" }}>
-        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Zufriedenheit im Detail</div>
-        {Object.entries(labels).map(([key, label]) => (
-          <FanclubBalken key={key} label={label} wert={zufriedenheit[key]} />
-        ))}
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="border border-emerald-800 rounded p-4 space-y-2" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Fanliebling</div>
+          {fanliebling ? (
+            <>
+              <div className="text-sm text-amber-300 font-semibold">{fanliebling.name} <span className="text-emerald-600 text-xs font-normal">({fanliebling.pos}, {fanliebling.rating})</span></div>
+              <div className="text-[11px] text-emerald-500">
+                {Math.max(0, season - (fanliebling.beimVereinSeitSaison ?? season))} Jahre im Verein · {(fanliebling.karriereTore || 0) + (fanliebling.tore || 0)} Tore · {fanliebling.elfDesTagesAnzahl || 0}× Elf des Tages
+              </div>
+              <div className="text-[10px] text-emerald-600">Ein Verkauf des Fanlieblings kostet Rückhalt im Fanclub{fanclub.lieblingZusage ? " — nach deiner Zusage wäre es ein Wortbruch" : ""}.</div>
+            </>
+          ) : <div className="text-[11px] text-emerald-700">Noch kein Fanliebling.</div>}
+          <div className="border-t border-emerald-900 pt-2 space-y-1.5">
+            <div className="text-[11px] text-emerald-400">Spieler besucht den Fanclub</div>
+            <div className="flex gap-1.5">
+              <select value={gewaehlterBesuch || ""} onChange={e => setBesuchId(e.target.value ? (isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value)) : null)}
+                className="flex-1 bg-transparent border border-emerald-800 rounded text-xs text-emerald-200 px-1.5 py-1.5">
+                {besuchsKandidaten.map(p => <option key={p.id} value={p.id} style={{ color: "#000" }}>{p.name} ({p.pos}, {p.rating}){fanliebling && p.id === fanliebling.id ? " ★" : ""}</option>)}
+              </select>
+              <button disabled={(fanclub.besuchSperre || 0) > 0 || !gewaehlterBesuch} onClick={() => onBesuch(gewaehlterBesuch)}
+                className="border border-sky-400/50 text-sky-300 text-xs rounded px-3 disabled:opacity-40 disabled:cursor-not-allowed">Schicken</button>
+            </div>
+            <div className="text-[10px] text-emerald-600">{(fanclub.besuchSperre || 0) > 0 ? `Nächster Besuch in ${fanclub.besuchSperre} Spieltag${fanclub.besuchSperre === 1 ? "" : "en"} möglich.` : "Kostenlos, +4 Unterstützung (Fanliebling +7). Danach 5 Spieltage Pause."}</div>
+          </div>
+        </div>
+
+        <div className="border border-emerald-800 rounded p-4 space-y-2" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Fanhaus</div>
+          <div className="text-sm text-amber-300 font-semibold">{FANHAUS_STUFEN[stufe].name}</div>
+          <div className="text-[11px] text-emerald-500">{stufe === 0 ? "Noch kein eigener Treffpunkt. Ein Fanhaus bindet Fans langfristig." : FANHAUS_STUFEN[stufe].beschreibung}</div>
+          <div className="text-[10px] text-emerald-600">Wirkung je Stufe: +0.3 Heimvorteil, +3% Fanclub-Wachstum, +10% Mitgliedsbeiträge, mehr Aktivitäten.</div>
+          {naechsteStufe ? (
+            <button disabled={ausbauKosten > budget} onClick={onFanhausAusbauen}
+              className="w-full border border-amber-400/50 text-amber-300 text-xs rounded py-2 disabled:opacity-40 disabled:cursor-not-allowed">
+              Ausbauen zu „{naechsteStufe.name}" — {ausbauKosten.toLocaleString("de-CH")} €
+            </button>
+          ) : <div className="text-[11px] text-emerald-300">Höchste Ausbaustufe erreicht.</div>}
+        </div>
       </div>
 
-      <div className="border border-emerald-800 rounded p-4" style={{ backgroundColor: "var(--fm-surface)" }}>
-        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Aktivitäten des Fanclubs</div>
-        {fanclub.aktivitaeten.length === 0 ? (
-          <div className="text-[11px] text-emerald-700">Noch keine Aktivitäten diese Saison.</div>
+      <div className="border border-sky-500/40 rounded p-4 mb-4 space-y-2.5" style={{ backgroundColor: "rgba(56,189,248,0.05)" }}>
+        <div className="text-[11px] uppercase tracking-wider text-sky-400/80">Fans aktiv unterstützen</div>
+        <p className="text-[11px] text-emerald-500">Vereine übernehmen in der Realität oft einen Teil der Buskosten für Auswärtsfahrten oder stellen Freikarten für betreute Jugendfahrten — das stärkt spürbar die Bindung zum Verein.</p>
+        <div className="flex gap-1.5">
+          <button disabled={kosten.bus > budget} onClick={onBusBezuschussen}
+            className="flex-1 border border-sky-400/50 text-sky-300 text-xs rounded py-2 disabled:opacity-40 disabled:cursor-not-allowed">
+            Auswärtsbus bezuschussen — {kosten.bus.toLocaleString("de-CH")} €
+          </button>
+          <button disabled={kosten.jugend > budget} onClick={onJugendfahrtSponsern}
+            className="flex-1 border border-sky-400/50 text-sky-300 text-xs rounded py-2 disabled:opacity-40 disabled:cursor-not-allowed">
+            Jugendfahrt sponsern — {kosten.jugend.toLocaleString("de-CH")} €
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="border border-emerald-800 rounded p-4 space-y-3" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Zufriedenheit im Detail</div>
+          {Object.entries(labels).map(([key, label]) => (
+            <FanclubBalken key={key} label={label} wert={zufriedenheit[key]} />
+          ))}
+        </div>
+        <div className="space-y-3">
+          <div className="border border-emerald-800 rounded p-4" style={karte}>
+            <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Fanclub-Kalender</div>
+            <div className="space-y-1.5">
+              {kalender.map(t => {
+                const fertig = erledigt.includes(t.id);
+                const inN = t.spieltag - spielNr;
+                return (
+                  <div key={t.id} className="text-xs flex items-center justify-between gap-2">
+                    <span className={fertig ? "text-emerald-600 line-through" : "text-emerald-300"}>{t.titel}</span>
+                    <span className="text-[10px] text-emerald-600 shrink-0">{fertig ? "erledigt" : inN > 0 ? `in ${inN} Spieltag${inN === 1 ? "" : "en"}` : "fällig"}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-[10px] text-emerald-700 mt-2">Zu jedem Termin legt dir der Sprecher einen Vorschlag vor.</div>
+          </div>
+          <div className="border border-emerald-800 rounded p-4" style={karte}>
+            <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Aktivitäten des Fanclubs</div>
+            {fanclub.aktivitaeten.length === 0 ? (
+              <div className="text-[11px] text-emerald-700">Noch keine Aktivitäten diese Saison.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {fanclub.aktivitaeten.map((a, i) => (
+                  <div key={i} className="text-xs text-emerald-300 flex items-start gap-1.5">
+                    <span className="text-emerald-700 shrink-0">•</span> {a.text}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {rb && (
+        <div className="border border-emerald-800 rounded p-4" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Saisonrückblick {rb.saison}/{String(rb.saison + 1).slice(-2)}</div>
+          <div className="grid grid-cols-4 gap-2 text-center mb-2">
+            <div><div className="text-lg font-bold text-amber-400">{rb.start.toLocaleString("de-CH")} → {rb.ende.toLocaleString("de-CH")}</div><div className="text-[10px] text-emerald-600">Mitglieder ({rb.ende >= rb.start ? "+" : ""}{(rb.ende - rb.start).toLocaleString("de-CH")})</div></div>
+            <div><div className="text-lg font-bold text-amber-400">{rb.stimmung}%</div><div className="text-[10px] text-emerald-600">Ø Stimmung an Heimspielen</div></div>
+            <div><div className="text-lg font-bold text-amber-400">{rb.aktionen}</div><div className="text-[10px] text-emerald-600">Aktionen umgesetzt</div></div>
+            <div><div className="text-lg font-bold text-amber-400">{FANHAUS_STUFEN[rb.fanhausStufe || 0].name}</div><div className="text-[10px] text-emerald-600">Fanhaus</div></div>
+          </div>
+          {rb.highlights?.length > 0 && <div className="text-[11px] text-emerald-400">Highlights: {rb.highlights.join(" · ")}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Vorstand & Presse: laufender Stand der Vorstandsziele (wie am Saisonende in der Vereinsversammlung
+// ausgewertet), die Wiederwahl-Aussicht und das Archiv der bisherigen Pressekonferenzen.
+function VorstandView({ ziele, zielStand, archiv = [], saisonLabel }) {
+  const karte = { backgroundColor: "var(--fm-surface)" };
+  const anzahl = zielStand.length;
+  const erfuellt = zielStand.filter(z => z.erfuellt).length;
+  const benoetigt = Math.ceil(anzahl / 2);
+  const aussicht = anzahl === 0 ? null : erfuellt >= benoetigt ? "gut" : "offen";
+  const wirkungText = (a) => {
+    const namen = { fans: "Fans", spieler: "Spieler", trainer: "Trainer", marke: "Marke" };
+    const teile = [];
+    if (a.ziel) teile.push(`${namen[a.ziel] || a.ziel} ${a.delta > 0 ? "+" : ""}${a.delta}`);
+    if (a.nebenziel) teile.push(`${namen[a.nebenziel] || a.nebenziel} ${a.nebendelta > 0 ? "+" : ""}${a.nebendelta}`);
+    return teile.join(" · ");
+  };
+  return (
+    <div>
+      <div className="border border-amber-500/40 rounded p-4 mb-4" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
+        <div className="text-[11px] uppercase tracking-wider text-amber-400/80 mb-2">Vorstand: deine Ziele {saisonLabel}</div>
+        {anzahl === 0 ? (
+          <div className="text-xs text-emerald-600">Der Vorstand hat dir aktuell keine Ziele vorgegeben.</div>
         ) : (
-          <div className="space-y-1.5">
-            {fanclub.aktivitaeten.map((a, i) => (
-              <div key={i} className="text-xs text-emerald-300 flex items-start gap-1.5">
-                <span className="text-emerald-700 shrink-0">•</span> {a.text}
+          <>
+            <div className="space-y-2">
+              {zielStand.map(z => (
+                <div key={z.id} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-amber-200 flex-1">{z.text}</span>
+                  <span className="text-amber-400 shrink-0">{(z.provision || 0).toLocaleString("de-CH")} €</span>
+                  <span className={`shrink-0 w-28 text-right ${z.erfuellt ? "text-emerald-300" : "text-red-300"}`}>{z.erfuellt ? "✓ aktuell erfüllt" : "noch offen"}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 border-t border-amber-500/20 pt-2 text-xs">
+              <span className="text-emerald-500">Wiederwahl-Aussicht: </span>
+              <span className={aussicht === "gut" ? "text-emerald-300 font-semibold" : "text-amber-300 font-semibold"}>
+                {erfuellt} von {anzahl} Zielen aktuell erfüllt — nötig sind {benoetigt}
+              </span>
+            </div>
+            <div className="text-[10px] text-emerald-600 mt-1">Zwischenstand: Platz, Gewinn und andere Werte ändern sich bis zum Saisonende noch. Am Saisonende entscheidet die Vereinsversammlung endgültig über deine Wiederwahl und zahlt die Provisionen für erfüllte Ziele.</div>
+          </>
+        )}
+      </div>
+
+      <div className="border border-emerald-800 rounded p-4" style={karte}>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Pressearchiv</div>
+        {archiv.length === 0 ? (
+          <div className="text-[11px] text-emerald-700">Noch keine Pressekonferenz gegeben. Deine Antworten erscheinen hier.</div>
+        ) : (
+          <div className="space-y-3">
+            {[...archiv].reverse().map((e, i) => (
+              <div key={i} className="border-l-2 border-emerald-800 pl-3">
+                <div className="text-[10px] text-emerald-600">Saison {e.saison}/{String(e.saison + 1).slice(-2)} · Spieltag {e.spieltag} · {e.journalist}</div>
+                <div className="text-xs text-emerald-300 italic">„{e.frage}"</div>
+                <div className="text-xs text-amber-200 mt-0.5">Deine Antwort: {e.antwort}</div>
+                <div className="text-[10px] text-emerald-500">{e.wirkung}</div>
               </div>
             ))}
           </div>
@@ -14902,15 +15375,27 @@ function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, o
   );
 }
 
-function TrainingsmaterialView({ trainingsschwerpunkt, onSchwerpunktWaehlen, belastung, onBelastungWaehlen, squad = [], spielerSchwerpunkt = {}, onSpielerSchwerpunktSetzen, managerDivId, season, trophaeen, teamName }) {
+function TrainingsmaterialView({ trainingsplan, coach, trainingsschwerpunkt, onSchwerpunktWaehlen, belastung, onBelastungWaehlen, squad = [], spielerSchwerpunkt = {}, onSpielerSchwerpunktSetzen, managerDivId, season, trophaeen, teamName }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   const [spielerFuerDetail, setSpielerFuerDetail] = useState(null);
   return (
     <div>
+      <div className="border border-amber-400/30 rounded p-4 mb-4" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
+        <div className="text-[11px] uppercase tracking-wider text-amber-400/80 mb-2">Trainingsplan des Trainers — diese Woche</div>
+        <div className="flex flex-wrap gap-x-6 gap-y-1 mb-1.5">
+          <div className="text-sm"><span className="text-emerald-500 text-xs">Schwerpunkt </span><span className="text-amber-300 font-semibold">{TRAININGSSCHWERPUNKTE[trainingsplan.schwerpunkt]?.name}</span></div>
+          <div className="text-sm"><span className="text-emerald-500 text-xs">Belastung </span><span className="text-amber-300 font-semibold">{BELASTUNGSSTUFEN[trainingsplan.belastung]?.name}</span></div>
+        </div>
+        <div className="text-[11px] text-emerald-500">{trainingsplan.grund}</div>
+        <div className="text-[11px] text-emerald-600 mt-1">{TRAININGSSCHWERPUNKTE[trainingsplan.schwerpunkt]?.beschreibung} {BELASTUNGSSTUFEN[trainingsplan.belastung]?.beschreibung}</div>
+        {trainingsplan.warnung && <div className="text-[11px] text-red-400 border border-red-500/40 rounded px-2.5 py-1.5 mt-2">{trainingsplan.warnung}</div>}
+        <div className="text-[10px] text-emerald-600 mt-2">Im echten Fussball plant der Cheftrainer mit seinem Stab die Woche. Du setzt den Rahmen (Stab, Budget, Infrastruktur) und kannst Wünsche äussern. Zufriedenheit unter 55 oder viele Verletzte lassen den Trainer deinen Wunsch ablehnen; Schonen kannst du immer anordnen.</div>
+      </div>
+
       <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
-        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Wöchentlicher Trainingsschwerpunkt (kaderweiter Standard)</div>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Dein Wunsch: Schwerpunkt</div>
         <div className="space-y-1.5">
-          {Object.entries(TRAININGSSCHWERPUNKTE).map(([id, s]) => {
+          {[["trainer", { name: "Trainer entscheidet", beschreibung: "Er plant nach seinem Stil, dem Kaderzustand und seinem Stab." }], ...Object.entries(TRAININGSSCHWERPUNKTE)].map(([id, sw]) => {
             const aktiv = trainingsschwerpunkt === id;
             return (
               <button
@@ -14919,19 +15404,19 @@ function TrainingsmaterialView({ trainingsschwerpunkt, onSchwerpunktWaehlen, bel
                 className={`w-full text-left rounded border px-3 py-2 transition-colors ${aktiv ? "border-amber-400" : "border-emerald-800 hover:border-emerald-600"}`}
                 style={aktiv ? { backgroundColor: "rgba(251,191,36,0.06)" } : undefined}
               >
-                <div className={`text-xs font-semibold ${aktiv ? "text-amber-300" : "text-emerald-100"}`}>{s.name}{aktiv && " ✓"}</div>
-                <div className="text-[11px] text-emerald-600 mt-0.5">{s.beschreibung}</div>
+                <div className={`text-xs font-semibold ${aktiv ? "text-amber-300" : "text-emerald-100"}`}>{sw.name}{aktiv && " ✓"}</div>
+                <div className="text-[11px] text-emerald-600 mt-0.5">{sw.beschreibung}</div>
               </button>
             );
           })}
         </div>
-        <div className="text-[11px] text-emerald-600 mt-2">Gilt für den ganzen Kader, ausser für Spieler mit einem individuellen Schwerpunkt weiter unten. Taktik- und Standardsituationen-Training bleiben bewusst nur kaderweit wählbar — das ist Mannschaftsarbeit.</div>
+        {trainingsplan.wunschStatus && <div className="text-[11px] text-emerald-400 mt-2">{trainingsplan.wunschStatus}</div>}
       </div>
 
       <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
-        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Belastungssteuerung</div>
-        <div className="grid grid-cols-3 gap-1.5">
-          {Object.entries(BELASTUNGSSTUFEN).map(([id, s]) => {
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Dein Wunsch: Belastung</div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {[["trainer", { name: "Trainer entscheidet" }], ...Object.entries(BELASTUNGSSTUFEN)].map(([id, sw]) => {
             const aktiv = belastung === id;
             return (
               <button
@@ -14940,23 +15425,24 @@ function TrainingsmaterialView({ trainingsschwerpunkt, onSchwerpunktWaehlen, bel
                 className={`rounded border px-2 py-2 text-center transition-colors ${aktiv ? "border-amber-400" : "border-emerald-800 hover:border-emerald-600"}`}
                 style={aktiv ? { backgroundColor: "rgba(251,191,36,0.06)" } : undefined}
               >
-                <div className={`text-xs font-semibold ${aktiv ? "text-amber-300" : "text-emerald-100"}`}>{s.name}</div>
+                <div className={`text-xs font-semibold ${aktiv ? "text-amber-300" : "text-emerald-100"}`}>{sw.name}</div>
               </button>
             );
           })}
         </div>
-        <div className="text-[11px] text-emerald-600 mt-2">{BELASTUNGSSTUFEN[belastung]?.beschreibung}</div>
+        {trainingsplan.belastungStatus && <div className="text-[11px] text-emerald-400 mt-2">{trainingsplan.belastungStatus}</div>}
       </div>
 
       <div className="border border-emerald-800 rounded p-4 mb-4" style={{ backgroundColor: "var(--fm-surface)" }}>
-        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">Individuelle Trainingsschwerpunkte</div>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">Individuelle Pläne</div>
         <div className="text-[11px] text-emerald-600 mb-3">
-          Einzelne Spieler können vom kaderweiten Standard abweichen — z.B. ein Talent gezielt auf Technik, ein verletzungsanfälliger Stammspieler auf Regeneration, während der Rest weiter im Team-Standard trainiert.
+          Mit Assistent oder Vereinsarzt im Stab betreut der Stab Verletzte (Regeneration) und junge Talente mit viel Potenzial (Technik) selbst. Du kannst bei Einzelnen eingreifen, z.B. bei einem Rückkehrer nach Verletzung.
         </div>
         <div className="space-y-1">
           {[...squad].sort((a, b) => b.rating - a.rating).map(p => {
-            const uebersteuert = spielerSchwerpunkt[p.id];
-            const aktivDaten = TRAININGSSCHWERPUNKTE[uebersteuert || trainingsschwerpunkt] || TRAININGSSCHWERPUNKTE.technik;
+            const planId = trainingsplan.individuell[p.id];
+            const quelle = trainingsplan.quelle[p.id];
+            const aktivDaten = TRAININGSSCHWERPUNKTE[planId || trainingsplan.schwerpunkt] || TRAININGSSCHWERPUNKTE.technik;
             const offen = ausgewaehlterSpieler === p.id;
             return (
               <div key={p.id} className="border border-emerald-900 rounded">
@@ -14968,23 +15454,23 @@ function TrainingsmaterialView({ trainingsschwerpunkt, onSchwerpunktWaehlen, bel
                     <span className="underline decoration-dotted hover:text-amber-300" onClick={e => { e.stopPropagation(); setSpielerFuerDetail(p); }}>{p.name}</span>
                     {" "}<span className="text-emerald-700">· {p.pos} · {p.rating}</span>
                   </span>
-                  <span className={uebersteuert ? "text-amber-300 font-semibold" : "text-emerald-600"}>{aktivDaten.name}{uebersteuert ? "" : " (Standard)"}</span>
+                  <span className={quelle === "manager" ? "text-amber-300 font-semibold" : quelle === "stab" ? "text-sky-300" : "text-emerald-600"}>{aktivDaten.name}{quelle === "manager" ? " (dein Eingriff)" : quelle === "stab" ? " (Stab)" : " (Team)"}</span>
                 </button>
                 {offen && (
                   <div className="px-2.5 pb-2 flex flex-wrap gap-1.5">
                     <button
                       onClick={() => onSpielerSchwerpunktSetzen(p.id, null)}
-                      className={`text-[10px] rounded border px-2 py-1 ${!uebersteuert ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500"}`}
+                      className={`text-[10px] rounded border px-2 py-1 ${quelle !== "manager" ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500"}`}
                     >
-                      Team-Standard ({TRAININGSSCHWERPUNKTE[trainingsschwerpunkt].name})
+                      Stab / Team entscheidet
                     </button>
-                    {Object.entries(TRAININGSSCHWERPUNKTE).map(([id, s]) => (
+                    {Object.entries(TRAININGSSCHWERPUNKTE).map(([id, sw]) => (
                       <button
                         key={id}
                         onClick={() => onSpielerSchwerpunktSetzen(p.id, id)}
-                        className={`text-[10px] rounded border px-2 py-1 ${uebersteuert === id ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500 hover:border-emerald-600"}`}
+                        className={`text-[10px] rounded border px-2 py-1 ${spielerSchwerpunkt[p.id] === id ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500 hover:border-emerald-600"}`}
                       >
-                        {s.name}
+                        {sw.name}
                       </button>
                     ))}
                   </div>
@@ -15481,9 +15967,28 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 138; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "20.11.2026, 10:30";
+const APP_BUILD = 157; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "21.11.2026, 02:00";
 const APP_NEUIGKEITEN = [
+  { build: 157, titel: "Spielregeln kompakt", text: "Die Spielregeln sind von 38 auf 16 Bereiche zusammengelegt und auf etwa ein Drittel des Umfangs gekürzt. Die Bereiche sind einklappbar: Titel antippen zeigt den Inhalt." },
+  { build: 156, titel: "Buchhaltung vollständig", text: "Buchhaltungs-Check: Alle Geldflüsse landen in der Saison-Abrechnung. Es fehlten der Kauf von Stadion-Infrastruktur (Flutlicht, Rasenheizung usw.) und der Stadionkauf. Beides erscheint jetzt unter Stadion." },
+  { build: 155, titel: "Abfindung für Mitarbeiter", text: "Mitarbeiter lassen sich nicht mehr kostenlos aus laufenden Verträgen entlassen. Läuft der Vertrag über das Saisonende hinaus, kostet es die Hälfte des Gehalts der verbleibenden vollen Vertragsjahre (mindestens ein Vierteljahresgehalt), mit Bestätigung vor dem Entlassen. Läuft er zum Saisonende aus, bleibt es kostenlos." },
+  { build: 154, titel: "Preise wirken auf die Nachfrage", text: "Ticket-, Fanartikel- und Verpflegungspreise beeinflussen jetzt, wie viele Fans kommen und kaufen: Preise über dem Richtwert kosten Nachfrage (Logen weniger, ein starker Markenwert macht tolerant), günstige Preise füllen Stadion und Stände. Ein guter Fanclub und das Fanhaus heben die Auslastung leicht. Die Ablöse hängt von der Restlaufzeit ab: letztes Vertragsjahr ca. −45 %, ein Jahr Restlaufzeit ca. −20 %. In Vertragsverhandlungen fordern junge Spieler jetzt längere statt kürzere Laufzeiten. Die Heimspielzeile zeigt die Fanclub-Beiträge." },
+  { build: 153, titel: "Inhaltliche Prüfung", text: "Das Vorstandsziel \"Bilanz positiv\" zählte bisher nur Tickets, Transfers und Sponsoring gegen vier Kostenposten. Jetzt zählt der echte Gesamtgewinn wie in der Buchhaltung. Die Spielregeln sind auf dem aktuellen Stand (neue Menüs, Training durch den Trainer, Taktik-Passung, Fanclub, Pressekonferenz, Jugend-Investition, Elf des Tages)." },
+  { build: 152, titel: "Menü neu geordnet", text: "Spielerverträge liegen jetzt bei Personal & Transfers. Fanshop, Verpflegung und Marketing wanderten in Finanzen & Vermarktung, Infrastruktur enthält Stadion und Trainingsmaterial. Die Jugend hat nur noch Übersicht und Mannschaften (U7 bis U19 mit Auswahl). Der Spielplan steht direkt nach der Tabelle. Neu: Vorstand & Presse mit Zielfortschritt, Wiederwahl-Aussicht und Pressearchiv; der Jahresbericht liegt bei Verein/Fans." },
+  { build: 151, titel: "Fanclub lebt, Pressekonferenz und Elf des Tages", text: "Fanclub: Stimmung, Fanhaus und Aktionen wirken jetzt als Heimvorteil, dazu Mitgliedsbeiträge als Einnahme. Der Sprecher legt Vorschläge und Termine vor (Choreo, Fanfest, Preise, Trikotdesign, Fanliebling-Zusage), du entscheidest mit Folgen. Neu: Fanliebling mit Besuch beim Fanclub, Fanhaus in 3 Stufen, Kalender und Saisonrückblick. Verkauf des Fanlieblings oder gebrochene Zusage kostet Rückhalt. Pressekonferenz: Titel, verlorene Finals, Auf- und Abstieg lösen sicher eine Frage aus, auch am Saisonende und zu Saisonbeginn. Elf des Tages: Formschub (bei Serie mehr), Marktwert und Gehaltsforderung steigen mit den Nominierungen." },
+  { build: 150, titel: "Vereinsinfos bereinigt", text: "Fehler behoben: Die Meldung zur Ausbildungsentschädigung und die Aufrück-Meldungen der U7 bis U11 blieben zu lange stehen, die Ausbildungsentschädigung sogar die ganze Saison. Sie verschwinden jetzt nach dem ersten Spieltag wie alle anderen Wochenmeldungen." },
+  { build: 149, titel: "Transfers: Sortierung und Filter", text: "Eigene Spieler stehen nach Position gruppiert mit Überschriften, innerhalb der Position nach Stärke. Sortierleisten nach Stärke, Preis, Alter, Potenzial, Marktwert und Vertrag, dazu Altersfilter und Filter nur bezahlbar auf dem Transfermarkt." },
+  { build: 148, titel: "Vertragslaufzeiten bis 5 Jahre", text: "Spielerverträge können bis 5 Jahre laufen. Je nach Alter gilt ein Maximum: unter 18 höchstens 3 Jahre, ab 31 höchstens 2, ab 34 nur 1 Jahr. Starke Spieler in der Blüte binden sich lieber langfristig." },
+  { build: 147, titel: "Vorstandsziele und Rotation umgezogen", text: "Die Vorstandsziele stehen jetzt unter Verein/Fans, weil sie deine Aufgabe als Manager sind. Das Rotationsprinzip wanderte auf die Taktik-Seite und hat eine Trainer-Passung: Jugendförderer tragen es gern mit, Defensiv-Trainer nicht." },
+  { build: 146, titel: "Training: der Trainer plant", text: "Schwerpunkt, Belastung und Einzelpläne kommen vom Trainer und seinem Stab (Stil, Kaderzustand, Verletzte). Du äusserst Wünsche; bei Unzufriedenheit oder vielen Verletzten lehnt der Trainer ab, Schonen kannst du immer anordnen. Arzt oder Trainer warnen bei Verletztenwelle." },
+  { build: 145, titel: "Taktik: Philosophie und Trainer", text: "Die Spielidee setzt du über die Trainerwahl durch: Passt der Trainerstil zum Philosophie-Paket, zieht er voll mit, sonst gibt es Reibung. Ein Wechsel mitten in der Saison kostet Vertrauen. Die Vorgabe Defensiv/Offensiv ist jetzt die Ambition des Vereins, die Formation bestimmt der Trainer." },
+  { build: 144, titel: "Akademie stärkt alle Nachrücker", text: "Jede Ausbaustufe der Akademie gibt +1 Stärke für die automatisch nachrückenden Kinder in allen Jugendstufen von U7 bis U19, zusätzlich zu Akademieleiter und Trainern." },
+  { build: 143, titel: "Jugend: Bezahlen pro Sichtung", text: "Das Jugendbudget wird nicht mehr im Voraus abgebucht, sondern erst bei jeder Sichtung. Wer Budget bereitstellt, bekommt mindestens eine Sichtung. Chefscout, Akademieleiter und Jugendtrainer wirken jetzt sichtbar: mehr Sichtungen und stärkere Nachrücker in allen Stufen." },
+  { build: 142, titel: "Jugendkader nach Alter", text: "Alle Jugendkader (U7 bis U19) sind nach Alter sortiert, ältester Jahrgang zuerst." },
+  { build: 141, titel: "Winterpause und Saisonstart", text: "Vorbereitung beginnt Mitte Juli, 1. Spieltag Anfang August. Die Hinrunde endet Mitte Dezember, danach echte Winterpause mit Testspielen im Januar-Transferfenster." },
+  { build: 140, titel: "Spielkalender korrigiert", text: "Fehler in der Datumsberechnung behoben: In der Schweiz und Deutschland rutschte jeder Spieltag um einen Wochentag nach vorne. Liga jetzt immer sonntags, Pokal dienstags, Europapokal mittwochs." },
+  { build: 139, titel: "DFB-Kader: Statistik", text: "Durchschnittsalter sowie Anzahl und Ø Stärke je Position über dem Kader." },
   { build: 138, titel: "Farben vereinheitlicht", text: "Restliche dunkelgrüne Flächen (Kaderlisten, Auswahllisten, Info-Boxen) im neuen Design." },
   { build: 137, titel: "Über-Seite", text: "Version, Update-Prüfung, Neuigkeiten, Impressum, Datenschutz und Lizenzen — erreichbar über „Über“ oben rechts." },
   { build: 136, titel: "DFB: Turnier mit Gruppenphase", text: "Gruppenauslosung, 3 Gruppenspiele mit Tabelle, dann K.o.-Runde. Nationen entwickeln sich über die Jahre, Eingespieltheit und Kapitän geben Boni, das Turnierergebnis wirkt auf die Fan-Euphorie." },
@@ -15710,7 +16215,7 @@ function TalentSichtungBanner({ sichtung, budget, onWaehlen, onAblehnen }) {
     <div className="border border-sky-400/50 rounded p-4 space-y-2.5" style={{ backgroundColor: "rgba(56,189,248,0.06)" }}>
       <div className="text-xs uppercase tracking-wider text-sky-400/80 flex items-center gap-1.5"><Sprout size={13} /> Talentsichtung aus der Jugendabteilung</div>
       <p className="text-[11px] text-emerald-500">
-        Der Chefscout hat {sichtung.kandidaten.length} Talente beobachtet. Die genaue Stärke der eigenen Nachwuchsspieler zeigt sich erst im Training — wähle, wer aufrücken darf.
+        {sichtung.kosten > 0 && <span className="text-amber-300 font-semibold">Diese Sichtung hat {sichtung.kosten.toLocaleString("de-CH")} € gekostet. </span>}Der Chefscout hat {sichtung.kandidaten.length} Talente beobachtet. Die genaue Stärke der eigenen Nachwuchsspieler zeigt sich erst im Training — wähle, wer aufrücken darf.
         {hatAbwerbung && " Ein Kandidat ist ein echter, junger Spieler eines anderen Vereins — der kostet eine Ablöse, dafür kennst du seine tatsächliche Stärke."}
         {hatInternational && " Ein Kandidat wurde über das internationale Scouting-Netzwerk im Ausland entdeckt — kostet eine Vermittlungsgebühr, die Stärke ist dabei unsicherer als bei der heimischen Sichtung."}
       </p>
@@ -15908,6 +16413,7 @@ function JahresberichtInhalt({ bericht }) {
 
 function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, speicherWarnung, onSpeicherWarnungAusblenden, onSpielNeuStarten, onSpielstandImportieren }) {
   const [tab, setTab] = useState("tabelle");
+  const [jugendStufe, setJugendStufe] = useState("u7");
   const [neustartBestaetigung, setNeustartBestaetigung] = useState(false);
   const [ueberOffen, setUeberOffen] = useState(false);
   // Spielstand-Sicherung: manueller Export/Import als Sicherheitsnetz, da iOS Safari localStorage in
@@ -15958,8 +16464,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "technik", belastung = "standard", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, dfbAbgang = null, dfbSperreBis = 0, nationenOffsets = {}, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "trainer", belastung = "trainer", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, dfbAbgang = null, dfbSperreBis = 0, nationenOffsets = {}, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], pressearchiv = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null } = careerState;
   AKTUELLE_NATIONEN_OFFSETS = nationenOffsets || {};
+  PREIS_SAISON = season;
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -15979,15 +16486,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         if (!fenster.offen) return null;
         return (eingehendeAngebote.length > 0 || spielerberaterAngebote.length > 0) ? "red" : "amber";
       case "trainingslager": return campVerfuegbar ? "amber" : null;
-      case "jugend-investition": return jugend?.sichtung ? "red" : jugend?.investition == null ? "amber" : null;
-      case "jugend-akademie": return akademie?.namensSponsorAngebot ? "red" : jugendKannAusbauen ? "amber" : null;
-      case "jugend-u19": return null;
-      case "jugend-u17": return null;
-      case "jugend-u15": return null;
-      case "jugend-u13": return null;
-      case "jugend-u11": return null;
-      case "jugend-u9": return null;
-      case "jugend-u7": return null;
+      case "jugend-investition": return (jugend?.sichtung || akademie?.namensSponsorAngebot) ? "red" : (jugend?.investition == null || jugendKannAusbauen) ? "amber" : null;
+      case "jugend-teams": return null;
       case "trainer": return (!coach || (coach && trainerBrauchtAktion)) ? "red" : null;
       case "sponsoring": return (werbebanner.angebote.length > 0 || stadionBrauchtAktion || !trikotsponsor || !aermelsponsor || !trainingsanzugsponsor) ? "red" : null;
       case "stab": return null;
@@ -16144,8 +16644,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const formBonus = (formDurchschnitt - 60) / 12; // Topform (~100) ≈ +3.3, Tiefform (~0) ≈ −5
   const assistentBonus = stab.assistent ? Math.max(0, (stab.assistent.rating - 40) / 40) : 0; // ca. bis +1.25
   // Trainingsschwerpunkt "Standardsituationen" verstärkt den Standardtrainer-Bonus zusätzlich
-  const schwerpunktDatenRender = TRAININGSSCHWERPUNKTE[trainingsschwerpunkt] || TRAININGSSCHWERPUNKTE.technik;
-  const belastungDatenRender = BELASTUNGSSTUFEN[belastung] || BELASTUNGSSTUFEN.standard;
+  const trainingsplan = ermittleTrainingsplan({ coach, stab, squad: division.squads[profile.team], wunschSchwerpunkt: trainingsschwerpunkt, wunschBelastung: belastung, spielerWunsch: spielerSchwerpunkt, zufriedenheit: trainerZufriedenheit, philosophiePaket, spieltag: division.matchday });
+  const schwerpunktDatenRender = TRAININGSSCHWERPUNKTE[trainingsplan.schwerpunkt] || TRAININGSSCHWERPUNKTE.technik;
+  const belastungDatenRender = BELASTUNGSSTUFEN[trainingsplan.belastung] || BELASTUNGSSTUFEN.standard;
   const philosophiePaketDatenRender = PHILOSOPHIE_PAKETE[philosophiePaket] || PHILOSOPHIE_PAKETE.ballbesitz;
   const standardBonus = (stab.standard ? Math.max(0, (stab.standard.rating - 40) / 35) : 0) + schwerpunktDatenRender.standardBonus; // ca. bis +1.4
   const trainingsBonus = schwerpunktDatenRender.taktikBonus + belastungDatenRender.bonus + philosophiePaketDatenRender.philosophieBonus;
@@ -16435,7 +16936,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const eigenesStadionTest = division.stadien[profile.team];
       const platzVorherTest = sortedTable(division.table).findIndex(t => t.name === profile.team) + 1;
       const gegnerAttraktivitaetTest = berechneGegnerAttraktivitaet(teamStrength(gegnerSquad), teamStrength(eigenesSquad));
-      const testEinnahmenRoh = berechneHeimspielEinnahmen(eigenesStadionTest, platzVorherTest, division.teams.length, false, gegnerAttraktivitaetTest);
+      const testEinnahmenRoh = berechneHeimspielEinnahmen(eigenesStadionTest, platzVorherTest, division.teams.length, false, gegnerAttraktivitaetTest, { tierId: managerDivId, markenwert });
       // Testspiele ziehen generell deutlich weniger als Pflichtspiele — Zuschauerzahl und Ticketpreis werden gedämpft
       const testDaempfung = 0.45;
       const testZuschauer = Math.round(testEinnahmenRoh.zuschauer * testDaempfung);
@@ -16511,16 +17012,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteU9NachU11Befoerderung: null,
           letzteU7NachU9Befoerderung: null,
           letzteMarketingAblauf: null,
-          letzterAufstieg: false,
-          letzterMeistertitelPK: null,
-          letzterTorschuetzenkoenigPK: null,
-          letzterPokalsiegPK: null,
-          letzterEuropapokalsiegPK: null,
-          letzterPokalFinaleVerlorenPK: null,
-          letzterEuropapokalFinaleVerlorenPK: null,
-          letzterWmEmSiegPK: null,
-          letzterWmEmFinalVerlorenPK: null,
-          letzterAbstieg: false,
+          // PK-Ereignis-Flags bleiben bewusst erhalten (werden erst nach der gestellten Frage bzw. nach Ablauf geleert)
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
           letzteU19Freistellung: null,
@@ -16622,7 +17114,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           const eigenesStadionEuro = division.stadien[profile.team];
           const platzVorherEuro = sortedTable(division.table).findIndex(t => t.name === profile.team) + 1;
           const gegnerAttraktivitaetEuro = berechneGegnerAttraktivitaet(gegnerRating, teamStrength(eigenesSquad));
-          const euroEinnahmen = berechneHeimspielEinnahmen(eigenesStadionEuro, platzVorherEuro, division.teams.length, false, gegnerAttraktivitaetEuro);
+          const euroEinnahmen = berechneHeimspielEinnahmen(eigenesStadionEuro, platzVorherEuro, division.teams.length, false, gegnerAttraktivitaetEuro, { tierId: managerDivId, markenwert });
           const { neuerFanshop: fsRoh, einnahmen: fanartikelEinnahmen } = verkaufeFanartikel(neuerFanshopEuro, euroEinnahmen.zuschauer, 1, 1, managerDivId, trikotBoostFaktor);
           const nbFanEuro = nachbestellen(fsRoh, FANARTIKEL_TYPEN);
           neuerFanshopEuro = nbFanEuro.neuerState;
@@ -16894,16 +17386,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteU9NachU11Befoerderung: null,
           letzteU7NachU9Befoerderung: null,
           letzteMarketingAblauf: null,
-          letzterAufstieg: false,
-          letzterMeistertitelPK: null,
-          letzterTorschuetzenkoenigPK: null,
-          letzterPokalsiegPK: null,
-          letzterEuropapokalsiegPK: null,
-          letzterPokalFinaleVerlorenPK: null,
-          letzterEuropapokalFinaleVerlorenPK: null,
-          letzterWmEmSiegPK: null,
-          letzterWmEmFinalVerlorenPK: null,
-          letzterAbstieg: false,
+          // PK-Ereignis-Flags bleiben bewusst erhalten (werden erst nach der gestellten Frage bzw. nach Ablauf geleert)
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
           letzteU19Freistellung: null,
@@ -17056,7 +17539,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         const gegnerStaerkePokal = gegnerDivPokal ? teamStrength(divisions[gegnerDivPokal].squads[gegnerNamePokal]) : teamStrength(division.squads[profile.team]);
         const gegnerAttraktivitaetPokal = berechneGegnerAttraktivitaet(gegnerStaerkePokal, teamStrength(division.squads[profile.team]));
         pokalEinnahmen = istHeim
-          ? berechneHeimspielEinnahmen(eigenesStadion, platzVorher, division.teams.length, istDerby(managerErgebnis.heim, managerErgebnis.gast), gegnerAttraktivitaetPokal)
+          ? berechneHeimspielEinnahmen(eigenesStadion, platzVorher, division.teams.length, istDerby(managerErgebnis.heim, managerErgebnis.gast), gegnerAttraktivitaetPokal, { tierId: managerDivId, markenwert })
           : berechneAuswaertsspielKosten(managerDivId, eigenesStadion, platzVorher, division.teams.length, istDerby(managerErgebnis.heim, managerErgebnis.gast));
         const fansAnwesend = istHeim ? pokalEinnahmen.zuschauer : pokalEinnahmen.reisendeFans;
         const { neuerFanshop: fsRoh, einnahmen: fanartikelEinnahmen } = verkaufeFanartikel(fanshop, fansAnwesend, istHeim ? 1 : 0.6, 1, managerDivId, trikotBoostFaktor);
@@ -17253,16 +17736,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteU9NachU11Befoerderung: null,
           letzteU7NachU9Befoerderung: null,
           letzteMarketingAblauf: null,
-          letzterAufstieg: false,
-          letzterMeistertitelPK: null,
-          letzterTorschuetzenkoenigPK: null,
-          letzterPokalsiegPK: null,
-          letzterEuropapokalsiegPK: null,
-          letzterPokalFinaleVerlorenPK: null,
-          letzterEuropapokalFinaleVerlorenPK: null,
-          letzterWmEmSiegPK: null,
-          letzterWmEmFinalVerlorenPK: null,
-          letzterAbstieg: false,
+          // PK-Ereignis-Flags bleiben bewusst erhalten (werden erst nach der gestellten Frage bzw. nach Ablauf geleert)
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
           letzteU19Freistellung: null,
@@ -17325,6 +17799,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     let nachbestellKostenFanshop = 0;
     let nachbestellKostenImbiss = 0;
     let heimvorteilBonus = 0;
+    let fanHeimspielHeute = false;
+    let fanAtmoWert = 0;
+    let fanGesamtHeim = null;
     let neuesStadionNachHeimspiel = null;
     // Auch die eigene Liga hat an manchen Wochen Doppelspieltage, falls sie mehr Spieltage als die
     // Referenz-Pace hat (z.B. nach einem Aufstieg in die 3. Liga mit 38 statt 34 Spieltagen). Der
@@ -17338,7 +17815,20 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         const platzVorher = sortedTable(division.table).findIndex(t => t.name === profile.team) + 1;
         if (paarung[0] === profile.team) {
           const stadion = division.stadien[profile.team];
-          einnahmen = berechneHeimspielEinnahmen(stadion, platzVorher, division.teams.length, heutigesDerby);
+          // Fanclub-Stimmung vorab: sie hebt bzw. senkt die Nachfrage und später den Heimvorteil.
+          try {
+            const fanZufrHeim = berechneFanzufriedenheit({
+              taktikKennzahlen: berechneTaktikKennzahlen(division.results, division.squads[profile.team], profile.team),
+              trainerZufriedenheit, platz: platzVorher || 1, anzahlTeams: division.teams.length,
+              anzahlSaisonsImAmt, trophaeenAnzahl: trophaeen.length, stadion, managerDivId, fanshop, imbiss, vereinsheim,
+              unterstuetzungsBonus: fanclub.unterstuetzungsBonus, markenwert
+            });
+            fanGesamtHeim = Object.values(fanZufrHeim).reduce((a, b) => a + b, 0) / 7;
+            fanAtmoWert = berechneFanAtmosphaere(fanclub, fanGesamtHeim);
+          } catch (err) { console.error("Fan-Atmosphäre fehlgeschlagen:", err); }
+          // Gute Stimmung und ein Fanhaus füllen das Stadion etwas besser (±4 % bzw. +1 % je Fanhaus-Stufe)
+          const fanNachfrageBonus = fanGesamtHeim != null ? ((fanGesamtHeim - 50) / 50) * 0.04 + 0.01 * (fanclub.fanhausStufe || 0) : 0;
+          einnahmen = berechneHeimspielEinnahmen(stadion, platzVorher, division.teams.length, heutigesDerby, 0, { tierId: managerDivId, markenwert, fanBonus: fanNachfrageBonus });
           // Sicherheitskosten am Spieltag (Ordner, Einlasskontrolle): eine reale, von den Vereinen
           // selbst getragene laufende Kostenposition, unabhängig vom einmaligen Sicherheitssystem-
           // Infrastrukturausbau. Skaliert mit der Zuschauerzahl und dem Liga-Niveau.
@@ -17372,6 +17862,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           nachbestellKostenImbiss += nbImbHeim.kosten + nbVhHeim.kosten;
           const imbissGesamtEinnahmen = imbissEinnahmen + vereinsheimEinnahmen;
           einnahmen = { ...einnahmen, fanartikeleinnahmen: fanartikelEinnahmen, imbisseinnahmen: imbissGesamtEinnahmen, gesamt: einnahmen.gesamt + fanartikelEinnahmen + imbissGesamtEinnahmen };
+          // Fanclub: Mitgliedsbeiträge fliessen anteilig bei jedem Heimspiel (Fanhaus +10% je Stufe)
+          const heimspieleProSaison = Math.max(1, Math.round(division.fixtures.length / 2));
+          const fanclubBeitrag = Math.round(fanclub.groesse * (FANCLUB_BEITRAG_PRO_SAISON[managerDivId] || 12) / heimspieleProSaison * (1 + 0.1 * (fanclub.fanhausStufe || 0)));
+          einnahmen = { ...einnahmen, fanclubBeitraege: fanclubBeitrag, gesamt: einnahmen.gesamt + fanclubBeitrag };
+          fanHeimspielHeute = true;
           // Stadionrekord & Auslastungs-Historie fürs Diagramm
           const istNeuerRekord = einnahmen.zuschauer > (stadion.rekordZuschauer || 0);
           // Platzwart: jedes Heimspiel nutzt den Rasen ab, ein guter Platzwart pflegt aktiv nach und
@@ -17395,6 +17890,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           const platzBonus = ((neuerPlatzzustand - 50) / 50) * 1.2;
           const soundsystemBonus = infrastrukturWirkung(stadion, "soundsystem") * einnahmen.auslastung * 0.6;
           heimvorteilBonus = Math.min(1.5, einnahmen.auslastung * 1.6) + platzBonus + soundsystemBonus;
+          // Der Fanclub trägt (oder bremst) die Mannschaft: Stimmung, Fanhaus und laufende Aktionen.
+          heimvorteilBonus += fanAtmoWert;
         } else {
           const eigenesStadion = division.stadien[profile.team];
           einnahmen = berechneAuswaertsspielKosten(managerDivId, eigenesStadion, platzVorher, division.teams.length, heutigesDerby);
@@ -17418,7 +17915,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // setzt den Zähler zurück.
     const philosophieJahre = season - (philosophiePaketSeitSaison ?? season);
     const philosophieAbnutzungMalus = -Math.min(3, Math.max(0, philosophieJahre - 3) * 0.7);
-    const gesamtBonus = begrenzeBonus(coachBonus + zufriedenheitsBonus + (campBonus ? campBonus.wert : 0) + formBonus + einwechslungsBonus + assistentBonus + standardBonus + heimvorteilBonus + trainingsBonus + teamgeistBonus + eingespieltheitBonus) + formationsBonus + philosophieAbnutzungMalus;
+    const passungMitTrainer = coach ? paketPassung(philosophiePaket, coach.stil) : 0;
+    const passungsBonus = passungMitTrainer > 0 ? 0.3 : passungMitTrainer < 0 ? -0.4 : 0;
+    const gesamtBonus = begrenzeBonus(coachBonus + zufriedenheitsBonus + (campBonus ? campBonus.wert : 0) + formBonus + einwechslungsBonus + assistentBonus + standardBonus + heimvorteilBonus + trainingsBonus + teamgeistBonus + eingespieltheitBonus) + formationsBonus + philosophieAbnutzungMalus + passungsBonus;
     const coachBonuses = { [profile.team]: gesamtBonus };
     // Standardtrainer: erhöht sowohl den Anteil an Standardtoren als auch die Trefferwahrscheinlichkeit
     // des vorgesehenen Elfmeter-/Freistossschützen — nur für das eigene Team bekannt/definiert
@@ -17555,12 +18054,19 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // Nicht nach jedem Spieltag eine Pressekonferenz — sonst würde es schnell repetitiv. Ca. 45%
       // Wahrscheinlichkeit hält es frisch, ohne zur festen Routine zu werden. Keine Obergrenze pro
       // Saison mehr — dafür jetzt nur noch 1 Frage pro Pressekonferenz (siehe waehlePressekonferenzFragen).
-      if (Math.random() < 0.45) {
+      {
         const rng = rngFor(`pressekonferenz|${profile.team}|${season}|${gespielterSpieltag}`);
         // Echter Spielkontext — nur Fragen, deren Bedingung gerade tatsächlich zutrifft, kommen in
         // die engere Auswahl (siehe bedingung-Feld je Frage). Verhindert z.B. Verletzungsfragen, wenn
         // noch gar keine Verletzung passiert ist.
         const squadNachSpieltag = neueDivisions[managerDivId].squads[profile.team];
+        const pkMeisterJetzt = alleFertig && sortedTable(neueDivisions[managerDivId].table)[0]?.name === profile.team;
+        let pkKoenigJetzt = null;
+        if (alleFertig) {
+          try { const k = ermittleTorschuetzenkoenig(neueDivisions[managerDivId]); if (k && k.team === profile.team) pkKoenigJetzt = { name: k.name, tore: k.tore }; } catch (err) { /* ignorieren */ }
+        }
+        const pkPokalsiegJetzt = (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "pokalsieg");
+        const pkEuropasiegJetzt = (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "europapokal");
         const pkKontext = {
           hatVerletzung: squadNachSpieltag.some(p => p.verletzung),
           schwacherSpielerVorhanden: squadNachSpieltag.some(p => (p.form || 60) < 40),
@@ -17583,15 +18089,17 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           bundestrainerAktiv: !!bundestrainerAmt,
           marketingBudgetHoch: Object.keys(marketingKampagnen || {}).length > 0,
           vermieterBautAus: !!careerState.vermieterAusbauAngekuendigt,
-          titelDieseSaison: !!letzterMeistertitelPK || !!letzterTorschuetzenkoenigPK || !!letzterPokalsiegPK || !!letzterEuropapokalsiegPK || !!letzterWmEmSiegPK,
-          pokalSiegerDieseSaison: !!letzterPokalsiegPK,
-          europapokalSiegerDieseSaison: !!letzterEuropapokalsiegPK,
+          // Ereignisse werden direkt aus dem aktuellen Stand abgeleitet (nicht nur aus übernommenen Flags),
+          // damit sie schon in der laufenden Saison und am letzten Spieltag Thema sein können.
+          titelDieseSaison: !!letzterMeistertitelPK || pkMeisterJetzt,
+          pokalSiegerDieseSaison: !!letzterPokalsiegPK || pkPokalsiegJetzt,
+          europapokalSiegerDieseSaison: !!letzterEuropapokalsiegPK || pkEuropasiegJetzt,
           wmEmSiegDieseSaison: !!letzterWmEmSiegPK,
           wmEmFinalVerlorenDieseSaison: !!letzterWmEmFinalVerlorenPK,
-          torschuetzenkoenigDieseSaison: letzterTorschuetzenkoenigPK,
+          torschuetzenkoenigDieseSaison: letzterTorschuetzenkoenigPK || pkKoenigJetzt,
           topspielerVerlaengertDieseSaison: !!letzteTopspielerVerlaengerung,
-          pokalFinaleVerlorenDieseSaison: !!letzterPokalFinaleVerlorenPK,
-          europapokalFinaleVerlorenDieseSaison: !!letzterEuropapokalFinaleVerlorenPK,
+          pokalFinaleVerlorenDieseSaison: !!letzterPokalFinaleVerlorenPK || !!pokalFinaleVerlorenDieseSaisonMarker,
+          europapokalFinaleVerlorenDieseSaison: !!letzterEuropapokalFinaleVerlorenPK || !!europapokalFinaleVerlorenDieseSaisonMarker,
           aufgestiegenDieseSaison: !!letzterAufstieg,
           abgestiegenDieseSaison: !!letzterAbstieg,
           vereinsWechselAngebot: !!letzterVereinswechselAngebot,
@@ -17620,7 +18128,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             };
           })()
         };
-        neuePressekonferenz = { fragen: waehlePressekonferenzFragen(rng, pkKontext, pressefragenGestelltDieseSaison), aktuellerIndex: 0, antworten: [] };
+        // Offene Ereignisfragen (Titel, Pokalfinale, Aufstieg, ...) haben Vorrang und lösen sicher eine
+        // Pressekonferenz aus; sonst wie bisher mit ca. 45% Wahrscheinlichkeit eine normale Frage.
+        const ereignisOffen = PRESSEKONFERENZ_FRAGEN.some(f => PK_EREIGNIS_IDS.includes(f.id) && f.bedingung && f.bedingung(pkKontext) && !(pressefragenGestelltDieseSaison || []).includes(f.id));
+        if (ereignisOffen || Math.random() < 0.45) {
+          neuePressekonferenz = { fragen: waehlePressekonferenzFragen(rng, pkKontext, pressefragenGestelltDieseSaison, ereignisOffen), aktuellerIndex: 0, antworten: [] };
+        }
       }
     }
     // Jede neu gestellte Frage-ID merken, damit sie diese Saison nicht nochmals vorkommt (siehe
@@ -17628,6 +18141,15 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const neuePressefragenGestellt = neuePressekonferenz
       ? [...(pressefragenGestelltDieseSaison || []), ...neuePressekonferenz.fragen.map(f => f.id)]
       : pressefragenGestelltDieseSaison;
+    // Pressekonferenz-Ereignis-Flags: ein am Saisonende neu entstandenes Ereignis wird gesetzt (ausser
+    // die Frage wurde diese Saison schon gestellt); ein übernommenes bleibt, bis die Frage gestellt
+    // wurde oder ab Spieltag 8 der Saison veraltet ist.
+    const pkFlagNeu = (frageId, neuerWert, alterWert) => {
+      const gestellt = (neuePressefragenGestellt || []).includes(frageId);
+      if (neuerWert) return gestellt ? null : neuerWert;
+      if (gestellt || neueDivisions[managerDivId].matchday >= 8) return null;
+      return alterWert || null;
+    };
 
     // DFB-Pokal: fester Rundenplan nach Bundesliga-Spieltagen — die Ansetzung erscheint sofort im Spielplan,
     // ausgetragen wird sie dann als eigener, dedizierter Pokal-Spieltag (siehe oben). Finale fällt auf BL-Spieltag 34.
@@ -17835,10 +18357,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Bereich der Fanzufriedenheit deutlich abrutscht
     let neuerFanclub = fanclub;
     if (spieltHeute) {
+      const spNr = division.matchday + 1;
+      const gesamtSp = division.fixtures.length;
       let aktivitaeten = fanclub.aktivitaeten;
-      if (Math.random() < 0.25) {
-        const text = FANCLUB_AKTIVITAETEN_POOL[Math.floor(Math.random() * FANCLUB_AKTIVITAETEN_POOL.length)];
-        aktivitaeten = [{ text, datum }, ...aktivitaeten].slice(0, 6);
+      const logPush = (text) => { aktivitaeten = [{ text, datum }, ...aktivitaeten].slice(0, 8); };
+      if (Math.random() < 0.25 + 0.05 * (fanclub.fanhausStufe || 0)) {
+        logPush(FANCLUB_AKTIVITAETEN_POOL[Math.floor(Math.random() * FANCLUB_AKTIVITAETEN_POOL.length)]);
       }
       let anliegen = fanclub.anliegen;
       if (!anliegen) {
@@ -17854,7 +18378,41 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           anliegen = { bereich: schwaechsterEintrag[0], ...FANCLUB_ANLIEGEN_KATALOG[schwaechsterEintrag[0]] };
         }
       }
-      neuerFanclub = { ...fanclub, aktivitaeten, anliegen };
+      // Vorschläge des Fanclub-Sprechers: feste Termine (Kalender) haben Vorrang vor spontanen Ideen.
+      let vorschlag = fanclub.vorschlag || null;
+      let unterstuetzungNeu = fanclub.unterstuetzungsBonus || 0;
+      let kalenderErledigt = fanclub.kalenderErledigt || [];
+      let letzterVorschlagId = fanclub.letzterVorschlagId || null;
+      if (vorschlag && vorschlag.ablaufSpieltag < spNr) {
+        unterstuetzungNeu -= 1;
+        logPush(`„${vorschlag.titel}" blieb unbeantwortet — die Fans sind enttäuscht`);
+        vorschlag = null;
+      }
+      if (!vorschlag) {
+        const squadFan = neueDivisions[managerDivId].squads[profile.team];
+        const ctxFan = { managerDivId, spNr, liebling: ermittleFanliebling(squadFan, season, kapitaenId), lieblingZusage: fanclub.lieblingZusage, letzteId: letzterVorschlagId };
+        const faellig = fanclubKalender(gesamtSp).find(t => t.spieltag <= spNr && spNr - t.spieltag <= 3 && !kalenderErledigt.includes(t.id));
+        if (faellig) {
+          vorschlag = baueFanclubVorschlag(faellig.aktion, ctxFan, faellig);
+          kalenderErledigt = [...kalenderErledigt, faellig.id];
+        } else if (Math.random() < 0.10) {
+          vorschlag = waehleFanclubVorschlag(ctxFan);
+        }
+        if (vorschlag) letzterVorschlagId = vorschlag.id;
+      }
+      // Atmosphäre: laufende Aktion nutzt sich bei jedem Heimspiel ab; auffällige Stimmung steht im Log
+      let atmosphaere = fanclub.atmosphaere || null;
+      if (fanHeimspielHeute && atmosphaere) atmosphaere = atmosphaere.heimspiele > 1 ? { ...atmosphaere, heimspiele: atmosphaere.heimspiele - 1 } : null;
+      if (fanHeimspielHeute && Math.abs(fanAtmoWert) >= 1.2 && Math.random() < 0.5) {
+        logPush(fanAtmoWert > 0 ? "Die Kurve peitscht das Team nach vorne — Gänsehaut-Atmosphäre" : "Pfiffe und Unmut auf den Rängen — das Stadion ist gereizt");
+      }
+      neuerFanclub = {
+        ...fanclub, aktivitaeten, anliegen, vorschlag, kalenderErledigt, letzterVorschlagId, atmosphaere,
+        unterstuetzungsBonus: Math.max(-25, Math.min(FAN_UNTERSTUETZUNG_MAX, unterstuetzungNeu)),
+        besuchSperre: Math.max(0, (fanclub.besuchSperre || 0) - 1),
+        stimmungSumme: (fanclub.stimmungSumme || 0) + (fanGesamtHeim ?? 0),
+        stimmungAnzahl: (fanclub.stimmungAnzahl || 0) + (fanGesamtHeim != null ? 1 : 0)
+      };
     }
     // Derby-Ergebnis wirkt zusätzlich direkt auf die Unterstützungsstimmung — unabhängig davon, ob heute
     // sonst ein Fanclub-Update fällig war (der Effekt soll nie durch Zufall ausfallen)
@@ -18029,7 +18587,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     });
 
     let neueTrainerVorschlaege = trainerVorschlaege;
-    let neueTrainerZufriedenheit = coach ? Math.max(0, Math.min(100, trainerZufriedenheit + stabZufriedenheitsDrift)) : trainerZufriedenheit;
+    const passungsDrift = coach ? ({ 1: 0.05, 0: 0, [-1]: -0.15 })[paketPassung(philosophiePaket, coach.stil)] + (rotationsprinzipAktiv ? ({ 1: 0.03, 0: 0, [-1]: -0.1 })[rotationPassung(coach.stil)] : 0) : 0;
+    let neueTrainerZufriedenheit = coach ? Math.max(0, Math.min(100, trainerZufriedenheit + stabZufriedenheitsDrift + passungsDrift)) : trainerZufriedenheit;
     if (coach && nachHalbzeit && !winterpauseGenommen) {
       // Rückrunde beginnt: alte (Vorrunde-)Vorschläge bewerten, neue generieren
       const delta = bewerteVorschlagsErfuellung(trainerVorschlaege, neueDivisions, managerDivId, profile.team, trainingsmaterial, stab);
@@ -18062,13 +18621,16 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Talentsichtung ausgelöst — der Manager wählt selbst aus mehreren gescouteten Kandidaten aus.
     let neueScoutingSichtung = jugend.sichtung || null;
     let neueJugendTermine = jugend.termine;
+    let sichtungsKosten = 0;
     const neuerMatchdayEigeneLiga = neueDivisions[managerDivId].matchday;
     if (jugend.investition != null && !neueScoutingSichtung && jugend.termine.includes(neuerMatchdayEigeneLiga)) {
+      // Bezahlt wird pro Sichtung — höchstens so viel, wie die Kasse hergibt.
+      sichtungsKosten = Math.max(0, Math.min(jugend.investition, Math.floor(budget)));
       // Nachwuchs-Sichtungsnetzwerk (Personalabteilung, siehe PERSONALABTEILUNGEN.sichtung): ergänzt
       // den Chefscout, indem es die zugrunde liegende Basisstärke für die Kandidaten-Generierung
       // anhebt — unabhängig davon, ob überhaupt ein Chefscout angestellt ist.
       const sichtungsBonus = (PERSONALABTEILUNGEN.sichtung.stufen[personalabteilungen.sichtung] || PERSONALABTEILUNGEN.sichtung.stufen.minimal).staerkeBonus;
-      neueScoutingSichtung = { kandidaten: generiereScoutingKandidaten(profile.team, division.baseRating + sichtungsBonus, jugend.investition, stab.scout?.rating, neueDivisions, managerDivId, akademie.level, stab.akademieleiter?.rating) };
+      neueScoutingSichtung = { kosten: sichtungsKosten, kandidaten: generiereScoutingKandidaten(profile.team, division.baseRating + sichtungsBonus, sichtungsKosten, stab.scout?.rating, neueDivisions, managerDivId, akademie.level, stab.akademieleiter?.rating) };
       neueJugendTermine = jugend.termine.filter(t => t !== neuerMatchdayEigeneLiga);
     }
 
@@ -18078,6 +18640,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // wirkt jetzt PRO SPIELER (spielerSchwerpunkt überschreibt den kaderweiten Standard je Spieler),
     // daher hier nur noch der kaderweite Material-/Philosophie-Anteil, der Rest passiert in entwickleKader.
     const philosophiePaketDaten = PHILOSOPHIE_PAKETE[philosophiePaket] || PHILOSOPHIE_PAKETE.ballbesitz;
+    // Der Trainer plant die Trainingswoche selbst (Schwerpunkt, Belastung, Einzelpläne); der Manager
+    // äussert nur Wünsche (siehe ermittleTrainingsplan).
+    const trainingsplanHeute = ermittleTrainingsplan({ coach, stab, squad: neueDivisions[managerDivId].squads[profile.team], wunschSchwerpunkt: trainingsschwerpunkt, wunschBelastung: belastung, spielerWunsch: spielerSchwerpunkt, zufriedenheit: trainerZufriedenheit, philosophiePaket, spieltag: neueDivisions[managerDivId].matchday });
     const { neuesSquad: entwickeltesSquad, veraenderungen } = entwickleKader(
       neueDivisions[managerDivId].squads[profile.team],
       coach?.rating || 50,
@@ -18087,8 +18652,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       division.stadien[profile.team]?.rasenheizung || false,
       datum,
       coach?.stil || null,
-      spielerSchwerpunkt,
-      trainingsschwerpunkt
+      trainingsplanHeute.individuell,
+      trainingsplanHeute.schwerpunkt
     );
 
     // Trainingsmaterial nutzt sich jetzt jeden Spieltag ein kleines Stück ab (statt nur einmal am
@@ -18109,7 +18674,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Kreuzverbindung: Infrastruktur + Personal). Ein Ernährungsberater wirkt als dritte, unabhängige
     // Säule — aus einem völlig anderen Blickwinkel (Vorbeugung statt Behandlung/Infrastruktur) und senkt
     // das Risiko zusätzlich, unabhängig davon, ob Arzt oder Trainingszentrum bereits vorhanden sind.
-    const belastungDaten = BELASTUNGSSTUFEN[belastung] || BELASTUNGSSTUFEN.standard;
+    const belastungDaten = BELASTUNGSSTUFEN[trainingsplanHeute.belastung] || BELASTUNGSSTUFEN.standard;
     const stadionFuerVerletzungen = division.stadien[profile.team];
     const tzWirkung = infrastrukturWirkung(stadionFuerVerletzungen, "trainingszentrum");
     const trainingszentrumRisikoFaktor = 1 - (1 - (stab.arzt ? 0.75 : 0.9)) * tzWirkung;
@@ -18267,13 +18832,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const medizinHeilungsBonus = medizinDaten.heilungsBonus * (stab.arzt ? 1.5 : 1);
     const { neuesSquad: squadNachVerletzungen, neueVerletzten } = verarbeiteVerletzungen(
       entwickeltesSquad, spielendeIdsHeute, stab.arzt, 7,
-      p => schwerpunktFuerSpieler(p.id, spielerSchwerpunkt, trainingsschwerpunkt).verletzungsFaktor * belastungDaten.verletzungsFaktor * trainingszentrumRisikoFaktor * ernaehrungsRisikoFaktor * materialRisikoFaktor * philosophiePaketDaten.verletzungsFaktor * medizinDaten.risikoFaktor,
-      p => schwerpunktFuerSpieler(p.id, spielerSchwerpunkt, trainingsschwerpunkt).heilungsBonus + trainingszentrumHeilungsBonus + medizinHeilungsBonus
+      p => schwerpunktFuerSpieler(p.id, trainingsplanHeute.individuell, trainingsplanHeute.schwerpunkt).verletzungsFaktor * belastungDaten.verletzungsFaktor * trainingszentrumRisikoFaktor * ernaehrungsRisikoFaktor * materialRisikoFaktor * philosophiePaketDaten.verletzungsFaktor * medizinDaten.risikoFaktor,
+      p => schwerpunktFuerSpieler(p.id, trainingsplanHeute.individuell, trainingsplanHeute.schwerpunkt).heilungsBonus + trainingszentrumHeilungsBonus + medizinHeilungsBonus
     );
     // Trainingsschwerpunkt wirkt sich zusätzlich leicht auf die Form aus (Kondition kostet kurzfristig
     // etwas Frische, Regeneration hebt sie) — jetzt pro Spieler statt kaderweit einheitlich
     const squadNachSchwerpunktForm = squadNachVerletzungen.map(p => {
-      const delta = schwerpunktFuerSpieler(p.id, spielerSchwerpunkt, trainingsschwerpunkt).formDelta;
+      const delta = schwerpunktFuerSpieler(p.id, trainingsplanHeute.individuell, trainingsplanHeute.schwerpunkt).formDelta;
       return delta !== 0 ? { ...p, form: Math.max(0, Math.min(100, (p.form ?? 60) + delta)) } : p;
     });
     // Bankfrustration: wer heute nicht in der Startelf stand, sammelt Frustration — wie schnell hängt
@@ -18298,15 +18863,17 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     let sfErtragFanartikel = sfBasis.ertragFanartikel || 0;
     let sfErtragImbiss = sfBasis.ertragImbiss || 0;
     let sfErtragTV = sfBasis.ertragTV || 0;
+    let sfErtragFanclub = sfBasis.ertragFanclub || 0;
     let sfAufwandReisen = sfBasis.aufwandReisen;
     if (einnahmen) {
+      sfErtragFanclub += einnahmen.fanclubBeitraege || 0;
       sfErtragFanartikel += einnahmen.fanartikeleinnahmen || 0;
       sfErtragImbiss += einnahmen.imbisseinnahmen || 0;
       sfErtragTV += einnahmen.tvGeld || 0;
       if (einnahmen.typ === "heim") sfErtragTicketing += einnahmen.ticketeinnahmen + (einnahmen.fanzoneEinnahmen || 0);
       else sfAufwandReisen += einnahmen.kosten;
     }
-    const neueSaisonFinanzen = { ...sfBasis, ertragTicketing: sfErtragTicketing, ertragFanartikel: sfErtragFanartikel, ertragImbiss: sfErtragImbiss, ertragTV: sfErtragTV, ertragLaenderspiel: (sfBasis.ertragLaenderspiel || 0) + laenderspielEinnahmen, aufwandReisen: sfAufwandReisen, aufwandGehalt: sfBasis.aufwandGehalt + trainergehaltGezahlt, aufwandMitarbeiterstab: (sfBasis.aufwandMitarbeiterstab || 0) + stabGehaltGezahlt, aufwandManagerlohn: (sfBasis.aufwandManagerlohn || 0) + managerlohnGezahlt, aufwandSpielerloehne: (sfBasis.aufwandSpielerloehne || 0) + spielerloehneGezahlt, aufwandPersonal: (sfBasis.aufwandPersonal || 0) + personalkostenGezahlt + personalabteilungenkostenGezahlt, aufwandSicherheit: (sfBasis.aufwandSicherheit || 0) + sicherheitskostenGezahlt, aufwandBetrieb: (sfBasis.aufwandBetrieb || 0) + betriebskostenGezahlt, aufwandSchiedsrichter: (sfBasis.aufwandSchiedsrichter || 0) + schiedsrichterkostenGezahlt, aufwandStadionmiete: (sfBasis.aufwandStadionmiete || 0) + stadionMieteGezahlt, aufwandSonstiges: (sfBasis.aufwandSonstiges || 0), aufwandFanartikel: (sfBasis.aufwandFanartikel || 0) + nachbestellKostenFanshop, aufwandImbiss: (sfBasis.aufwandImbiss || 0) + nachbestellKostenImbiss };
+    const neueSaisonFinanzen = { ...sfBasis, ertragFanclub: sfErtragFanclub, ertragTicketing: sfErtragTicketing, ertragFanartikel: sfErtragFanartikel, ertragImbiss: sfErtragImbiss, ertragTV: sfErtragTV, ertragLaenderspiel: (sfBasis.ertragLaenderspiel || 0) + laenderspielEinnahmen, aufwandReisen: sfAufwandReisen, aufwandGehalt: sfBasis.aufwandGehalt + trainergehaltGezahlt, aufwandMitarbeiterstab: (sfBasis.aufwandMitarbeiterstab || 0) + stabGehaltGezahlt, aufwandManagerlohn: (sfBasis.aufwandManagerlohn || 0) + managerlohnGezahlt, aufwandSpielerloehne: (sfBasis.aufwandSpielerloehne || 0) + spielerloehneGezahlt, aufwandPersonal: (sfBasis.aufwandPersonal || 0) + personalkostenGezahlt + personalabteilungenkostenGezahlt, aufwandSicherheit: (sfBasis.aufwandSicherheit || 0) + sicherheitskostenGezahlt, aufwandBetrieb: (sfBasis.aufwandBetrieb || 0) + betriebskostenGezahlt, aufwandSchiedsrichter: (sfBasis.aufwandSchiedsrichter || 0) + schiedsrichterkostenGezahlt, aufwandStadionmiete: (sfBasis.aufwandStadionmiete || 0) + stadionMieteGezahlt, aufwandSonstiges: (sfBasis.aufwandSonstiges || 0), aufwandFanartikel: (sfBasis.aufwandFanartikel || 0) + nachbestellKostenFanshop, aufwandImbiss: (sfBasis.aufwandImbiss || 0) + nachbestellKostenImbiss };
 
     // Markenwert: wöchentlicher Auf- oder Abbau durch Marketingchef, sportlichen Erfolg, digitale
     // Infrastruktur und Teamgeist — die eigentliche Kreuzverbindung der neuen Marketingabteilung.
@@ -18388,8 +18955,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     let vereinsversammlung = null;
     if (alleFertig && ziele && ziele.length) {
       const platzFuerZiele = neuerHistorieEintrag ? neuerHistorieEintrag.platz : 1;
-      const reingewinnGesamt = (neueSaisonFinanzen.ertragTicketing + neueSaisonFinanzen.ertragTransfers + neueSaisonFinanzen.ertragSponsoring)
-        - (neueSaisonFinanzen.aufwandGehalt + neueSaisonFinanzen.aufwandReisen + neueSaisonFinanzen.aufwandTransfers + neueSaisonFinanzen.aufwandSonstiges);
+      const reingewinnGesamt = berechneSaisonReingewinn(neueSaisonFinanzen);
       const kontext = {
         platz: platzFuerZiele,
         anzahlTeams: division.teams.length,
@@ -18473,16 +19039,16 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       jugendliga: neueJugendliga,
       jugendKader: neuerJugendKader,
       letztesU19Highlight: neuesU19Highlight,
-      letzterMeistertitelPK: letzterMeistertitelPKNeu,
-      letzterTorschuetzenkoenigPK: letzterTorschuetzenkoenigPKNeu,
-      letzterPokalsiegPK: letzterPokalsiegPKNeu,
-      letzterEuropapokalsiegPK: letzterEuropapokalsiegPKNeu,
-      letzterPokalFinaleVerlorenPK: letzterPokalFinaleVerlorenPKNeu,
-      letzterEuropapokalFinaleVerlorenPK: letzterEuropapokalFinaleVerlorenPKNeu,
+      letzterMeistertitelPK: pkFlagNeu("verein_titel_saison", letzterMeistertitelPKNeu, letzterMeistertitelPK),
+      letzterTorschuetzenkoenigPK: pkFlagNeu("verein_torschuetzenkoenig", letzterTorschuetzenkoenigPKNeu, letzterTorschuetzenkoenigPK),
+      letzterPokalsiegPK: pkFlagNeu("verein_pokalsieg", letzterPokalsiegPKNeu, letzterPokalsiegPK),
+      letzterEuropapokalsiegPK: pkFlagNeu("verein_europapokalsieg", letzterEuropapokalsiegPKNeu, letzterEuropapokalsiegPK),
+      letzterPokalFinaleVerlorenPK: pkFlagNeu("verein_pokalfinale_verloren", letzterPokalFinaleVerlorenPKNeu, letzterPokalFinaleVerlorenPK),
+      letzterEuropapokalFinaleVerlorenPK: pkFlagNeu("verein_europapokalfinale_verloren", letzterEuropapokalFinaleVerlorenPKNeu, letzterEuropapokalFinaleVerlorenPK),
       // Season-weite Marker jetzt zurücksetzen — der nächste Saisondurchlauf soll wieder bei false
       // starten, nicht die alten Werte weitertragen.
-      pokalFinaleVerlorenDieseSaisonMarker: false,
-      europapokalFinaleVerlorenDieseSaisonMarker: false,
+      pokalFinaleVerlorenDieseSaisonMarker: alleFertig ? false : pokalFinaleVerlorenDieseSaisonMarker,
+      europapokalFinaleVerlorenDieseSaisonMarker: alleFertig ? false : europapokalFinaleVerlorenDieseSaisonMarker,
       jugendliga17: neueJugendliga17,
       jugendKader17: neuerJugendKader17,
       letztesU17Highlight: neuesU17Highlight,
@@ -18504,7 +19070,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       spielHistorie: neuerHistorienEintrag ? [...(spielHistorie || []), neuerHistorienEintrag] : (spielHistorie || []),
       letztesTrainergehalt: trainergehaltGezahlt > 0 ? trainergehaltGezahlt : null,
       letztesManagerlohn: managerlohnGezahlt > 0 ? managerlohnGezahlt : null,
-      budget: krise.budget,
+      budget: krise.budget - sichtungsKosten,
       bankrottWarnstufe: krise.bankrottWarnstufe ?? cs.bankrottWarnstufe,
       budgetKrise: krise.budgetKrise || null,
       vermieterAusbauAngekuendigt: vermieterErgebnisErfolg?.ankuendigung || null,
@@ -18529,10 +19095,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           letzteTrainerEingewoehnung: null,
           letzteJugendbeforderung: null,
           letzteMarketingAblauf: null,
-          letzterAufstieg: false,
-          letzterWmEmSiegPK: null,
-          letzterWmEmFinalVerlorenPK: null,
-          letzterAbstieg: false,
+          letzterAufstieg: (neueDivisions[managerDivId].matchday >= 8 || neuePressefragenGestellt.includes("verein_aufstieg")) ? false : letzterAufstieg,
+          letzterAbstieg: (neueDivisions[managerDivId].matchday >= 8 || neuePressefragenGestellt.includes("verein_abstieg")) ? false : letzterAbstieg,
+          letzterWmEmSiegPK: (neueDivisions[managerDivId].matchday >= 8 || neuePressefragenGestellt.includes("verein_wm_em_sieg")) ? null : letzterWmEmSiegPK,
+          letzterWmEmFinalVerlorenPK: (neueDivisions[managerDivId].matchday >= 8 || neuePressefragenGestellt.includes("verein_wm_em_final_verloren")) ? null : letzterWmEmFinalVerlorenPK,
           letzterVereinswechselAngebot: null,
           letzterSpielerauftrittVerkauf: null,
           letzteU19Freistellung: null,
@@ -18552,6 +19118,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letzteEinberufene: neueEinberufene,
       letzteRueckkehrer: neueRueckkehrer,
       letztesDerby: derbyBericht,
+      // Diese Saisonstart-Meldungen sind Ein-Wochen-Meldungen und müssen nach dem ersten Spieltag wieder
+      // verschwinden. Sie wurden hier bisher nie zurückgesetzt und blieben die ganze Saison stehen
+      // (Ausbildungsentschädigung) bzw. bis zum nächsten Pokal-/Europapokal-/Länderspieltag (U7-U11-Aufrücker).
+      letzteAusbildungsentschaedigung: null,
+      letzteU11NachU13Befoerderung: null,
+      letzteU9NachU11Befoerderung: null,
+      letzteU7NachU9Befoerderung: null,
       akademie: akademieMitNamensAngebot,
       letzterAkademieAusbau: akademieFertig,
       testspiele: { ...cs.testspiele, winter: neueWinterTestspiele },
@@ -18572,7 +19145,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       beraterVerlaengerungsAngebote: neueBeraterVerlaengerungsAngebote,
       verkaufsliste: neueVerkaufsliste,
       fanclub: fanclubDeltaEreignis ? { ...neuerFanclub, groesse: Math.max(50, neuerFanclub.groesse + fanclubDeltaEreignis) } : neuerFanclub,
-      saisonFinanzen: neueSaisonFinanzenMitZinsen,
+      saisonFinanzen: sichtungsKosten > 0 ? { ...neueSaisonFinanzenMitZinsen, aufwandJugend: (neueSaisonFinanzenMitZinsen.aufwandJugend || 0) + sichtungsKosten } : neueSaisonFinanzenMitZinsen,
       letzterStadionUmbau: umbauFertig.length ? umbauFertig : null,
       letzteHeimspielKategorien: neueHeimspielKategorien,
       markenwertStartSaison: markenwertStartSaisonEffektiv,
@@ -19181,7 +19754,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Ein hoher Markenwert zieht zusätzlich neue Fans an — unabhängig von der reinen Zufriedenheit
     // der bestehenden Basis, ganz wie eine erfolgreiche Marketingabteilung das leisten soll.
     const markenwertWachstumsBonus = 1 + (markenwert - 50) / 500;
-    let neueFanclubGroesse = Math.max(50, Math.round(fanclub.groesse * (0.85 + (gesamtZufrFanclub / 100) * 0.4) * markenwertWachstumsBonus));
+    // Fanhaus (+3% je Stufe) und aktive Fanclub-Aktionen (+1% je Aktion, max. +5%) beschleunigen das Wachstum
+    const fanclubAktivBonus = (1 + 0.03 * (fanclub.fanhausStufe || 0)) * (1 + Math.min(0.05, (fanclub.saisonAktionen || 0) * 0.01));
+    let neueFanclubGroesse = Math.max(50, Math.round(fanclub.groesse * (0.85 + (gesamtZufrFanclub / 100) * 0.4) * markenwertWachstumsBonus * fanclubAktivBonus));
     // Bei einem Liga-Wechsel wuchs der Fanclub bisher einfach organisch von der alten (viel kleineren)
     // Basis weiter — ein Aufstieg von der Oberliga in die 2. Liga bedeutet real aber eine ganz andere
     // Grössenordnung an potenziellen Fans (siehe FANCLUB_BASIS_GROESSE), nicht nur ein paar Prozent
@@ -19298,7 +19873,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendKaderBasisVorAlterung = jugendliga && jugendKader.length ? jugendKader : initialerU19Kader(profile.team, JUGENDLIGA_DEFS.find(d => d.id === jugendDivIdBasisVorAlterung).baseRating);
     const jugendErgebnisVorAlterung = verarbeiteJugendligaSaisonende(jugendligaBasisVorAlterung, jugendDivIdBasisVorAlterung, profile.team);
     const jugendBaseRatingVorAlterung = JUGENDLIGA_DEFS.find(d => d.id === jugendErgebnisVorAlterung.jugendDivId).baseRating;
-    const { kader: u19KaderNachAlterung, ausgemustert: u19Ausgemustert } = alterJugendKader(jugendKaderBasisVorAlterung, profile.team, jugendBaseRatingVorAlterung, seasonEndInfo.season);
+    const { kader: u19KaderNachAlterung, ausgemustert: u19Ausgemustert } = alterJugendKader(jugendKaderBasisVorAlterung, profile.team, jugendBaseRatingVorAlterung + jugendNachrueckerBonus(stab, "u19", akademie?.level), seasonEndInfo.season);
     // Zu alt für die U19 (19 Jahre) und nicht rechtzeitig hochgezogen: statt spurlos zu verschwinden,
     // wechselt der Spieler zu einem echten anderen Verein (wie ein verkauftes Eigengewächs) — ein sehr
     // vielversprechender Spieler bringt dabei noch eine kleine Ablöse ein.
@@ -19333,7 +19908,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendKader17BasisVorAlterung = jugendliga17 && jugendKader17.length ? jugendKader17 : initialerU17Kader(profile.team, JUGENDLIGA17_DEFS.find(d => d.id === jugendDivId17BasisVorAlterung).baseRating);
     const jugendliga17ErgebnisVorAlterung = verarbeiteJugendliga17Saisonende(jugendliga17BasisVorAlterung, jugendDivId17BasisVorAlterung, profile.team);
     const jugend17BaseRatingVorAlterung = JUGENDLIGA17_DEFS.find(d => d.id === jugendliga17ErgebnisVorAlterung.jugendDivId).baseRating;
-    const { kader: u17KaderNachAlterung, aufgestiegen: u17NachU19Aufgestiegen } = alterJugendKader17(jugendKader17BasisVorAlterung, profile.team, jugend17BaseRatingVorAlterung, seasonEndInfo.season);
+    const { kader: u17KaderNachAlterung, aufgestiegen: u17NachU19Aufgestiegen } = alterJugendKader17(jugendKader17BasisVorAlterung, profile.team, jugend17BaseRatingVorAlterung + jugendNachrueckerBonus(stab, "u17", akademie?.level), seasonEndInfo.season);
     const u19KaderMitU17Zugaengen = [...u19KaderNachAlterung, ...u17NachU19Aufgestiegen];
     let u17AufstiegsMeldung = u17NachU19Aufgestiegen.length
       ? { anzahl: u17NachU19Aufgestiegen.length, namen: u17NachU19Aufgestiegen.map(p => p.name) }
@@ -19346,7 +19921,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendKader15BasisVorAlterung = jugendliga15 && jugendKader15.length ? jugendKader15 : initialerU15Kader(profile.team, JUGENDLIGA15_DEFS.find(d => d.id === jugendDivId15BasisVorAlterung).baseRating);
     const jugendliga15ErgebnisVorAlterung = verarbeiteJugendliga15Saisonende(jugendliga15BasisVorAlterung, jugendDivId15BasisVorAlterung, profile.team);
     const jugend15BaseRatingVorAlterung = JUGENDLIGA15_DEFS.find(d => d.id === jugendliga15ErgebnisVorAlterung.jugendDivId).baseRating;
-    const { kader: u15KaderNachAlterung, aufgestiegen: u15NachU17Aufgestiegen } = alterJugendKader15(jugendKader15BasisVorAlterung, profile.team, jugend15BaseRatingVorAlterung, seasonEndInfo.season);
+    const { kader: u15KaderNachAlterung, aufgestiegen: u15NachU17Aufgestiegen } = alterJugendKader15(jugendKader15BasisVorAlterung, profile.team, jugend15BaseRatingVorAlterung + jugendNachrueckerBonus(stab, "u15", akademie?.level), seasonEndInfo.season);
     const u17KaderMitU15Zugaengen = [...u17KaderNachAlterung, ...u15NachU17Aufgestiegen];
     let u15AufstiegsMeldung = u15NachU17Aufgestiegen.length
       ? { anzahl: u15NachU17Aufgestiegen.length, namen: u15NachU17Aufgestiegen.map(p => p.name) }
@@ -19359,7 +19934,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendKader13BasisVorAlterung = jugendliga13 && jugendKader13.length ? jugendKader13 : initialerU13Kader(profile.team, JUGENDLIGA13_DEFS.find(d => d.id === jugendDivId13BasisVorAlterung).baseRating);
     const jugendliga13ErgebnisVorAlterung = verarbeiteJugendliga13Saisonende(jugendliga13BasisVorAlterung, jugendDivId13BasisVorAlterung, profile.team);
     const jugend13BaseRatingVorAlterung = JUGENDLIGA13_DEFS.find(d => d.id === jugendliga13ErgebnisVorAlterung.jugendDivId).baseRating;
-    const { kader: u13KaderNachAlterung, aufgestiegen: u13NachU15Aufgestiegen } = alterJugendKader13(jugendKader13BasisVorAlterung, profile.team, jugend13BaseRatingVorAlterung, seasonEndInfo.season);
+    const { kader: u13KaderNachAlterung, aufgestiegen: u13NachU15Aufgestiegen } = alterJugendKader13(jugendKader13BasisVorAlterung, profile.team, jugend13BaseRatingVorAlterung + jugendNachrueckerBonus(stab, "u13", akademie?.level), seasonEndInfo.season);
     const u15KaderMitU13Zugaengen = [...u15KaderNachAlterung, ...u13NachU15Aufgestiegen];
     let u13AufstiegsMeldung = u13NachU15Aufgestiegen.length
       ? { anzahl: u13NachU15Aufgestiegen.length, namen: u13NachU15Aufgestiegen.map(p => p.name) }
@@ -19370,7 +19945,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendliga11BasisVorAlterung = jugendliga11 || initialeJugendliga11(profile.team, rngFor(`jugendliga11|${profile.team}|nachtraeglich`));
     const jugendKader11BasisVorAlterung = jugendliga11 && jugendKader11.length ? jugendKader11 : initialerU11Kader(profile.team, JUGENDLIGA11_DEF.baseRating);
     const jugendliga11ErgebnisVorAlterung = verarbeiteJugendliga11Saisonende(jugendliga11BasisVorAlterung, profile.team);
-    const { kader: u11KaderNachAlterung, aufgestiegen: u11NachU13Aufgestiegen } = alterJugendKader11(jugendKader11BasisVorAlterung, profile.team, JUGENDLIGA11_DEF.baseRating, seasonEndInfo.season);
+    const { kader: u11KaderNachAlterung, aufgestiegen: u11NachU13Aufgestiegen } = alterJugendKader11(jugendKader11BasisVorAlterung, profile.team, JUGENDLIGA11_DEF.baseRating + jugendNachrueckerBonus(stab, "u11", akademie?.level), seasonEndInfo.season);
     const u13KaderMitU11Zugaengen = [...u13KaderNachAlterung, ...u11NachU13Aufgestiegen];
     let u11AufstiegsMeldung = u11NachU13Aufgestiegen.length
       ? { anzahl: u11NachU13Aufgestiegen.length, namen: u11NachU13Aufgestiegen.map(p => p.name) }
@@ -19381,7 +19956,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendliga9BasisVorAlterung = jugendliga9 || initialeJugendliga9(profile.team, rngFor(`jugendliga9|${profile.team}|nachtraeglich`));
     const jugendKader9BasisVorAlterung = jugendliga9 && jugendKader9.length ? jugendKader9 : initialerU9Kader(profile.team, JUGENDLIGA9_DEF.baseRating);
     const jugendliga9ErgebnisVorAlterung = verarbeiteJugendliga9Saisonende(jugendliga9BasisVorAlterung, profile.team);
-    const { kader: u9KaderNachAlterung, aufgestiegen: u9NachU11Aufgestiegen } = alterJugendKader9(jugendKader9BasisVorAlterung, profile.team, JUGENDLIGA9_DEF.baseRating, seasonEndInfo.season);
+    const { kader: u9KaderNachAlterung, aufgestiegen: u9NachU11Aufgestiegen } = alterJugendKader9(jugendKader9BasisVorAlterung, profile.team, JUGENDLIGA9_DEF.baseRating + jugendNachrueckerBonus(stab, "u9", akademie?.level), seasonEndInfo.season);
     const u11KaderMitU9Zugaengen = [...u11KaderNachAlterung, ...u9NachU11Aufgestiegen];
     let u9AufstiegsMeldung = u9NachU11Aufgestiegen.length
       ? { anzahl: u9NachU11Aufgestiegen.length, namen: u9NachU11Aufgestiegen.map(p => p.name) }
@@ -19390,7 +19965,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // U7-Pendant: kein eigener Ligabetrieb, daher nur Alterung + automatische Beförderung nach U9,
     // ohne vorherige Saisonende-Verarbeitung einer Tabelle.
     const jugendKader7BasisVorAlterung = jugendKader7.length ? jugendKader7 : initialerU7Kader(profile.team, U7_BASE_RATING);
-    const { kader: u7KaderNachAlterung, aufgestiegen: u7NachU9Aufgestiegen } = alterJugendKader7(jugendKader7BasisVorAlterung, profile.team, U7_BASE_RATING, seasonEndInfo.season);
+    const { kader: u7KaderNachAlterung, aufgestiegen: u7NachU9Aufgestiegen } = alterJugendKader7(jugendKader7BasisVorAlterung, profile.team, U7_BASE_RATING + jugendNachrueckerBonus(stab, "u7", akademie?.level), seasonEndInfo.season);
     const u9KaderMitU7Zugaengen = [...u9KaderNachAlterung, ...u7NachU9Aufgestiegen];
     let u7AufstiegsMeldung = u7NachU9Aufgestiegen.length
       ? { anzahl: u7NachU9Aufgestiegen.length, namen: u7NachU9Aufgestiegen.map(p => p.name) }
@@ -19434,6 +20009,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       vermieterAusbauAngekuendigt: vermieterErgebnisNachAufstieg?.ankuendigung || null,
       pressekonferenzenDieseSaison: 0,
       pressefragenGestelltDieseSaison: [],
+      pressearchiv: (pressearchiv || []).slice(-40),
       jugendbefoerderungenDieseSaison: 0,
       letzterJahresbericht: jahresbericht,
       karriereAufstiege: karriereAufstiege + (managerAufgestiegen ? 1 : 0),
@@ -19469,7 +20045,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       trainingsmaterial: neuesMaterial,
       tvGeldProSpieltag: neuesTvGeldProSpieltag,
       europapokal: neuerEuropapokal,
-      fanclub: { groesse: neueFanclubGroesse, aktivitaeten: fanclub.aktivitaeten, anliegen: null, unterstuetzungsBonus: Math.max(-25, Math.min(FAN_UNTERSTUETZUNG_MAX, Math.round((fanclub.unterstuetzungsBonus || 0) * 0.4) + dfbFanDelta)) },
+      fanclub: { ...fanclub, groesse: neueFanclubGroesse, aktivitaeten: [], vorschlag: null, atmosphaere: null, besuchSperre: 0, lieblingZusage: null, kalenderErledigt: [],
+        saisonStartGroesse: neueFanclubGroesse, saisonAktionen: 0, stimmungSumme: 0, stimmungAnzahl: 0,
+        rueckblick: { saison: season, start: fanclub.saisonStartGroesse ?? fanclub.groesse, ende: neueFanclubGroesse, aktionen: fanclub.saisonAktionen || 0,
+          stimmung: fanclub.stimmungAnzahl ? Math.round(fanclub.stimmungSumme / fanclub.stimmungAnzahl) : Math.round(gesamtZufrFanclub),
+          fanhausStufe: fanclub.fanhausStufe || 0, highlights: (fanclub.aktivitaeten || []).slice(0, 3).map(a => a.text) },
+        anliegen: null, unterstuetzungsBonus: Math.max(-25, Math.min(FAN_UNTERSTUETZUNG_MAX, Math.round((fanclub.unterstuetzungsBonus || 0) * 0.4) + dfbFanDelta)) },
       testspiele: { vorsaison: generiereTestspiele(seasonEndInfo.divisions[neueManagerDivIdFuerVorschlaege], profile.team, 2), winter: null },
       letzteEntwicklung: null,
       letzterSpielbericht: null,
@@ -19744,7 +20325,18 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const onPhilosophiePaketChange = (id) => {
     // Nur zurücksetzen, wenn sich das Paket TATSÄCHLICH ändert — sonst würde ein erneutes Bestätigen
     // desselben Pakets die Abnutzung (siehe philosophiePaketSeitSaison) grundlos zurücksetzen.
-    setCareerState(cs => cs.philosophiePaket === id ? cs : { ...cs, philosophiePaket: id, philosophiePaketSeitSaison: cs.season });
+    // Mitten in der Saison die Spielidee zu ändern kostet das Vertrauen des Trainers (-8); vor dem
+    // 1. Spieltag oder ohne Cheftrainer ist der Wechsel kostenlos.
+    setCareerState(cs => {
+      if (cs.philosophiePaket === id) return cs;
+      const mitten = cs.coach && (cs.divisions?.[managerDivId]?.matchday || 0) > 0;
+      return {
+        ...cs,
+        philosophiePaket: id,
+        philosophiePaketSeitSaison: cs.season,
+        trainerZufriedenheit: mitten ? Math.max(0, (cs.trainerZufriedenheit ?? 70) - 8) : cs.trainerZufriedenheit
+      };
+    });
   };
 
   const onRotationsprinzipUmschalten = () => {
@@ -19934,7 +20526,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       return {
         ...cs,
         budget: cs.budget - kosten,
-        divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], stadien: { ...cs.divisions[managerDivId].stadien, [profile.team]: neuerStadion } } }
+        divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], stadien: { ...cs.divisions[managerDivId].stadien, [profile.team]: neuerStadion } } },
+        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandStadion: (cs.saisonFinanzen?.aufwandStadion || 0) + kosten }
       };
     });
   };
@@ -20169,7 +20762,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       return {
         ...cs,
         budget: cs.budget - preis,
-        divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], stadien: { ...cs.divisions[managerDivId].stadien, [profile.team]: neuerStadion } } }
+        divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], stadien: { ...cs.divisions[managerDivId].stadien, [profile.team]: neuerStadion } } },
+        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandStadion: (cs.saisonFinanzen?.aufwandStadion || 0) + preis }
       };
     });
   };
@@ -20272,7 +20866,15 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   };
 
   const onStabEntlassen = (rolle) => {
-    setCareerState(cs => ({ ...cs, stab: { ...(cs.stab || {}), [rolle]: null } }));
+    setCareerState(cs => {
+      const abfindung = stabAbfindung((cs.stab || {})[rolle], cs.season);
+      if (abfindung > cs.budget) return cs;
+      const sf = cs.saisonFinanzen || leereSaisonFinanzen();
+      return {
+        ...cs, budget: cs.budget - abfindung, stab: { ...(cs.stab || {}), [rolle]: null },
+        saisonFinanzen: abfindung > 0 ? { ...sf, aufwandMitarbeiterstab: (sf.aufwandMitarbeiterstab || 0) + abfindung } : sf
+      };
+    });
   };
 
   const onJobAngebotAblehnen = () => {
@@ -20341,6 +20943,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         trainerVorschlaege: neueVorschlaege,
         saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), ertragTransfers: (cs.saisonFinanzen?.ertragTransfers || 0) + angebot.summe },
         letzterAbgangEffekt: formEffekt !== 0 ? { name: spieler.name, formEffekt, zufriedenheitEffekt, grund } : null,
+        fanclub: fanclubNachVerkauf(cs.fanclub, squadVorher, spieler, cs.datum, cs.season, cs.kapitaenId),
         marketingKampagnen: marketingFolge.marketingKampagnen,
         markenwert: marketingFolge.markenwert,
         letzterSpielerauftrittVerkauf: marketingFolge.meldung
@@ -20472,12 +21075,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     setCareerState(cs => {
       const managerDivId = findManagerDivision(cs.divisions, profile.team);
       const div = cs.divisions[managerDivId];
-      const termine = planeJuniorTermine(div.fixtures.length, cs.akademie?.level || 0);
+      const termine = planeJuniorTermine(div.fixtures.length, cs.akademie?.level || 0, jugendScoutZusatzChance(cs.stab), betrag > 0);
+      // Das Budget wird NICHT mehr im Voraus abgebucht: Es gilt pro Sichtung und wird erst fällig,
+      // wenn eine Sichtung tatsächlich stattfindet.
       return {
         ...cs,
-        budget: cs.budget - betrag,
-        jugend: { investition: betrag, termine },
-        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandJugend: (cs.saisonFinanzen?.aufwandJugend || 0) + betrag }
+        jugend: { investition: betrag, termine }
       };
     });
   };
@@ -20489,6 +21092,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const squad = cs.divisions[managerDivId].squads[profile.team];
       const spieler = squad.find(p => p.id === spielerId);
       if (!spieler) return cs;
+      laufzeit = Math.min(laufzeit, maxVertragsLaufzeit(spieler.alter));
       const marktSalaer = berechneSpielerlohn(spieler, managerDivId);
       const angebotsSalaer = Math.round((marktSalaer * gehaltsFaktor) / 100 / 100) * 100;
       const platz = sortedTable(cs.divisions[managerDivId].table).findIndex(t => t.name === profile.team) + 1 || 1;
@@ -20534,7 +21138,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       return {
         ...cs,
         divisions: { ...cs.divisions, [managerDivId]: div },
-        letzteVertragsverhandlung: { name: spieler.name, angenommen, laufzeit, gehalt: angebotsSalaer, verlaesstAusFrust: false, temporaerFrustriert: wurdeFrustriert, willAbwarten, forderungen: angenommen || willAbwarten ? null : ermittleVertragsForderungen(angebotsSalaer, marktSalaer, laufzeit) },
+        letzteVertragsverhandlung: { name: spieler.name, angenommen, laufzeit, gehalt: angebotsSalaer, verlaesstAusFrust: false, temporaerFrustriert: wurdeFrustriert, willAbwarten, forderungen: angenommen || willAbwarten ? null : ermittleVertragsForderungen(angebotsSalaer, marktSalaer, laufzeit, spieler.alter) },
         // Für die Pressekonferenz-Kreuzverbindung (siehe pkKontext.topspielerVerlaengertDieseSaison) —
         // nur bei einem wirklich starken Spieler (Rating ≥82) und nur kurz nach der eigentlichen
         // Verlängerung aktuell, wie bei den anderen Ein-Wochen-Meldungen auch.
@@ -20744,6 +21348,71 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     });
   };
 
+  const onFanclubEntscheidung = (optIdx) => {
+    setCareerState(cs => {
+      const v = cs.fanclub?.vorschlag;
+      const opt = v?.optionen?.[optIdx];
+      if (!opt || opt.kosten > cs.budget) return cs;
+      const w = opt.wirkung || {};
+      let fc = { ...cs.fanclub, vorschlag: null, saisonAktionen: (cs.fanclub.saisonAktionen || 0) + (opt.aktion ? 1 : 0) };
+      fc.unterstuetzungsBonus = Math.max(-25, Math.min(FAN_UNTERSTUETZUNG_MAX, (fc.unterstuetzungsBonus || 0) + (w.unterstuetzung || 0)));
+      if (w.mitglieder) fc.groesse = Math.max(50, Math.round(fc.groesse * (1 + w.mitglieder)));
+      if (w.atmosphaere) fc.atmosphaere = { heimspiele: w.atmosphaere.heimspiele, bonus: w.atmosphaere.bonus };
+      if (w.zusage) fc.lieblingZusage = w.zusage;
+      fc.aktivitaeten = [{ text: opt.log, datum: cs.datum }, ...(fc.aktivitaeten || [])].slice(0, 8);
+      let neueDivisionen = cs.divisions;
+      if (w.ticketSenken) {
+        const div = { ...cs.divisions[managerDivId], stadien: { ...cs.divisions[managerDivId].stadien } };
+        const stadion = div.stadien[profile.team];
+        const gesenkt = {};
+        STADION_KATEGORIEN.forEach(k => { gesenkt[k] = { ...stadion[k], ticketpreis: Math.max(1, Math.round(stadion[k].ticketpreis * (1 - w.ticketSenken))) }; });
+        div.stadien[profile.team] = { ...stadion, ...gesenkt };
+        neueDivisionen = { ...cs.divisions, [managerDivId]: div };
+      }
+      const sf = cs.saisonFinanzen || leereSaisonFinanzen();
+      return {
+        ...cs, divisions: neueDivisionen, fanclub: fc,
+        budget: cs.budget - opt.kosten + (w.budget || 0),
+        saisonFinanzen: { ...sf, aufwandSonstiges: (sf.aufwandSonstiges || 0) + opt.kosten, ertragEvents: (sf.ertragEvents || 0) + (w.budget || 0) }
+      };
+    });
+  };
+
+  const onFanhausAusbauen = () => {
+    setCareerState(cs => {
+      const stufe = cs.fanclub.fanhausStufe || 0;
+      if (stufe >= FANHAUS_STUFEN.length - 1) return cs;
+      const kosten = fanhausKosten(managerDivId, stufe + 1);
+      if (kosten > cs.budget) return cs;
+      const sf = cs.saisonFinanzen || leereSaisonFinanzen();
+      return {
+        ...cs, budget: cs.budget - kosten,
+        fanclub: { ...cs.fanclub, fanhausStufe: stufe + 1, aktivitaeten: [{ text: `${FANHAUS_STUFEN[stufe + 1].name} eröffnet`, datum: cs.datum }, ...(cs.fanclub.aktivitaeten || [])].slice(0, 8) },
+        saisonFinanzen: { ...sf, aufwandSonstiges: (sf.aufwandSonstiges || 0) + kosten }
+      };
+    });
+  };
+
+  const onFanclubBesuch = (spielerId) => {
+    setCareerState(cs => {
+      if ((cs.fanclub.besuchSperre || 0) > 0) return cs;
+      const squad = cs.divisions[managerDivId].squads[profile.team];
+      const spieler = squad.find(p => p.id === spielerId);
+      if (!spieler) return cs;
+      const lieb = ermittleFanliebling(squad, cs.season, cs.kapitaenId);
+      const istLieb = lieb && lieb.id === spieler.id;
+      const delta = (istLieb ? 7 : 4) + ((cs.fanclub.fanhausStufe || 0) >= 2 ? 1 : 0);
+      return {
+        ...cs,
+        fanclub: {
+          ...cs.fanclub, besuchSperre: 5,
+          unterstuetzungsBonus: Math.min(FAN_UNTERSTUETZUNG_MAX, (cs.fanclub.unterstuetzungsBonus || 0) + delta),
+          aktivitaeten: [{ text: istLieb ? `Fanliebling ${spieler.name} besucht den Fanclub — riesige Freude` : `${spieler.name} besucht den Fanclub und schreibt Autogramme`, datum: cs.datum }, ...(cs.fanclub.aktivitaeten || [])].slice(0, 8)
+        }
+      };
+    });
+  };
+
   const onJobAngebotAnnehmen = () => {
     if (!jobAngebot) return;
     const neuesTeam = jobAngebot.verein;
@@ -20936,12 +21605,20 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const effekte = berechnePressekonferenzEffekte(neueAntworten);
       const squad = cs.divisions[managerDivId].squads[profile.team];
       const neuesSquad = effekte.spieler ? squad.map(p => ({ ...p, form: Math.max(0, Math.min(100, (p.form || 60) + effekte.spieler)) })) : squad;
+      const archivNeu = pk.fragen.map((f, i) => ({
+        saison: cs.season, spieltag: cs.divisions[managerDivId].matchday, journalist: f.journalist ? `${f.journalist.vorname} ${f.journalist.nachname} (${f.journalist.zeitung})` : "Presse",
+        frage: f.frage, antwort: neueAntworten[i]?.text || "", wirkung: neueAntworten[i] ? (() => {
+          const a = neueAntworten[i]; const n = { fans: "Fans", spieler: "Spieler", trainer: "Trainer", marke: "Marke" };
+          return [a.ziel && `${n[a.ziel] || a.ziel} ${a.delta > 0 ? "+" : ""}${a.delta}`, a.nebenziel && `${n[a.nebenziel] || a.nebenziel} ${a.nebendelta > 0 ? "+" : ""}${a.nebendelta}`].filter(Boolean).join(" · ");
+        })() : ""
+      }));
       return {
         ...cs,
         pressekonferenz: null,
+        pressearchiv: [...(cs.pressearchiv || []), ...archivNeu].slice(-60),
         trainerZufriedenheit: Math.max(0, Math.min(100, (cs.trainerZufriedenheit ?? 70) + (effekte.trainer || 0))),
         markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? 50) + (effekte.marke || 0))),
-        fanclub: { ...cs.fanclub, unterstuetzungsBonus: Math.max(0, Math.min(FAN_UNTERSTUETZUNG_MAX, (cs.fanclub.unterstuetzungsBonus || 0) + (effekte.fans || 0))) },
+        fanclub: { ...cs.fanclub, unterstuetzungsBonus: Math.max(-25, Math.min(FAN_UNTERSTUETZUNG_MAX, (cs.fanclub.unterstuetzungsBonus || 0) + (effekte.fans || 0))) },
         divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads, [profile.team]: neuesSquad } } }
       };
     });
@@ -21030,6 +21707,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       let sternTransferNeu = null;
       let neuesEigengewaechsTracking = null;
       let abgangsEffektErgebnis = null;
+      let fanclubVerkaufNeu = cs.fanclub;
 
       if (richtung === "kaufen") {
         const quellDivId = sourceDivId || managerDivId;
@@ -21056,7 +21734,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         // erhalten, wenn sie im neuen Kader noch frei ist, sonst wird eine neue eindeutige vergeben.
         const eigeneAlteNummerNochFrei = !zielDiv.squads[profile.team].some(p => p.nr === spieler.nr);
         const neueRueckennummer = eigeneAlteNummerNochFrei ? spieler.nr : vergibtEindeutigeNummer(zielDiv.squads[profile.team], 1, 40);
-        const spielerMitNeuemVertrag = { ...spieler, nr: neueRueckennummer, vertragBisSaison: cs.season + (laufzeit || 3), gehalt: berechneSpielerlohn(spieler, managerDivId), beimVereinSeitSaison: cs.season, karriereTore: 0, karriereVorlagen: 0, karriereGelb: 0, karriereRot: 0, karriereSpiele: 0, motmAnzahl: 0, elfDesTagesAnzahl: 0, junior: false };
+        const spielerMitNeuemVertrag = { ...spieler, nr: neueRueckennummer, vertragBisSaison: cs.season + Math.min(laufzeit || 3, maxVertragsLaufzeit(spieler.alter)), gehalt: berechneSpielerlohn(spieler, managerDivId), beimVereinSeitSaison: cs.season, karriereTore: 0, karriereVorlagen: 0, karriereGelb: 0, karriereRot: 0, karriereSpiele: 0, motmAnzahl: 0, elfDesTagesAnzahl: 0, junior: false };
         // Star-Transfer-Erkennung: gilt als echter Star, wenn ENTWEDER der Neuzugang deutlich (mind.
         // 15 Punkte) über dem bisherigen Kaderschnitt liegt (gut bei kleineren Vereinen, wo das eine
         // echte Verwandlung bedeutet) ODER er selbst eine sehr hohe absolute Stärke erreicht (≥92) —
@@ -21092,6 +21770,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         // Derselbe Kabinen-Effekt wie bei einem Verkauf über ein eingehendes Angebot (siehe
         // berechneAbgangsEffekt) — bisher galt das nur für DIESEN anderen Verkaufsweg, jetzt einheitlich.
         const { formEffekt, zufriedenheitEffekt, grund } = berechneAbgangsEffekt(spieler, cs.kapitaenId);
+        fanclubVerkaufNeu = fanclubNachVerkauf(cs.fanclub, div.squads[profile.team], spieler, cs.datum, cs.season, cs.kapitaenId);
         const restSquad = div.squads[profile.team].filter(p => p.id !== spieler.id);
         div.squads[profile.team] = formEffekt !== 0
           ? restSquad.map(p => ({ ...p, form: Math.max(0, Math.min(100, p.form + formEffekt)) }))
@@ -21162,6 +21841,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         sternTransferBoost: sternTransferNeu || cs.sternTransferBoost,
         letzterSternTransfer: sternTransferNeu,
         letzterAbgangEffekt: abgangsEffektErgebnis,
+        fanclub: fanclubVerkaufNeu,
         ehemaligeEigengewaechse: neuesEigengewaechsTracking
           ? [...(cs.ehemaligeEigengewaechse || []), neuesEigengewaechsTracking]
           : (cs.ehemaligeEigengewaechse || []).filter(e => e.spielerId !== spieler.id),
@@ -22097,6 +22777,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               Tickets <span className="text-amber-400">{letzteEinnahmen.ticketeinnahmen.toLocaleString("de-CH")} €</span> ·
               Fanartikel <span className="text-amber-400">{letzteEinnahmen.fanartikeleinnahmen.toLocaleString("de-CH")} €</span> ·
               Stände &amp; Vereinsheim <span className="text-amber-400">{(letzteEinnahmen.imbisseinnahmen || 0).toLocaleString("de-CH")} €</span>
+              {letzteEinnahmen.fanclubBeitraege > 0 && (<> · Fanclub-Beiträge <span className="text-amber-400">{letzteEinnahmen.fanclubBeitraege.toLocaleString("de-CH")} €</span></>)}
               {letzteEinnahmen.preisgeld > 0 && (
                 <> · Preisgeld <span className="text-amber-400">{letzteEinnahmen.preisgeld.toLocaleString("de-CH")} €</span></>
               )}
@@ -22224,6 +22905,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           {tab === "vertraege" && <SpielervertraegeView squad={division.squads[profile.team]} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} beraterVerlaengerungsAngebote={beraterVerlaengerungsAngebote} onBeraterVerlaengerungAnnehmen={onBeraterVerlaengerungAnnehmen} onBeraterVerlaengerungAblehnen={onBeraterVerlaengerungAblehnen} />}
           {tab === "taktik" && (
             <TaktikView
+              rotationsprinzipAktiv={rotationsprinzipAktiv}
+              onRotationsprinzipUmschalten={onRotationsprinzipUmschalten}
               squad={division.squads[profile.team]}
               coach={coach}
               philosophie={philosophie}
@@ -22255,11 +22938,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               zufriedenheit={trainerZufriedenheit}
               onAntwort={onAntwortVorschlag}
               trainerZiele={trainerZiele}
-              ziele={ziele}
               philosophiePaket={philosophiePaket}
               philosophiePaketSeitSaison={philosophiePaketSeitSaison}
-              rotationsprinzipAktiv={rotationsprinzipAktiv}
-              onRotationsprinzipUmschalten={onRotationsprinzipUmschalten}
               trophaeen={trophaeen}
             />
           )}
@@ -22278,9 +22958,19 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onPersonalabteilungSetzen={onPersonalabteilungSetzen}
             />
           )}
-          {(tab === "jugend-investition" || tab === "jugend-akademie" || tab === "jugend-u7" || tab === "jugend-u9" || tab === "jugend-u11" || tab === "jugend-u13" || tab === "jugend-u15" || tab === "jugend-u17" || tab === "jugend-u19") && (
+          {tab === "jugend-teams" && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {["u7", "u9", "u11", "u13", "u15", "u17", "u19"].map(st => (
+                <button key={st} onClick={() => setJugendStufe(st)}
+                  className={`px-3 py-1.5 rounded border text-xs ${jugendStufe === st ? "border-amber-400 text-amber-300 bg-amber-400/10" : "border-emerald-800 text-emerald-500"}`}>
+                  {st.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
+          {(tab === "jugend-investition" || tab === "jugend-teams") && (
             <JugendAkademieView
-              abschnitt={tab === "jugend-investition" ? "investition" : tab === "jugend-akademie" ? "akademie" : tab === "jugend-u7" ? "u7" : tab === "jugend-u9" ? "u9" : tab === "jugend-u11" ? "u11" : tab === "jugend-u13" ? "u13" : tab === "jugend-u15" ? "u15" : tab === "jugend-u17" ? "u17" : "u19"}
+              abschnitt={tab === "jugend-investition" ? "uebersicht" : jugendStufe}
               akademie={akademie}
               budget={budget}
               managerDivId={managerDivId}
@@ -22291,6 +22981,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onNamensSponsorAblehnen={onAkademieNamensSponsorAblehnen}
               jugend={jugend}
               onJugendInvestition={onJugendInvestition}
+              stab={stab}
               onTalentWaehlen={onTalentWaehlen}
               onTalentAblehnen={onTalentAblehnen}
               saisonLabel={`Saison ${season}/${(season + 1) % 100}`}
@@ -22492,6 +23183,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           )}
           {tab === "material" && (
             <TrainingsmaterialView
+              trainingsplan={trainingsplan}
+              coach={coach}
               trainingsschwerpunkt={trainingsschwerpunkt}
               onSchwerpunktWaehlen={onSchwerpunktWaehlen}
               belastung={belastung}
@@ -22513,6 +23206,28 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onKaufen={onMaterialKaufen}
             />
           )}
+          {tab === "vorstand" && (() => {
+            const sfV = saisonFinanzen || leereSaisonFinanzen();
+            const zielKontext = {
+              platz: sortedTable(division.table).findIndex(t => t.name === profile.team) + 1 || 1,
+              anzahlTeams: division.teams.length,
+              aufsteigerPlaetze: Math.max(1, division.aufsteiger),
+              abstiegsPlaetze: Math.max(1, division.absteiger || 3),
+              reingewinn: berechneSaisonReingewinn(sfV),
+              squad: division.squads[profile.team],
+              pokalRundeErreicht: pokal ? pokal.runde : 1,
+              sponsorenAbschluesse: sponsorenAbschluesseDieseSaison,
+              bannerBelegt: (werbebanner?.vertraege || []).reduce((s, v) => s + (v.anzahl || 1), 0),
+              bannerMax: BANNER_MAX_PLAETZE[managerDivId] || BANNER_MAX_PLAETZE.OL,
+              eingespieltheitStreakMax: eingespieltheitStreakMaxDieseSaison,
+              markenwert,
+              markenwertStartSaison: markenwertStartSaison ?? markenwert,
+              fanshopMitZiel: Object.values(fanshop || {}).filter(item => (item.ziel || 0) > 0).length,
+              spielerberaterVerpflichtungen: spielerberaterVerpflichtungenDieseSaison
+            };
+            const zielStand = (ziele || []).map(z => ({ ...z, erfuellt: bewerteZiel(z.id, zielKontext) }));
+            return <VorstandView ziele={ziele} zielStand={zielStand} archiv={pressearchiv} saisonLabel={`Saison ${season}/${String(season + 1).slice(-2)}`} />;
+          })()}
           {tab === "fanclub" && (
             <FanclubView
               fanclub={fanclub}
@@ -22538,6 +23253,14 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onHandeln={onFananliegenHandeln}
               onBusBezuschussen={onAuswaertsfahrtBezuschussen}
               onJugendfahrtSponsern={onJugendfahrtenSponsern}
+              squad={division.squads[profile.team]}
+              season={season}
+              kapitaenId={kapitaenId}
+              spielNr={division.matchday}
+              gesamtSpieltage={division.fixtures.length}
+              onEntscheidung={onFanclubEntscheidung}
+              onFanhausAusbauen={onFanhausAusbauen}
+              onBesuch={onFanclubBesuch}
             />
           )}
           {tab === "europa" && (
