@@ -43,6 +43,28 @@ const THEME = {
        Ziffern halten Zahlenspalten sauber untereinander. */
     .font-mono { font-family: ${THEME.fontSans} !important; font-variant-numeric: tabular-nums; }
     ::selection { background: ${THEME.accent}33; }
+    /* --- Schritt 2: Rundungen, Karten, Tabellen, Knöpfe --- (mit "html" vorangestellt, damit diese Regeln
+       gegen die später eingefügten Tailwind-Klassen gewinnen, ohne !important zu brauchen) */
+    html .rounded, html .rounded-md { border-radius: 10px; }
+    html .rounded-lg { border-radius: 14px; }
+    html .rounded-xl { border-radius: 18px; }
+    /* Karten: bestehende Rahmen-Container bekommen eine feine Fläche und weichen Schatten. Bewusst per
+       background-image statt background-color, damit eigene Tönungen (z.B. gelbe Hinweis-Banner) bleiben. */
+    html .border.border-emerald-800.rounded:not([class*="text-[9px]"]):not([class*="text-[10px]"]),
+    html .border.border-emerald-700\\/50.rounded-lg {
+      background-image: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 12px 28px -20px rgba(0,0,0,.8);
+    }
+    /* Tabellen: mehr Zeilenhöhe, ruhige Kopfzeile, Zebrastreifen, Tipp-Rückmeldung */
+    html table.text-xs thead th { font-weight: 600; letter-spacing: .06em; color: ${THEME.textMuted}; padding-top: .8rem; padding-bottom: .65rem; }
+    html table.text-xs tbody td { padding-top: .7rem; padding-bottom: .7rem; }
+    html table.text-xs tbody tr:nth-child(even) { background-image: linear-gradient(rgba(255,255,255,.024), rgba(255,255,255,.024)); }
+    html table.text-xs tbody tr:active { background-image: linear-gradient(rgba(67,217,160,.10), rgba(67,217,160,.10)); }
+    /* Knöpfe: kurzes Eindrücken beim Tippen, Hauptknöpfe mit leichtem Leuchten */
+    html button { transition: transform .08s ease, background-color .15s ease, opacity .15s ease; }
+    html button:not(:disabled):active { transform: scale(.97); }
+    html button.bg-amber-500, html button.bg-amber-400 { font-weight: 700; box-shadow: 0 8px 20px -10px rgba(251,191,36,.6); }
+    html button:disabled { box-shadow: none; }
     ::-webkit-scrollbar { width: 10px; height: 10px; }
     ::-webkit-scrollbar-thumb { background: ${THEME.border}; border-radius: 8px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -686,6 +708,41 @@ const NATIONALITAETEN_POOL = [
   "Marokko", "USA", "Japan", "Südkorea", ...Array(2).fill("Argentinien"), "Uruguay", "Kolumbien",
   "Chile", "Paraguay", "Ecuador", "Peru", "Venezuela"
 ];
+
+// Farbe je Mannschaftsteil für die kompakte Positionsmarke (TW/IV/AV/ZM/OM/ST) — volle Bezeichnung
+// steht im Tooltip, in Tabellen spart das Kürzel Platz und verhindert Zeilenumbrüche.
+const POSITIONS_CHIP_STIL = {
+  TW: "text-amber-300 bg-amber-400/10 border-amber-400/30",
+  IV: "text-sky-300 bg-sky-400/10 border-sky-400/30",
+  AV: "text-sky-300 bg-sky-400/10 border-sky-400/30",
+  ZM: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30",
+  OM: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30",
+  ST: "text-red-300 bg-red-400/10 border-red-400/30"
+};
+function PositionsChip({ pos, name }) {
+  return (
+    <span
+      title={name}
+      className={`inline-block w-9 text-center rounded-md border px-1 py-0.5 text-[11px] font-bold tracking-wide ${POSITIONS_CHIP_STIL[pos] || "text-emerald-400 border-emerald-400/30"}`}
+    >{pos}</span>
+  );
+}
+
+// Stärke als Zahl mit kleinem Balken: Farbe folgt den bisherigen Schwellen (75+ gold, 55+ grün, sonst gedämpft).
+function StaerkeBalken({ wert, extra = null, breite = 44 }) {
+  const w = Math.round(wert);
+  const pct = Math.max(4, Math.min(100, ((w - 30) / 69) * 100));
+  const farbe = w >= 75 ? "#fbbf24" : w >= 55 ? "#43d9a0" : "#6b7a90";
+  return (
+    <span className="inline-flex items-center justify-end gap-2 whitespace-nowrap">
+      <span className="inline-block h-1.5 rounded-full overflow-hidden align-middle" style={{ width: breite, backgroundColor: "rgba(255,255,255,.09)" }}>
+        <span className="block h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: farbe }} />
+      </span>
+      <span className="font-semibold w-6 text-right" style={{ color: farbe }}>{w}</span>
+      {extra}
+    </span>
+  );
+}
 
 const POSITIONEN = [
   { code: "TW", name: "Torwart", n: 3 },
@@ -8592,11 +8649,82 @@ function LigaPyramide({ divisions, managerDivId }) {
   );
 }
 
+// Detailkarte zu einem Verein der Tabelle (iPad quer: rechts neben der Tabelle): Stärke, Durchschnittswerte,
+// stärkste Spieler und Torjäger des Vereins in dieser Saison.
+function VereinsDetailPanel({ teamName, division, row, platz, managerTeam, onClose }) {
+  const squad = division.squads[teamName] || [];
+  const staerke = squad.length ? Math.round(teamStrength(squad)) : 0;
+  const beste = [...squad].sort((a, b) => b.rating - a.rating).slice(0, 6);
+  const torjaeger = [...squad].filter(sp => (sp.tore || 0) > 0).sort((a, b) => (b.tore || 0) - (a.tore || 0)).slice(0, 3);
+  const schnitt = (feld) => squad.length ? squad.reduce((sum, sp) => sum + (sp[feld] ?? 0), 0) / squad.length : 0;
+  const ichBins = teamName === managerTeam;
+  return (
+    <div className="sticky top-[96px] border border-amber-400/40 rounded-xl p-4 space-y-3 max-h-[calc(100vh-116px)] overflow-y-auto" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <VereinsWappen teamName={teamName} size={44} />
+          <div>
+            <div className={`text-base font-bold ${ichBins ? "text-amber-300" : "text-white"}`}>{teamName}</div>
+            <div className="text-xs text-emerald-500">Platz {platz} · {row.pkt} Pkt · {row.tore}:{row.gegentore} Tore</div>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-emerald-500 hover:text-emerald-300 text-xl leading-none px-1" aria-label="Schliessen">×</button>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg border border-emerald-800 py-2" style={{ backgroundColor: "var(--fm-surface)" }}>
+          <div className="text-[10px] uppercase tracking-wider text-emerald-600">Stärke</div>
+          <div className="text-lg font-bold text-amber-300">{staerke}</div>
+        </div>
+        <div className="rounded-lg border border-emerald-800 py-2" style={{ backgroundColor: "var(--fm-surface)" }}>
+          <div className="text-[10px] uppercase tracking-wider text-emerald-600">Ø Alter</div>
+          <div className="text-lg font-bold text-emerald-200">{schnitt("alter").toFixed(1)}</div>
+        </div>
+        <div className="rounded-lg border border-emerald-800 py-2" style={{ backgroundColor: "var(--fm-surface)" }}>
+          <div className="text-[10px] uppercase tracking-wider text-emerald-600">Ø Form</div>
+          <div className="text-lg font-bold text-emerald-200">{Math.round(schnitt("form"))}</div>
+        </div>
+      </div>
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-500 mb-1.5">Stärkste Spieler</div>
+        <div className="space-y-1.5">
+          {beste.map(sp => (
+            <div key={sp.id} className="flex items-center justify-between gap-2 text-xs">
+              <span className="flex items-center gap-2 min-w-0">
+                <PositionsChip pos={sp.pos || String(sp.posName || "?").slice(0, 2).toUpperCase()} name={sp.posName} />
+                <span className="truncate text-emerald-100">{sp.name}</span>
+                <span className="text-emerald-600 shrink-0">{sp.alter}</span>
+              </span>
+              <StaerkeBalken wert={sp.rating} breite={34} />
+            </div>
+          ))}
+        </div>
+      </div>
+      {torjaeger.length > 0 && (
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-500 mb-1.5">Torjäger dieser Saison</div>
+          <div className="space-y-1">
+            {torjaeger.map(sp => (
+              <div key={sp.id} className="flex items-center justify-between text-xs text-emerald-100">
+                <span className="truncate">⚽ {sp.name}</span>
+                <span className="text-amber-400 font-semibold">{sp.tore}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TabelleView({ division, managerTeam, managerBonus = 0 }) {
+  const [gewaehlterVerein, setGewaehlterVerein] = useState(null);
   const tab = sortedTable(division.table);
   const torschuetzenkoenig = ermittleTorschuetzenkoenig(division);
+  const gewaehlteZeile = gewaehlterVerein ? tab.find(r => r.name === gewaehlterVerein) : null;
+  const gewaehlterPlatz = gewaehlteZeile ? tab.indexOf(gewaehlteZeile) + 1 : 0;
+  const spalteAus = gewaehlteZeile ? "lg:hidden" : "";
   return (
-    <div className="overflow-x-auto">
+    <div>
       {torschuetzenkoenig && (
         <div className="flex items-center gap-1.5 text-xs text-amber-300 mb-2 px-1">
           <Trophy size={13} className="text-amber-400" />
@@ -8604,18 +8732,20 @@ function TabelleView({ division, managerTeam, managerBonus = 0 }) {
           <span className="text-emerald-600">({torschuetzenkoenig.team}) · {torschuetzenkoenig.tore} Tore</span>
         </div>
       )}
+      <div className="flex gap-4 items-start">
+      <div className="flex-1 min-w-0 overflow-x-auto">
       <table className="w-full text-xs sm:text-sm">
         <thead>
           <tr className="text-emerald-500 border-b border-emerald-800 uppercase text-[10px] sm:text-xs">
-            <th className="text-left py-2 pl-2">#</th>
+            <th className="text-left py-2 pl-3">#</th>
             <th className="text-left py-2">Verein</th>
             <th className="py-2 px-1">Stärke</th>
             <th className="py-2 px-1">Sp</th>
             <th className="py-2 px-1">S</th>
             <th className="py-2 px-1">U</th>
             <th className="py-2 px-1">N</th>
-            <th className="py-2 px-1">Tore</th>
-            <th className="py-2 px-1">Diff</th>
+            <th className={`py-2 px-1 ${spalteAus}`}>Tore</th>
+            <th className={`py-2 px-1 ${spalteAus}`}>Diff</th>
             <th className="py-2 pr-2">Pkt</th>
           </tr>
         </thead>
@@ -8633,9 +8763,8 @@ function TabelleView({ division, managerTeam, managerBonus = 0 }) {
             const istManager = row.name === managerTeam;
             const staerke = Math.round(teamStrength(division.squads[row.name]));
             return (
-              <tr key={row.name} className={`border-b border-emerald-900/60 ${istManager ? "bg-amber-400/10 text-amber-300 font-semibold" : "text-emerald-100"}`}>
-                <td className="py-1.5 pl-2 relative">
-                  <span className={`inline-block w-1 h-4 mr-1 align-middle rounded-sm ${auf ? "bg-emerald-400" : ab ? "bg-red-500" : relegation ? "bg-amber-400" : "bg-transparent"}`}></span>
+              <tr key={row.name} onClick={() => setGewaehlterVerein(gewaehlterVerein === row.name ? null : row.name)} className={`border-b border-emerald-900/60 cursor-pointer ${istManager ? "bg-amber-400/10 text-amber-300 font-semibold" : "text-emerald-100"} ${gewaehlterVerein === row.name ? "ring-1 ring-inset ring-amber-400/50" : ""}`}>
+                <td className="py-1.5 pl-3 relative" style={{ boxShadow: `inset 4px 0 0 0 ${auf ? "#43d9a0" : ab ? "#ef4444" : relegation ? "#fbbf24" : "transparent"}` }}>
                   {platz}
                 </td>
                 <td className="py-1.5">
@@ -8644,24 +8773,33 @@ function TabelleView({ division, managerTeam, managerBonus = 0 }) {
                     {row.name}
                   </span>
                 </td>
-                <td className="text-center py-1.5 text-emerald-400">
-                  {staerke}
-                  {istManager && Math.abs(managerBonus) >= 0.5 && (
-                    <span className={managerBonus > 0 ? "text-amber-400" : "text-red-400"}> ({managerBonus > 0 ? "+" : ""}{managerBonus.toFixed(1)})</span>
-                  )}
+                <td className="text-center py-1.5 px-2 whitespace-nowrap">
+                  <StaerkeBalken
+                    wert={staerke}
+                    extra={istManager && Math.abs(managerBonus) >= 0.5 ? (
+                      <span className={`text-[11px] ${managerBonus > 0 ? "text-amber-400" : "text-red-400"}`}>({managerBonus > 0 ? "+" : ""}{managerBonus.toFixed(1)})</span>
+                    ) : null}
+                  />
                 </td>
                 <td className="text-center py-1.5">{row.sp}</td>
                 <td className="text-center py-1.5">{row.s}</td>
                 <td className="text-center py-1.5">{row.u}</td>
                 <td className="text-center py-1.5">{row.n}</td>
-                <td className="text-center py-1.5">{row.tore}:{row.gegentore}</td>
-                <td className="text-center py-1.5">{row.tore - row.gegentore > 0 ? "+" : ""}{row.tore - row.gegentore}</td>
+                <td className={`text-center py-1.5 ${spalteAus}`}>{row.tore}:{row.gegentore}</td>
+                <td className={`text-center py-1.5 ${spalteAus}`}>{row.tore - row.gegentore > 0 ? "+" : ""}{row.tore - row.gegentore}</td>
                 <td className="text-center py-1.5 pr-2 font-semibold">{row.pkt}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      </div>
+      {gewaehlteZeile && (
+        <div className="hidden lg:block w-[320px] xl:w-[340px] shrink-0">
+          <VereinsDetailPanel teamName={gewaehlteZeile.name} division={division} row={gewaehlteZeile} platz={gewaehlterPlatz} managerTeam={managerTeam} onClose={() => setGewaehlterVerein(null)} />
+        </div>
+      )}
+      </div>
       <div className="flex gap-4 mt-3 text-[10px] text-emerald-600 px-2">
         {division.aufsteiger > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 bg-emerald-400 inline-block rounded-sm"></span>Aufstieg</span>}
         {(division.id === "BL" || division.id === "L2" || division.id === "L3") && <span className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-400 inline-block rounded-sm"></span>Relegation</span>}
@@ -8774,15 +8912,15 @@ function SpielerAttributBlock({ spieler }) {
   );
 }
 
-function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamName, portrait, onClose }) {
+function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamName, portrait, onClose, eingebettet = false, nurSchmal = false }) {
   const jahreImVerein = season - (p.beimVereinSeitSaison ?? season);
   const marktwert = berechneMarktwert(p, managerDivId);
   // Titel der gesamten Karriere — direkt im Moment des Gewinns auf den Spieler gestempelt (siehe
   // stempleTitelAufSquad), übersteht daher auch Vereinswechsel und ist unabhängig vom aktuellen Verein.
   const alleTitel = p.titelHistorie || [];
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(6,10,18,0.82)" }} onClick={onClose}>
-      <div className="w-full max-w-md border border-amber-400/50 rounded-lg p-5 space-y-4 max-h-[85vh] overflow-y-auto" style={{ backgroundColor: "var(--fm-surface-raised)" }} onClick={e => e.stopPropagation()}>
+    <div className={eingebettet ? "" : `fixed inset-0 z-50 flex items-center justify-center p-4${nurSchmal ? " lg:hidden" : ""}`} style={eingebettet ? undefined : { backgroundColor: "rgba(6,10,18,0.82)" }} onClick={eingebettet ? undefined : onClose}>
+      <div className={`w-full border border-amber-400/50 rounded-lg p-5 space-y-4 overflow-y-auto ${eingebettet ? "sticky top-[96px] max-h-[calc(100vh-116px)]" : "max-w-md max-h-[85vh]"}`} style={{ backgroundColor: "var(--fm-surface-raised)" }} onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <img src={portrait} alt="" className="w-16 h-16 rounded-full border-2 border-amber-400/50 object-cover shrink-0" />
@@ -9073,20 +9211,22 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
       </div>
 
       <p className="text-[11px] text-emerald-600 mb-1.5">💡 Auf einen Spielernamen tippen öffnet sein Spielerdatenblatt mit allen Details und Statistiken.</p>
+      <div className="flex gap-4 items-start">
+      <div className="flex-1 min-w-0 overflow-x-auto">
       <table className="w-full text-xs sm:text-sm">
         <thead>
           <tr className="text-emerald-500 border-b border-emerald-800 uppercase text-[10px] sm:text-xs">
             <th className="text-left py-2 pl-2">Nr</th>
             <th className="text-left py-2">Name</th>
-            <th className="text-left py-2">Position</th>
-            <th className="text-left py-2">Alter</th>
+            <th className="text-left py-2" title="Position: TW Torwart · IV Innenverteidiger · AV Außenverteidiger · ZM Zentrales Mittelfeld · OM Offensives Mittelfeld · ST Stürmer">Pos</th>
+            <th className="text-left py-2 pr-2">Alter</th>
             <th className="text-center py-2" title="Form">Form</th>
-            <th className="text-center py-2" title="Spiele">Sp</th>
-            <th className="text-center py-2" title="Tore">⚽</th>
-            <th className="text-center py-2" title="Vorlagen">🅰️</th>
-            <th className="text-center py-2" title="Gelbe Karten">🟨</th>
-            <th className="text-center py-2" title="Rote Karten">🟥</th>
-            <th className="text-right py-2" title="Jahresgehalt">Lohn</th>
+            <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Spiele">Sp</th>
+            <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Tore">⚽</th>
+            <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Vorlagen">🅰️</th>
+            <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Gelbe Karten">🟨</th>
+            <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Rote Karten">🟥</th>
+            <th className={`text-right py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Jahresgehalt">Lohn</th>
             <th className="text-center py-2" title="Vertrag bis Saison">Vertrag</th>
             <th className="text-right py-2 pr-2">Stärke</th>
           </tr>
@@ -9096,11 +9236,11 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
             const jahreVerbleibend = (p.vertragBisSaison ?? season + 9) - season;
             const vertragFarbe = jahreVerbleibend <= 1 ? "text-red-400" : jahreVerbleibend <= 2 ? "text-amber-400" : "text-emerald-500";
             return (
-            <tr key={p.id} onClick={() => setAusgewaehlterSpieler(p)} className={`border-b border-emerald-900/60 cursor-pointer hover:bg-emerald-900/20 ${p.verletzung ? "text-red-400/70" : "text-emerald-100"}`}>
+            <tr key={p.id} onClick={() => setAusgewaehlterSpieler(p)} className={`border-b border-emerald-900/60 cursor-pointer hover:bg-emerald-900/20 ${ausgewaehlterSpieler?.id === p.id ? "bg-amber-400/10" : ""} ${p.verletzung ? "text-red-400/70" : "text-emerald-100"}`}>
               <td className="py-1.5 pl-2 text-emerald-600">{p.nr}</td>
               <td className="py-1.5">
-                <span title={p.nationalitaet || "Deutschland"}>{NATIONALITAETEN[p.nationalitaet] || "🇩🇪"}</span>{" "}
-                {p.name}
+                <span className="whitespace-nowrap"><span title={p.nationalitaet || "Deutschland"}>{NATIONALITAETEN[p.nationalitaet] || "🇩🇪"}</span>{" "}
+                {p.name}</span>
                 {p.id === kapitaenId && <span className="ml-1.5 text-[9px] uppercase tracking-wide text-amber-400 border border-amber-400/40 rounded px-1 py-0.5" title="Kapitän">© Kapitän</span>}
                 {p.id === elfmeterSchuetzeId && <span className="ml-1.5 text-[9px] uppercase tracking-wide text-sky-400 border border-sky-400/40 rounded px-1 py-0.5" title="Elfmeterschütze">⚽ Elfmeter</span>}
                 {p.id === freistossSchuetzeId && p.id !== elfmeterSchuetzeId && <span className="ml-1.5 text-[9px] uppercase tracking-wide text-sky-400 border border-sky-400/40 rounded px-1 py-0.5" title="Freistossschütze">🎯 Freistoss</span>}
@@ -9154,8 +9294,8 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
                   </span>
                 )}
               </td>
-              <td className="py-1.5 text-emerald-400">{p.posName}</td>
-              <td className="py-1.5">{p.alter}</td>
+              <td className="py-1.5 whitespace-nowrap"><PositionsChip pos={p.pos || String(p.posName || "?").slice(0, 2).toUpperCase()} name={p.posName} /></td>
+              <td className="py-1.5 pr-2 whitespace-nowrap">{p.alter}</td>
               <td className="py-1.5 text-center">
                 <span
                   className="inline-block w-7 rounded px-1.5 py-0.5 text-[10px] font-bold text-center"
@@ -9165,24 +9305,38 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
                   {p.form ?? 60}
                 </span>
               </td>
-              <td className="py-1.5 text-center text-emerald-400 font-semibold">{p.spiele || 0}</td>
-              <td className="py-1.5 text-center text-emerald-300">{p.tore || 0}</td>
-              <td className="py-1.5 text-center text-emerald-300">{p.vorlagen || 0}</td>
-              <td className="py-1.5 text-center text-emerald-300">{p.gelb || 0}</td>
-              <td className="py-1.5 text-center text-red-400">{p.rot || 0}</td>
-              <td className="py-1.5 text-right text-emerald-500">{(p.gehalt ?? berechneSpielerlohn(p, managerDivId)).toLocaleString("de-CH")} €</td>
-              <td className={`py-1.5 text-center font-semibold ${vertragFarbe}`} title={`Vertrag bis Saison ${p.vertragBisSaison ?? "?"}`}>
+              <td className={`py-1.5 text-center text-emerald-400 font-semibold ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{p.spiele || 0}</td>
+              <td className={`py-1.5 text-center text-emerald-300 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{p.tore || 0}</td>
+              <td className={`py-1.5 text-center text-emerald-300 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{p.vorlagen || 0}</td>
+              <td className={`py-1.5 text-center text-emerald-300 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{p.gelb || 0}</td>
+              <td className={`py-1.5 text-center text-red-400 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{p.rot || 0}</td>
+              <td className={`py-1.5 pl-2 text-right text-emerald-500 whitespace-nowrap ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{(p.gehalt ?? berechneSpielerlohn(p, managerDivId)).toLocaleString("de-CH")} €</td>
+              <td className={`py-1.5 px-2 text-center font-semibold whitespace-nowrap ${vertragFarbe}`} title={`Vertrag bis Saison ${p.vertragBisSaison ?? "?"}`}>
                 {jahreVerbleibend <= 0 ? "abgelaufen" : `${jahreVerbleibend}J`}
               </td>
               <td className="py-1.5 pr-2 text-right font-semibold">
-                <span className={p.rating >= 75 ? "text-amber-400" : p.rating >= 55 ? "text-emerald-300" : "text-emerald-600"}>
-                  {p.rating}
-                </span>
+                <StaerkeBalken wert={p.rating} />
               </td>
             </tr>
           );})}
         </tbody>
       </table>
+      </div>
+      {ausgewaehlterSpieler && (
+        <div className="hidden lg:block w-[340px] xl:w-[380px] shrink-0">
+          <SpielerDetailModal
+            eingebettet
+            spieler={ausgewaehlterSpieler}
+            managerDivId={managerDivId}
+            season={season}
+            trophaeen={trophaeen}
+            teamName={teamName}
+            portrait={squadPortraits[ausgewaehlterSpieler.id]}
+            onClose={() => setAusgewaehlterSpieler(null)}
+          />
+        </div>
+      )}
+      </div>
       {meineAusgeliehenenSpieler && meineAusgeliehenenSpieler.length > 0 && (
         <div className="mt-4">
           <div className="text-[11px] uppercase tracking-wider text-orange-400/80 mb-1.5">Verliehen — aktueller Stand</div>
@@ -9209,6 +9363,7 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
       )}
       {ausgewaehlterSpieler && (
         <SpielerDetailModal
+          nurSchmal
           spieler={ausgewaehlterSpieler}
           managerDivId={managerDivId}
           season={season}
@@ -15079,7 +15234,7 @@ function SpieltagErgebnisseModal({ info, managerTeam, onClose }) {
   const hatElfDesTages = info.elfDesTages?.spieler?.length > 0;
   return (
     <div className="min-h-screen text-emerald-50 font-mono p-4" style={{background: "var(--fm-bg)"}}>
-      <div className={`${hatElfDesTages ? "max-w-5xl" : "max-w-md"} mx-auto border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden`} style={{ backgroundColor: "var(--fm-surface-raised)" }}>
+      <div className="max-w-5xl mx-auto border border-emerald-700/50 rounded-xl shadow-2xl overflow-hidden" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
         <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-5 py-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] text-emerald-500 uppercase tracking-widest">{info.ligaName}</div>
@@ -15094,38 +15249,44 @@ function SpieltagErgebnisseModal({ info, managerTeam, onClose }) {
             zweispaltigen Anordnung wäre sie nur halb so breit gewesen wie der Popup-Container —
             das erzwang praktisch immer horizontales Scrollen. Auf voller Breite passt sie meist
             komplett ohne Scrollen hinein. */}
-        <div className="p-4 space-y-1.5">
+        <div className="p-4 lg:grid lg:grid-cols-5 lg:gap-5 items-start">
+        <div className="lg:col-span-3 space-y-1.5">
           {info.ergebnisse.map((erg, i) => {
             const eigenesSpiel = erg.heim === managerTeam || erg.gast === managerTeam;
             return (
               <div
                 key={i}
-                className={`flex items-center justify-between text-xs sm:text-sm rounded px-3 py-2 border ${eigenesSpiel ? "border-amber-400/50" : "border-emerald-900"}`}
-                style={{ backgroundColor: eigenesSpiel ? "rgba(251,191,36,0.06)" : "#0b1f14" }}
+                className={`flex items-center text-sm rounded-lg px-3 py-2.5 border ${eigenesSpiel ? "border-amber-400/50" : "border-emerald-900"}`}
+                style={{ backgroundColor: eigenesSpiel ? "rgba(251,191,36,0.07)" : "var(--fm-surface)" }}
               >
-                <span className={`flex-1 text-right pr-2 ${erg.heim === managerTeam ? "text-amber-300 font-semibold" : "text-emerald-100"}`}>{erg.heim}</span>
-                <span className="w-14 text-center font-mono text-emerald-400 shrink-0">{erg.tHeim}:{erg.tGast}</span>
-                <span className={`flex-1 pl-2 ${erg.gast === managerTeam ? "text-amber-300 font-semibold" : "text-emerald-100"}`}>{erg.gast}</span>
+                <span className={`flex-1 flex items-center justify-end gap-2 text-right ${erg.heim === managerTeam ? "text-amber-300 font-semibold" : "text-emerald-100"}`}>
+                  <span className="truncate">{erg.heim}</span><VereinsWappen teamName={erg.heim} size={22} />
+                </span>
+                <span className={`w-16 mx-2 text-center text-base font-bold rounded-md py-0.5 shrink-0 ${eigenesSpiel ? "text-amber-300 bg-amber-400/10" : "text-white bg-white/5"}`}>{erg.tHeim}:{erg.tGast}</span>
+                <span className={`flex-1 flex items-center gap-2 ${erg.gast === managerTeam ? "text-amber-300 font-semibold" : "text-emerald-100"}`}>
+                  <VereinsWappen teamName={erg.gast} size={22} /><span className="truncate">{erg.gast}</span>
+                </span>
               </div>
             );
           })}
         </div>
 
         {info.torschuetzenliste?.length > 0 && (
-          <div className="px-4 pb-4 flex justify-center">
-            <div className="border border-emerald-800 rounded p-3 w-full lg:max-w-sm" style={{ backgroundColor: "var(--fm-surface)" }}>
+          <div className="lg:col-span-2 mt-4 lg:mt-0">
+            <div className="border border-emerald-800 rounded-xl p-3 w-full" style={{ backgroundColor: "var(--fm-surface)" }}>
               <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2 flex items-center gap-1.5">⚽ Torschützenliste (aktueller Stand)</div>
-              <div className="space-y-1">
-                {info.torschuetzenliste.map((s, i) => (
-                  <div key={s.id} className={`flex items-center justify-between text-xs ${s.team === managerTeam ? "text-amber-300 font-semibold" : "text-emerald-100"}`}>
-                    <span><span className="text-emerald-700 mr-1.5">{i + 1}.</span>{s.name} <span className="text-emerald-600">· {s.team}</span></span>
-                    <span className="text-amber-400 font-semibold">{s.tore}</span>
+              <div className="space-y-1.5">
+                {info.torschuetzenliste.map((sc, i) => (
+                  <div key={sc.id} className={`flex items-center justify-between text-xs ${sc.team === managerTeam ? "text-amber-300 font-semibold" : "text-emerald-100"}`}>
+                    <span className="flex items-center gap-2 min-w-0"><span className="text-emerald-700 w-4 text-right shrink-0">{i + 1}</span><VereinsWappen teamName={sc.team} size={16} /><span className="truncate">{sc.name}</span></span>
+                    <span className="text-amber-400 font-semibold ml-2">{sc.tore}</span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
         )}
+        </div>
 
         {hatElfDesTages && (
           <div className="px-4 pb-4">
@@ -15193,7 +15354,7 @@ function TalentSichtungBanner({ sichtung, budget, onWaehlen, onAblehnen }) {
 function SpielberichtKarten({ tore, vorlagen, gelb, rot }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-      <div>
+      <div className="rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,.03)" }}>
         <span className="text-emerald-600">⚽ Tore: </span>
         {tore && tore.length ? (
           <span className="text-emerald-200">
@@ -15203,7 +15364,7 @@ function SpielberichtKarten({ tore, vorlagen, gelb, rot }) {
           </span>
         ) : <span className="text-emerald-700">keine</span>}
       </div>
-      <div>
+      <div className="rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,.03)" }}>
         <span className="text-emerald-600">🅰️ Vorlagen: </span>
         {vorlagen && vorlagen.length ? (
           <span className="text-emerald-200">
@@ -15213,7 +15374,7 @@ function SpielberichtKarten({ tore, vorlagen, gelb, rot }) {
           </span>
         ) : <span className="text-emerald-700">keine</span>}
       </div>
-      <div>
+      <div className="rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,.03)" }}>
         <span className="text-emerald-600">🟨 Gelbe Karten: </span>
         {gelb && gelb.length ? (
           <span className="text-emerald-200">{gruppiereSpielerListe(gelb).map((g, i) => (
@@ -15221,7 +15382,7 @@ function SpielberichtKarten({ tore, vorlagen, gelb, rot }) {
           ))}</span>
         ) : <span className="text-emerald-700">keine</span>}
       </div>
-      <div>
+      <div className="rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,.03)" }}>
         <span className="text-emerald-600">🟥 Rote Karte: </span>
         {rot ? (
           <span className="text-red-400">{rot.name}</span>
@@ -21116,7 +21277,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   return (
     <div className="min-h-screen text-emerald-50 font-mono pb-10" style={{background: "var(--fm-bg)"}}>
       <header className="border-b border-emerald-800 px-4 py-3 sticky top-0 z-10" style={{backgroundColor: "var(--fm-surface-raised)"}}>
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
+        <div className="max-w-[1480px] mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src={trainerPortraitFuer(`${profile.vorname} ${profile.nachname}`)} alt="" className="w-11 h-11 rounded-full border-2 border-amber-400/50 object-cover shrink-0" />
             <div>
@@ -21175,10 +21336,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 pt-4">
+      <main className="max-w-[1480px] mx-auto px-4 pt-4">
         <div className="flex gap-4 items-start">
           {/* FRAME 1 — feste linke Navigation, unabhängig vom Inhalt der anderen beiden Bereiche scrollbar */}
-          <nav className="hidden md:flex flex-col gap-0.5 shrink-0 w-52 border border-emerald-800 rounded p-2 sticky top-[88px] max-h-[calc(100vh-104px)] overflow-y-auto" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
+          <nav className="hidden md:flex flex-col gap-1 shrink-0 w-64 border border-emerald-800 rounded-xl p-2.5 sticky top-[88px] max-h-[calc(100vh-104px)] overflow-y-auto" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
             {TAB_GRUPPEN.map(g => {
               const aktiv = TAB_ZU_GRUPPE[tab] === g.id;
               const punkt = gruppeBenachrichtigung(g);
@@ -21188,9 +21349,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                 <div key={g.id}>
                   <button
                     onClick={() => onTabWechseln(aktiv ? tab : ersterTab.id)}
-                    className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs sm:text-sm rounded text-left transition-colors ${aktiv ? "bg-emerald-900/60 text-amber-300 font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
+                    className={`w-full flex items-center gap-2.5 px-3 py-3 text-sm sm:text-[15px] rounded-lg text-left transition-colors ${aktiv ? "bg-emerald-900/60 text-amber-300 font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
                   >
-                    <g.icon size={14} className="shrink-0" /> <span className="flex-1">{g.label}</span>
+                    <g.icon size={18} className="shrink-0" /> <span className="flex-1">{g.label}</span>
                     {punkt && <span className={`w-1.5 h-1.5 rounded-full ${BENACHRICHTIGUNG_FARBE[punkt]} shrink-0`}></span>}
                   </button>
                   {aktiv && sichtbareTabs.length > 1 && (
@@ -21201,9 +21362,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                           <button
                             key={t.id}
                             onClick={() => onTabWechseln(t.id)}
-                            className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs rounded text-left transition-colors ${tab === t.id ? "bg-amber-400 text-[#0b1f14] font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
+                            className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm rounded-lg text-left transition-colors ${tab === t.id ? "bg-amber-400/15 text-amber-300 font-semibold ring-1 ring-amber-400/40" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
                           >
-                            <t.icon size={12} className="shrink-0" /> <span className="flex-1">{t.label}</span>
+                            <t.icon size={15} className="shrink-0" /> <span className="flex-1">{t.label}</span>
                             {tPunkt && <span className={`w-1.5 h-1.5 rounded-full ${BENACHRICHTIGUNG_FARBE[tPunkt]} shrink-0`}></span>}
                           </button>
                         );
@@ -21215,9 +21376,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             })}
             <button
               onClick={() => onTabWechseln("regeln")}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs sm:text-sm rounded text-left transition-colors mt-1 border-t border-emerald-800 pt-2 ${tab === "regeln" ? "bg-amber-400 text-[#0b1f14] font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
+              className={`flex items-center gap-2.5 px-3 py-3 text-sm sm:text-[15px] rounded-lg text-left transition-colors mt-1 border-t border-emerald-800 pt-3 ${tab === "regeln" ? "bg-amber-400/15 text-amber-300 font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
             >
-              <BookOpen size={14} className="shrink-0" /> <span className="flex-1">Spielregeln</span>
+              <BookOpen size={18} className="shrink-0" /> <span className="flex-1">Spielregeln</span>
             </button>
           </nav>
 
@@ -21450,10 +21611,36 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                 const { typ, bericht, label, scoreZeile } = eintrag;
                 return (
                   <div key={i} className="border border-emerald-700/50 rounded p-3 space-y-2" style={{ backgroundColor: i === 0 ? "var(--fm-surface-raised)" : "var(--fm-surface)" }}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs uppercase tracking-wider text-emerald-400/80">{label}</span>
-                      <span className="text-sm font-semibold text-white">{scoreZeile}</span>
-                    </div>
+                    {(() => {
+                      const tafel = (typ === "liga" || typ === "pokal") && bericht.heim && bericht.gast
+                        ? { heim: bericht.heim, gast: bericht.gast, th: bericht.tHeim, tg: bericht.tGast }
+                        : typ === "testspiel" && bericht.gegner
+                        ? { heim: profile.team, gast: bericht.gegner, th: bericht.tHeim, tg: bericht.tGast }
+                        : null;
+                      if (!tafel) {
+                        return (
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs uppercase tracking-wider text-emerald-400/80">{label}</span>
+                            <span className="text-sm font-semibold text-white">{scoreZeile}</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div>
+                          <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-2">{label}</div>
+                          <div className="flex items-center justify-center gap-3 sm:gap-5">
+                            <span className={`flex-1 flex items-center justify-end gap-2.5 text-right text-sm sm:text-base ${tafel.heim === profile.team ? "text-amber-300 font-bold" : "text-emerald-100"}`}>
+                              <span className="truncate">{tafel.heim}</span><VereinsWappen teamName={tafel.heim} size={34} />
+                            </span>
+                            <span className="text-2xl sm:text-3xl font-extrabold text-white px-4 py-1 rounded-xl bg-white/5 shrink-0 tracking-wide">{tafel.th}:{tafel.tg}</span>
+                            <span className={`flex-1 flex items-center gap-2.5 text-sm sm:text-base ${tafel.gast === profile.team ? "text-amber-300 font-bold" : "text-emerald-100"}`}>
+                              <VereinsWappen teamName={tafel.gast} size={34} /><span className="truncate">{tafel.gast}</span>
+                            </span>
+                          </div>
+                          {typ === "pokal" && bericht.elfmeter && <div className="text-center text-[11px] text-amber-300 mt-1">n. E. — {bericht.elfmeter} weiter</div>}
+                        </div>
+                      );
+                    })()}
                     {typ === "testspiel" && bericht?.schwachstelle && (
                       <div className="text-xs text-amber-300">Trainer-Einschätzung: Nachholbedarf im Bereich {bericht.schwachstelle.name} — {bericht.schwachstelle.grund}. Vielleicht ein Fall für den Transfermarkt.</div>
                     )}
