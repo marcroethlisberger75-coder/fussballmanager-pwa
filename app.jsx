@@ -12906,6 +12906,21 @@ const VEREINSINFOS_MASTHEAD_BASE64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAw
 // Zentrale Prüfung, ob es aktuell etwas Neues für den Vereinsinfos-Tab gibt — wird sowohl für den
 // Leer-Zustand innerhalb des Tabs als auch für den roten Punkt in der Navigation verwendet, damit
 // beide garantiert exakt dieselbe Definition von "gibt es News" teilen.
+// Hinweise, die sich aus dem aktuellen Zustand ergeben (Transferfenster, Trainingslager, Gehaltsforderungen).
+// Jeder hat einen Schlüssel: Der rote Punkt erscheint nur einmal pro Hinweis, bis er gelesen ist.
+function aktuelleVereinsHinweise(cs) {
+  const liste = [];
+  const fenster = cs.datum ? transferfensterStatus(cs.datum) : { offen: false };
+  if (fenster.offen) {
+    liste.push({ key: `fenster-${cs.season}-${fenster.name}`, art: "fenster", text: `Das ${fenster.name} ist geöffnet (bis ${fenster.bisText}). Jetzt können Spieler gekauft, verkauft und verliehen werden.` });
+    const camp = cs.trainingslager || {};
+    const frei = fenster.name === "Sommer-Transferfenster" ? !camp.vorrunde : !camp.rueckrunde;
+    if (frei) liste.push({ key: `camp-${cs.season}-${fenster.name}`, art: "camp", text: `Ein Trainingslager ist jetzt buchbar (einmal pro Saisonhälfte, gibt einen temporären Stärkebonus). Das Fenster schliesst am ${fenster.bisText}` });
+  }
+  (cs.gehaltsforderungen || []).forEach(f => liste.push({ key: `forderung-${f.id}`, art: "forderung", text: `${f.name} fordert ${f.gehalt.toLocaleString("de-CH")} € Jahresgehalt (${f.grund}). Noch ${f.restSpieltage} Liga-Spieltage Zeit, zu entscheiden: Tab Spielerverträge.` }));
+  return liste;
+}
+
 function hatVereinsinfosNeuigkeiten(cs) {
   return !!(
     cs.letztesTrainergehalt || cs.letztesManagerlohn || cs.letzteSpielerloehne ||
@@ -12918,7 +12933,8 @@ function hatVereinsinfosNeuigkeiten(cs) {
 }
 
 function VereinsinfosView({ careerState }) {
-  const hatVereinsinfos = hatVereinsinfosNeuigkeiten(careerState);
+  const hinweise = aktuelleVereinsHinweise(careerState);
+  const hatVereinsinfos = hatVereinsinfosNeuigkeiten(careerState) || hinweise.length > 0;
 
   return (
     <div>
@@ -12928,6 +12944,13 @@ function VereinsinfosView({ careerState }) {
         className="w-full rounded-t-lg block"
       />
       <div className="border border-t-0 rounded-b-lg p-5 space-y-3" style={{ backgroundColor: "#fefefe", fontFamily: "Georgia, 'Times New Roman', serif" }}>
+        {hinweise.map(h => (
+          <div key={h.key} className="flex items-start gap-2 border border-sky-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#eaf4fb" }}>
+            {h.art === "camp" ? <Tent size={14} className="text-sky-700 shrink-0 mt-0.5" /> : h.art === "forderung" ? <Users size={14} className="text-sky-700 shrink-0 mt-0.5" /> : <Repeat size={14} className="text-sky-700 shrink-0 mt-0.5" />}
+            <span className="text-sky-900">{h.text}</span>
+          </div>
+        ))}
+
         {careerState.letztesTrainergehalt && (
           <div className="flex items-center gap-2 border border-emerald-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#fbeeee" }}>
             <UserCog size={14} className="text-emerald-800 shrink-0" />
@@ -16016,6 +16039,152 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
   );
 }
 
+// Easter Egg (Anmeldung mit "1"/"1"): der Verein startet komplett ausgebaut. Stadion mit allen Anlagen,
+// alle Marketing-Kampagnen, bestes Trainingsmaterial, voller Mitarbeiterstab (inkl. Jugendstab und
+// Personalabteilungen), gefüllte Lager in Fanshop, Imbiss und Vereinsheim, alle Sponsoren-Plätze, die
+// Akademie auf Maximalstufe und alle Jugendteams in der obersten Liga mit Top-Kadern.
+function jugendligaMitManagerInTopLiga(liga, defs, managerTeam, rng) {
+  const topId = defs[0].id;
+  const vonId = Object.keys(liga).find(id => liga[id].teams.includes(managerTeam));
+  if (!vonId || vonId === topId) return { liga, divId: vonId || topId };
+  const ersatz = liga[topId].teams[liga[topId].teams.length - 1];
+  const bauen = (id, teams) => {
+    const def = defs.find(d => d.id === id);
+    const table = {}; teams.forEach(t => { table[t] = { sp: 0, s: 0, u: 0, n: 0, tore: 0, gegentore: 0, pkt: 0 }; });
+    const staerken = {}; teams.forEach(t => { staerken[t] = t === managerTeam ? null : Math.round(def.baseRating + (rng() * 16 - 8)); });
+    return { teams, table, staerken, fixtures: generateFixtures(teams), matchday: 0 };
+  };
+  return {
+    liga: {
+      ...liga,
+      [topId]: bauen(topId, liga[topId].teams.map(t => t === ersatz ? managerTeam : t)),
+      [vonId]: bauen(vonId, liga[vonId].teams.map(t => t === managerTeam ? ersatz : t))
+    },
+    divId: topId
+  };
+}
+
+function vollausbauEasterEgg(cs, managerDivId, team, season, startDatum) {
+  const rng = rngFor(`easteregg|${team}`);
+  const markenwert = markenwertDeckel(managerDivId);
+  let budgetPlus = 0, sponsorErtrag = 0;
+
+  // Stadion: Eigentum, maximale Kapazität (inkl. Logen), alle Anlagen im Bestzustand, Namensrechte
+  const div = cs.divisions[managerDivId];
+  const st = div.stadien[team];
+  const stehKap = Math.round(STADION_MAX_KAPAZITAET * 0.3);
+  const logenKap = Math.round(STADION_MAX_KAPAZITAET * 0.12);
+  const sitzKap = STADION_MAX_KAPAZITAET - stehKap - logenKap;
+  const infra = {}, infraZustand = {};
+  Object.keys(STADION_INFRASTRUKTUR).forEach(k => { infra[k] = true; infraZustand[k] = 100; });
+  const namensAngebot = generiereNamensSponsorAngebot(managerDivId, [], 1);
+  const stadion = {
+    ...st,
+    kapazitaet: STADION_MAX_KAPAZITAET,
+    stehplaetze: { ...st.stehplaetze, kapazitaet: stehKap },
+    sitzplaetze: { ...st.sitzplaetze, kapazitaet: sitzKap },
+    logen: { ...st.logen, kapazitaet: logenKap },
+    eigentum: true,
+    ...infra,
+    infrastrukturZustand: { ...(st.infrastrukturZustand || {}), ...infraZustand },
+    platzzustand: 100,
+    personalstufe: "grosszuegig",
+    namensSponsor: namensAngebot ? { firma: namensAngebot.firma, betragProJahr: namensAngebot.betragProJahr, vertragBisSaison: season + 7 } : st.namensSponsor
+  };
+
+  // Marketing: alle Kampagnen gebucht, Markenwert am Deckel der Liga
+  const marketingKampagnen = {};
+  MARKETING_KAMPAGNEN.forEach(k => { marketingKampagnen[k.id] = { gebuchtSaison: season, bonus: k.markenwertBonus || 0, name: k.name }; });
+
+  // Trainingsmaterial: jede Kategorie vorhanden und neuwertig
+  const trainingsmaterial = {};
+  TRAININGSMATERIAL_ITEMS.forEach(i => { trainingsmaterial[i.id] = 100; });
+
+  // Stab: für jede Rolle der beste verfügbare Kandidat, alle Personalabteilungen auf Vollausbau
+  const stab = { ...cs.stab };
+  Object.keys(stab).forEach(rolle => {
+    const kandidaten = generateStabKandidaten(rolle, managerDivId, season, 0);
+    const bester = kandidaten.reduce((b, k) => (k.rating > b.rating ? k : b), kandidaten[0]);
+    stab[rolle] = { ...bester, vertragBisSaison: season + 2, naechsteLohnzahlung: addTage(startDatum, 30) };
+  });
+  const personalabteilungen = Object.fromEntries(Object.keys(PERSONALABTEILUNGEN).map(k => [k, "top"]));
+
+  // Fanshop, Imbiss, Vereinsheim: Ziel-Bestand am Maximum, Lager voll
+  const fanshop = {};
+  FANARTIKEL_TYPEN.forEach(t => {
+    const max = berechneMaxZielbestand(STADION_MAX_KAPAZITAET, t.nachfrageAnteil, managerDivId, t.id === "shirts" ? 2.5 : 1);
+    fanshop[t.id] = { bestand: max, verkaufspreis: Math.round(t.einkaufspreis * 2), ziel: max };
+  });
+  const imbiss = {};
+  IMBISS_ARTIKEL_TYPEN.forEach(t => {
+    const max = berechneMaxZielbestand(STADION_MAX_KAPAZITAET, t.nachfrageAnteil, managerDivId, 1.15);
+    imbiss[t.id] = { bestand: max, verkaufspreis: Math.round(t.einkaufspreis * 3.5 * 10) / 10, ziel: max };
+  });
+  const vereinsheim = {};
+  IMBISS_ARTIKEL_TYPEN.forEach(t => {
+    const max = berechneMaxZielbestand(STADION_MAX_KAPAZITAET, t.nachfrageAnteil, managerDivId, VEREINSHEIM_NACHFRAGE_FAKTOR * 1.3);
+    vereinsheim[t.id] = { bestand: max, verkaufspreis: Math.round(t.einkaufspreis * 3.5 * 10) / 10, ziel: max };
+  });
+
+  // Sponsoren: bestes Angebot für Trikot, Ärmel und Trainingsanzug, alle Bandenplätze belegt
+  const bestes = (bereich, salt) => {
+    const k = generateSponsorKandidaten(managerDivId, season, `egg-${salt}`, markenwert, bereich)[0];
+    budgetPlus += k.betragProJahr; sponsorErtrag += k.betragProJahr;
+    return { firma: k.firma, betragProJahr: k.betragProJahr, vertragBisSaison: season + k.laufzeit - 1 };
+  };
+  const trikotsponsor = bestes(TRIKOT_BEREICH, "trikot");
+  const aermelsponsor = bestes(AERMEL_BEREICH, "aermel");
+  const trainingsanzugsponsor = bestes(TRAININGSANZUG_BEREICH, "anzug");
+  const banden = [];
+  let frei = BANNER_MAX_PLAETZE[managerDivId] || BANNER_MAX_PLAETZE.OL;
+  for (let i = 0; i < 80 && frei > 0; i++) {
+    const a = generateBannerAngebot(managerDivId, 1, 18, banden.map(b => b.firma), frei, markenwert);
+    if (!a) break;
+    if (a.anzahl > frei) continue;
+    banden.push({ id: a.id, firma: a.firma, anzahl: a.anzahl, betrag: a.betrag, vertragBisSaison: season + (a.laufzeit || 1) - 1 });
+    frei -= a.anzahl; budgetPlus += a.betrag; sponsorErtrag += a.betrag;
+  }
+
+  // Jugendakademie auf Maximalstufe, Jugendteams in der obersten Liga mit Top-Kadern
+  const akademieLevel = AKADEMIE_MAX_LEVEL_PRO_LIGA[managerDivId] || AKADEMIE_MAX_LEVEL;
+  const akNamen = generiereAkademieNamensSponsorAngebot(managerDivId, akademieLevel, stadion.namensSponsor ? [stadion.namensSponsor.firma] : [], 1);
+  const akademie = {
+    ...(cs.akademie || { umbau: null, absolventenGesamt: 0 }),
+    level: akademieLevel,
+    umbau: null,
+    namensSponsor: akNamen ? { firma: akNamen.firma, betragProJahr: akNamen.betragProJahr, vertragBisSaison: season + 7 } : null
+  };
+  const j19 = jugendligaMitManagerInTopLiga(cs.jugendliga, JUGENDLIGA_DEFS, team, rng);
+  const j17 = jugendligaMitManagerInTopLiga(cs.jugendliga17, JUGENDLIGA17_DEFS, team, rng);
+  const j15 = jugendligaMitManagerInTopLiga(cs.jugendliga15, JUGENDLIGA15_DEFS, team, rng);
+  const j13 = jugendligaMitManagerInTopLiga(cs.jugendliga13, JUGENDLIGA13_DEFS, team, rng);
+
+  return {
+    ...cs,
+    budget: cs.budget + budgetPlus,
+    divisions: { ...cs.divisions, [managerDivId]: { ...div, stadien: { ...div.stadien, [team]: stadion } } },
+    markenwert,
+    marketingKampagnen,
+    trainingsmaterial,
+    stab,
+    personalabteilungen,
+    fanshop, imbiss, vereinsheim,
+    trikotsponsor, aermelsponsor, trainingsanzugsponsor,
+    werbebanner: { vertraege: banden, angebote: [] },
+    saisonFinanzen: { ...cs.saisonFinanzen, ertragSponsoring: (cs.saisonFinanzen?.ertragSponsoring || 0) + sponsorErtrag },
+    sponsorenAbschluesseDieseSaison: 3 + banden.length,
+    fanclub: { ...cs.fanclub, fanhausStufe: 3 },
+    akademie,
+    jugendliga: j19.liga, jugendDivId: j19.divId, jugendKader: initialerU19Kader(team, JUGENDLIGA_DEFS[0].baseRating),
+    jugendliga17: j17.liga, jugendDivId17: j17.divId, jugendKader17: initialerU17Kader(team, JUGENDLIGA17_DEFS[0].baseRating),
+    jugendliga15: j15.liga, jugendDivId15: j15.divId, jugendKader15: initialerU15Kader(team, JUGENDLIGA15_DEFS[0].baseRating),
+    jugendliga13: j13.liga, jugendDivId13: j13.divId, jugendKader13: initialerU13Kader(team, JUGENDLIGA13_DEFS[0].baseRating),
+    jugendKader11: initialerU11Kader(team, JUGENDLIGA11_DEF.baseRating + 10),
+    jugendKader9: initialerU9Kader(team, JUGENDLIGA9_DEF.baseRating + 8),
+    jugendKader7: initialerU7Kader(team, U7_BASE_RATING + 6)
+  };
+}
+
 function SponsoringView({ trikotsponsor, trikotsponsorKandidaten, aermelsponsor, aermelsponsorKandidaten, trainingsanzugsponsor, trainingsanzugsponsorKandidaten, werbebanner, budget, season, managerDivId, stadion, teamName, onAnnehmen, onAblehnen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, onTrikotAngeboteEinholen, onTrikotsponsorWaehlen, onAermelAngeboteEinholen, onAermelsponsorWaehlen, onTrainingsanzugAngeboteEinholen, onTrainingsanzugsponsorWaehlen }) {
   const vertraege = werbebanner?.vertraege || [];
   const angebote = werbebanner?.angebote || [];
@@ -16230,9 +16399,11 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 158; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "21.11.2026, 10:30";
+const APP_BUILD = 160; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "21.11.2026, 14:00";
 const APP_NEUIGKEITEN = [
+  { build: 160, titel: "Easter Egg: Vollausbau", text: "Wer sich mit 1 / 1 anmeldet, startet jetzt mit einem komplett ausgebauten Verein: Stadion mit allen Anlagen und Namensrechten, alle Marketing-Kampagnen, bestes Trainingsmaterial, voller Mitarbeiter- und Jugendstab, gefüllte Lager, alle Sponsoren, Akademie auf Stufe 5 und alle Jugendteams in der obersten Liga." },
+  { build: 159, titel: "Hinweise in den Vereinsinfos", text: "Die Vereinsinfos melden jetzt, sobald ein Transferfenster öffnet, ein Trainingslager buchbar ist oder ein Spieler mehr Lohn fordert (mit roter Markierung, bis du sie gelesen hast)." },
   { build: 158, titel: "Grosses Update: Finanzen, Kader, Transfers", text: "Buchhaltung: Stadionkauf, Umbauten und Infrastruktur sind jetzt Investitionen und belasten das Ergebnis nicht mehr. Neu: Mehrjahres-Bilanz und Bankdarlehen (bis 80 % des Stadionpreises). Kader: Nach längeren Verletzungen gibt es eine Aufbauphase mit Leistungsabzug und höherem Rückfallrisiko, starke Spieler stellen von sich aus Gehaltsforderungen, und du wählst Elfmeter- und Freistoss-Schützen selbst. Transfers: Um gefragte Spieler bewirbt sich manchmal ein Rivale (mit Gerücht über sein Gebot). Dazu eine Team-Bilanz in der Statistik, ein Titelzähler im Trophäenschrank, ein Vorstands-Verlauf und die Spielregeln als Unter-Tab unter Verein/Fans." },
   { build: 157, titel: "Spielregeln kompakt", text: "Die Spielregeln sind von 38 auf 16 Bereiche zusammengelegt und auf etwa ein Drittel des Umfangs gekürzt. Die Bereiche sind einklappbar: Titel antippen zeigt den Inhalt." },
   { build: 156, titel: "Buchhaltung vollständig", text: "Buchhaltungs-Check: Alle Geldflüsse landen in der Saison-Abrechnung. Es fehlten der Kauf von Stadion-Infrastruktur (Flutlicht, Rasenheizung usw.) und der Stadionkauf. Beides erscheint jetzt unter Stadion." },
@@ -16734,10 +16905,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
-  const vereinsinfosUngelesen = hatVereinsinfosNeuigkeiten(careerState) && vereinsinfosGelesenAmDatum !== datum;
+  const hinweiseUngelesen = aktuelleVereinsHinweise(careerState).some(h => !(careerState.gelesenHinweise || []).includes(h.key));
+  const vereinsinfosUngelesen = (hatVereinsinfosNeuigkeiten(careerState) && vereinsinfosGelesenAmDatum !== datum) || hinweiseUngelesen;
   const onTabWechseln = (neuerTab) => {
-    if (neuerTab === "vereinsinfos" && vereinsinfosGelesenAmDatum !== datum) {
-      setCareerState(cs => ({ ...cs, vereinsinfosGelesenAmDatum: datum }));
+    if (neuerTab === "vereinsinfos" && (vereinsinfosGelesenAmDatum !== datum || hinweiseUngelesen)) {
+      setCareerState(cs => ({ ...cs, vereinsinfosGelesenAmDatum: datum, gelesenHinweise: [...new Set([...(cs.gelesenHinweise || []), ...aktuelleVereinsHinweise(cs).map(h => h.key)])].slice(-40) }));
     }
     setTab(neuerTab);
   };
@@ -23914,8 +24086,9 @@ function App() {
       },
       jobAngebot: null
     };
-    setCareerStateRaw(cs);
-    persist(profile, cs);
+    const csStart = profile.easterEgg ? vollausbauEasterEgg(cs, managerDivId, profile.team, season, startDatum) : cs;
+    setCareerStateRaw(csStart);
+    persist(profile, csStart);
   };
 
   const onSponsorGewaehlt = (kandidat) => {
