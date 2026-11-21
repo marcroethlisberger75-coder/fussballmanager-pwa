@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Component } from "react";
-import { Trophy, Users, CalendarDays, ArrowUp, ArrowDown, Shield, ChevronRight, Play, RotateCcw, Info, Repeat, Lock, Tent, ThumbsDown, Landmark, Bus, Sprout, ClipboardList, TrendingUp, UserCog, Medal, Award, XCircle, Megaphone, Shirt, UserPlus, Wallet, ShoppingBag, Building2, Dumbbell, Heart, Flag, Coffee, Package, BookOpen, Mic, Newspaper, Radio, FileText } from "lucide-react";
+import { Trophy, Users, CalendarDays, Shield, ChevronRight, Play, RotateCcw, Info, Repeat, Lock, Tent, ThumbsDown, Landmark, Bus, Sprout, ClipboardList, TrendingUp, UserCog, Medal, Award, XCircle, Megaphone, Shirt, UserPlus, Wallet, ShoppingBag, Building2, Dumbbell, Heart, Flag, Coffee, Package, BookOpen, Mic, Newspaper, Radio, FileText } from "lucide-react";
 
 /* =========================================================================
    THEME — zentrale Quelle für Farben, Schrift und Grundstil (modernes dunkles Design).
@@ -240,13 +240,6 @@ const REGIONALLIGA_REGIONEN = [
 // Welche Regionalliga-Staffel an die jeweilige Oberliga-Startregion anschliesst — real steigen beide
 // bayerischen Bayernliga-Staffeln (Nord/Süd) in dieselbe Regionalliga Bayern auf.
 const REGIONALLIGA_ZUORDNUNG = { "BAY-SUED": "BAYERN", "BAY-NORD": "BAYERN", "BW": "SUEDWEST", "HH": "NORD" };
-
-// Namenspool für neue Nachrücker-Vereine in der untersten Spielklasse (fiktiv, wenn Vereine "aufgelöst" absteigen)
-const ERSATZVEREINE = [
-  "SV Grünwald", "TSV Oberhaching", "FC Vaterstetten", "SpVgg Unterföhring",
-  "TSV Dachau", "FC Starnberg", "SV Planegg", "TSV Fürstenfeldbruck",
-  "SC Olching", "FC Puchheim", "TSV Gauting", "SV Germering"
-];
 
 /* =========================================================================
    PRNG (deterministisch pro Verein → gleicher Kader bei gleichem Namen/Saison)
@@ -1355,7 +1348,7 @@ function positionsStrafe(naturalPos, gespielterPos) {
 // einen Junior in der ersten Mannschaft etablieren" überhaupt gezielt beeinflussen kann.
 const JUGENDFOERDERUNG_BONUS = 10;
 function sortRatingFuerStartelf(p) {
-  return p.rating + (p.jugendfoerderung && p.junior ? JUGENDFOERDERUNG_BONUS : 0);
+  return p.rating + (p.jugendfoerderung && p.junior ? JUGENDFOERDERUNG_BONUS : 0) + (p.einsatzZusage ? 12 : 0);
 }
 
 function waehleStartelf(squad, formation) {
@@ -1679,12 +1672,162 @@ function ermittleTrainingsplan({ coach, stab = {}, squad = [], wunschSchwerpunkt
 
 // Bankfrustration: wer über Wochen unfreiwillig nicht spielt, verliert Form — wie schnell hängt von der
 // Persönlichkeit ab (Ehrgeizige werden schnell unzufrieden, Eigenbrötler lässt es kalt)
+/* =========================================================================
+   RUHMESHALLE — Vereinsrekorde, ewige Bestenlisten, Saisonbilanzen und Spielerbilanz je Saison.
+   Persistiert werden nur die Spieler-Saisonzeilen (spielerArchiv), die Saisonbilanzen und die Spiel-
+   Rekorde; Transferrekorde ergeben sich aus der Chronik, die laufende Saison wird live eingerechnet.
+   ========================================================================= */
+function spielerSaisonZeile(p, saison, abgang = false) {
+  return { id: p.id, name: p.name, pos: p.pos, posName: p.posName, saison, spiele: p.spiele || 0, tore: p.tore || 0, vorlagen: p.vorlagen || 0, gelb: p.gelb || 0, rot: p.rot || 0, motm: p.motmAnzahl || 0, elf: p.elfDesTagesAnzahl || 0, rating: p.rating, alter: p.alter, ...(abgang ? { abgang: true } : {}) };
+}
+function archivZeilenAusAbgaengen(prev, next, team) {
+  if (!prev || !next || prev === next || !prev.divisions || !next.divisions || prev.season !== next.season) return [];
+  const finde = cs => { for (const d of Object.values(cs.divisions)) if (d?.squads?.[team]) return d.squads[team]; return null; };
+  const a = finde(prev), b = finde(next);
+  if (!a || !b || a === b) return [];
+  const bIds = new Set(b.map(x => x.id));
+  return a.filter(x => !bIds.has(x.id) && !x.leihspieler && ((x.spiele || 0) > 0 || (x.tore || 0) > 0 || (x.vorlagen || 0) > 0)).map(x => spielerSaisonZeile(x, prev.season, true));
+}
+function berechneSpielRekorde(spielHistorie, saison) {
+  const alle = (spielHistorie || []).filter(h => h.tHeim != null && h.istHeim !== undefined && h.wettbewerb !== "Testspiel" && !String(h.wettbewerb || "Liga").startsWith("Nationalmannschaft"));
+  const aufbereitet = alle.map(h => {
+    const eigen = h.istHeim ? h.tHeim : h.tGast, gegen = h.istHeim ? h.tGast : h.tHeim;
+    return { eigen, gegen, gegner: h.istHeim ? h.gast : h.heim, wettbewerb: h.wettbewerb || "Liga", zuschauer: h.istHeim ? h.zuschauer : null, res: eigen > gegen ? "S" : eigen === gegen ? "U" : "N" };
+  });
+  const rek = {};
+  const setze = (key, wert, text) => { if (!rek[key] || wert > rek[key].wert) rek[key] = { wert, text, saison }; };
+  aufbereitet.forEach(e => {
+    if (e.res === "S") setze("hoechsterSieg", (e.eigen - e.gegen) * 100 + e.eigen, `${e.eigen}:${e.gegen} gegen ${e.gegner} (${e.wettbewerb})`);
+    if (e.res === "N") setze("hoechsteNiederlage", (e.gegen - e.eigen) * 100 + e.gegen, `${e.eigen}:${e.gegen} gegen ${e.gegner} (${e.wettbewerb})`);
+    if (e.zuschauer) setze("zuschauer", e.zuschauer, `${e.zuschauer.toLocaleString("de-CH")} gegen ${e.gegner} (${e.wettbewerb})`);
+  });
+  let su = 0, ss = 0;
+  aufbereitet.filter(e => e.wettbewerb === "Liga").forEach(e => {
+    su = e.res === "N" ? 0 : su + 1; ss = e.res === "S" ? ss + 1 : 0;
+    if (su > 0) setze("serieUngeschlagen", su, `${su} Liga-Spiele ohne Niederlage`);
+    if (ss > 0) setze("siegesserie", ss, `${ss} Liga-Siege in Folge`);
+  });
+  return rek;
+}
+function mergeRekorde(a, b) {
+  const out = { ...(a || {}) };
+  Object.entries(b || {}).forEach(([k, v]) => { if (!out[k] || v.wert > out[k].wert) out[k] = v; });
+  return out;
+}
+// Ewige Spielerliste: gespeicherte Saisonzeilen plus die laufende Saison aus dem aktuellen Kader
+function spielerSaisonZeilenAlle(spielerArchiv, squad, season) {
+  const laufende = (squad || []).filter(p => !p.leihspieler && ((p.spiele || 0) > 0 || (p.tore || 0) > 0 || (p.vorlagen || 0) > 0)).map(p => spielerSaisonZeile(p, season));
+  const roh = [...(spielerArchiv || []), ...laufende];
+  const map = new Map();
+  roh.forEach(z => {
+    const k = `${z.id}|${z.saison}`;
+    const alt = map.get(k);
+    map.set(k, alt ? { ...alt, spiele: alt.spiele + z.spiele, tore: alt.tore + z.tore, vorlagen: alt.vorlagen + z.vorlagen, gelb: alt.gelb + z.gelb, rot: alt.rot + z.rot, motm: alt.motm + z.motm, elf: alt.elf + z.elf, rating: z.rating, alter: z.alter } : z);
+  });
+  return [...map.values()];
+}
+
+/* =========================================================================
+   KABINE — Konflikte entstehen aus der Lage im Kader (Bank, Lohnschere, Kapitänsfrage,
+   Positionskampf, Niederlagenserie). Der Manager entscheidet, sonst eskaliert es.
+   ========================================================================= */
+const KABINE_OPTIONEN = {
+  gespraech: { label: "Gespräch führen", info: "Kostenlos. Erfolg hängt von Persönlichkeit und Team-Psychologe ab, ein Versuch pro Konflikt." },
+  einsatz: { label: "Einsatzzeit zusichern", info: "Er spielt die nächsten 5 Spiele, sofern fit. Wird das Versprechen gebrochen, leidet seine Stimmung stark." },
+  lohn: { label: "Lohn anpassen", info: "Sein Gehalt wird dem des Neuzugangs angenähert. Kostet dauerhaft mehr." },
+  kapitaen: { label: "Binde übergeben", info: "Er wird neuer Kapitän, der bisherige Kapitän ist gekränkt." },
+  strafe: { label: "Geldstrafe", info: "Disziplinarmassnahme (Mannschaftskasse). Der Spieler ist verärgert, die Mannschaft sieht Konsequenz." },
+  verkauf: { label: "Auf die Verkaufsliste", info: "Er darf gehen. Beruhigt ihn kurzfristig, kostet Form." }
+};
+const KABINE_TYP_OPTIONEN = {
+  bank: ["gespraech", "einsatz", "verkauf"],
+  gehalt: ["gespraech", "lohn", "verkauf"],
+  kapitaen: ["gespraech", "kapitaen"],
+  position: ["gespraech", "einsatz", "verkauf"],
+  serie: ["gespraech", "strafe", "verkauf"]
+};
+const KABINE_TYP_TITEL = { bank: "Unzufrieden auf der Bank", gehalt: "Lohnschere", kapitaen: "Kapitänsfrage", position: "Positionskampf", serie: "Krise nach Niederlagenserie" };
+
+function kabinenGespraechChance(spieler, stab) {
+  const pers = { fuehrungsspieler: 0.2, professionell: 0.2, loyal: 0.15, ehrgeizig: -0.05, eigenbroetler: -0.05, hitzkoepfig: -0.2 }[spieler?.persoenlichkeit] || 0;
+  const psycho = stab?.psychologe ? Math.max(0, Math.min(1, ((stab.psychologe.rating || 30) - 30) / 60)) * 0.15 : 0;
+  const rest = (stab?.assistent ? 0.05 : 0) + (stab?.mental ? 0.05 : 0);
+  return Math.max(0.15, Math.min(0.9, 0.55 + pers + psycho + rest));
+}
+
+function kabinenStimmung(teamgeistGesamt, anzahlKonflikte) {
+  const wert = Math.max(0, Math.min(100, Math.round(teamgeistGesamt - anzahlKonflikte * 8)));
+  if (wert >= 65) return { wert, label: "gut", farbe: "#34d399" };
+  if (wert >= 45) return { wert, label: "angespannt", farbe: "#fbbf24" };
+  return { wert, label: "brodelt", farbe: "#f87171" };
+}
+
+// Prüft die aktuelle Lage und liefert (höchstens) einen neuen Konflikt oder null.
+function generiereKabinenKonflikt(squad, ctx) {
+  const { kapitaenId, season, datum, offeneKonflikte = [], niederlagenSerie = 0 } = ctx;
+  const gesperrt = new Set(offeneKonflikte.flatMap(k => [k.hauptId, k.gegenId].filter(Boolean)));
+  const frei = p => !p.leihspieler && !gesperrt.has(p.id) && !(p.kabineRuhe && p.kabineRuhe > datum);
+  const kern = [...squad].sort((a, b) => b.rating - a.rating).slice(0, 14);
+  const kandidaten = [];
+  const euro = n => `${Math.round(n).toLocaleString("de-CH")} €`;
+  const typen = offeneKonflikte.map(k => k.typ);
+
+  if (!typen.includes("bank")) {
+    kern.filter(p => frei(p) && !p.verletzung && (p.bankStreak || 0) > Math.round(4 * (PERSOENLICHKEITEN[p.persoenlichkeit]?.bankToleranz ?? 1)) + 1).forEach(p => {
+      kandidaten.push({ typ: "bank", hauptId: p.id, hauptName: p.name, text: `${p.name} (${p.posName}, Stärke ${p.rating}) sitzt seit ${p.bankStreak} Spielen draussen und verlangt eine Erklärung.` });
+    });
+  }
+  if (!typen.includes("gehalt")) {
+    const neue = squad.filter(p => frei(p) && p.beimVereinSeitSaison === season && (p.gehalt || 0) > 0);
+    neue.forEach(a => {
+      const b = squad.filter(q => q.id !== a.id && frei(q) && q.rating >= a.rating - 3 && (q.gehalt || 0) > 0 && a.gehalt >= q.gehalt * 1.6 && q.beimVereinSeitSaison !== season)
+        .sort((x, y) => x.gehalt - y.gehalt)[0];
+      if (b) kandidaten.push({ typ: "gehalt", hauptId: b.id, hauptName: b.name, gegenId: a.id, gegenName: a.name, text: `${b.name} (${euro(b.gehalt)}) ärgert sich, dass Neuzugang ${a.name} ${euro(a.gehalt)} verdient, obwohl er selbst gleich stark ist.` });
+    });
+  }
+  if (!typen.includes("kapitaen")) {
+    const kap = kapitaenId ? squad.find(p => p.id === kapitaenId) : null;
+    if (kap && (PERSOENLICHKEITEN[kap.persoenlichkeit]?.kapitaenBonus || 0) < 5) {
+      const fuehrung = squad.filter(p => p.id !== kap.id && frei(p) && p.persoenlichkeit === "fuehrungsspieler" && p.alter >= 22 && p.rating >= 55).sort((x, y) => y.rating - x.rating)[0];
+      if (fuehrung && !gesperrt.has(kap.id)) kandidaten.push({ typ: "kapitaen", hauptId: fuehrung.id, hauptName: fuehrung.name, gegenId: kap.id, gegenName: kap.name, text: `Führungsspieler ${fuehrung.name} fühlt sich bei der Kapitänsfrage übergangen, ${kap.name} trägt die Binde.` });
+    }
+  }
+  if (!typen.includes("position")) {
+    POSITIONEN.forEach(pos => {
+      const gruppe = squad.filter(p => p.pos === pos.code && !p.verletzung).sort((x, y) => y.rating - x.rating);
+      const [erster, zweiter] = gruppe;
+      if (erster && zweiter && frei(erster) && frei(zweiter) && erster.rating - zweiter.rating <= 5 && (zweiter.bankStreak || 0) >= 2
+        && ["ehrgeizig", "hitzkoepfig"].includes(zweiter.persoenlichkeit)) {
+        kandidaten.push({ typ: "position", hauptId: zweiter.id, hauptName: zweiter.name, gegenId: erster.id, gegenName: erster.name, text: `${zweiter.name} und ${erster.name} kämpfen um denselben Platz als ${pos.name || zweiter.posName}, die Stimmung ist gereizt.` });
+      }
+    });
+  }
+  if (!typen.includes("serie") && niederlagenSerie >= 3) {
+    kern.filter(p => frei(p) && ["hitzkoepfig", "fuehrungsspieler"].includes(p.persoenlichkeit)).forEach(p => {
+      kandidaten.push({ typ: "serie", hauptId: p.id, hauptName: p.name, text: p.persoenlichkeit === "hitzkoepfig" ? `${p.name} kritisiert nach der Niederlagenserie die Mannschaft öffentlich.` : `${p.name} fordert in einer Krisensitzung Konsequenzen nach der Niederlagenserie.` });
+    });
+  }
+  if (!kandidaten.length) return null;
+  const k = kandidaten[Math.floor(Math.random() * kandidaten.length)];
+  return { ...k, id: `kabine-${k.hauptId}-${Date.now()}`, titel: KABINE_TYP_TITEL[k.typ], restSpieltage: 5, gespraechVersucht: false, saison: season, datum };
+}
+
 function verarbeiteBankfrustration(squad, elfIds) {
   return squad.map(p => {
     if (elfIds.includes(p.id)) {
+      if (p.einsatzZusage) {
+        const rest = p.einsatzZusage.rest - 1;
+        return rest <= 0
+          ? { ...p, einsatzZusage: null, bankStreak: 0, zufriedenheit: Math.min(100, (p.zufriedenheit ?? 70) + 4) }
+          : { ...p, einsatzZusage: { rest }, bankStreak: 0 };
+      }
       return p.bankStreak ? { ...p, bankStreak: 0 } : p;
     }
     if (p.verletzung || p.laenderspielSperre) return p; // zählt nicht als unfreiwillige Bankzeit
+    if (p.einsatzZusage) {
+      // Versprechen gebrochen: Spieler ist fit, stand aber nicht in der Startelf
+      return { ...p, einsatzZusage: null, bankStreak: (p.bankStreak || 0) + 1, zufriedenheit: Math.max(0, (p.zufriedenheit ?? 70) - 10), form: Math.max(0, (p.form ?? 60) - 4) };
+    }
     const neuerStreak = (p.bankStreak || 0) + 1;
     const toleranz = PERSOENLICHKEITEN[p.persoenlichkeit]?.bankToleranz ?? 1;
     const schwelle = Math.round(4 * toleranz);
@@ -1698,6 +1841,98 @@ function verarbeiteBankfrustration(squad, elfIds) {
 // zusatzFaktor und heilungsBonus dürfen entweder eine feste Zahl (gilt für den ganzen Kader, wie
 // bisher) oder eine Funktion (spieler => Zahl) sein — Letzteres ermöglicht individuelle
 // Trainingsschwerpunkte pro Spieler statt eines einzigen kaderweiten Werts.
+/* =========================================================================
+   VEREINSCHRONIK — saisonweises Archiv der wichtigsten Ereignisse des Vereins.
+   Die Einträge werden zentral beim Speichern des Spielstands aus dem Unterschied zwischen altem und
+   neuem Zustand erkannt (Zu-/Abgänge mit Ablöse, Leihen, Verletzungen, Lohnforderungen, Vertrags-
+   verlängerungen, Jugend). So deckt es jeden Weg ab, ohne dass jede Aktion einzeln angepasst werden muss.
+   ========================================================================= */
+const CHRONIK_MAX = 2000;
+const CHRONIK_TYPEN = {
+  transfer: { label: "Transfers", farbe: "#34d399" },
+  verletzung: { label: "Verletzungen", farbe: "#f87171" },
+  lohn: { label: "Löhne & Verträge", farbe: "#fbbf24" },
+  jugend: { label: "Jugend", farbe: "#a3e635" },
+  stadion: { label: "Stadion & Fans", farbe: "#60a5fa" },
+  kabine: { label: "Kabine", farbe: "#c084fc" },
+  rekord: { label: "Rekorde", farbe: "#f59e0b" }
+};
+const CHRONIK_JUGENDSTUFEN = [["jugendKader", "U19"], ["jugendKader17", "U17"], ["jugendKader15", "U15"], ["jugendKader13", "U13"], ["jugendKader11", "U11"], ["jugendKader9", "U9"], ["jugendKader7", "U7"]];
+function chronikEuro(n) { return `${Math.round(n).toLocaleString("de-CH")} €`; }
+function chronikAusDiff(prev, next, team) {
+  if (!prev || !next || prev === next || !prev.divisions || !next.divisions || prev.season !== next.season) return [];
+  const finde = cs => { for (const d of Object.values(cs.divisions)) if (d?.squads?.[team]) return d.squads[team]; return null; };
+  const a = finde(prev), b = finde(next);
+  const out = [];
+  const eintrag = (typ, text, extra) => out.push({ saison: next.season, datum: next.datum, typ, text, ...(extra || {}) });
+  const beschreibung = p => `${p.name} (${p.posName || p.pos}, ${p.rating})`;
+  if (a && b && a !== b) {
+    const aIds = new Map(a.map(x => [x.id, x])), bIds = new Map(b.map(x => [x.id, x]));
+    const zugaenge = b.filter(x => !aIds.has(x.id)), abgaenge = a.filter(x => !bIds.has(x.id));
+    const sfA = prev.saisonFinanzen || {}, sfB = next.saisonFinanzen || {};
+    const kaufDelta = (sfB.aufwandTransfers || 0) - (sfA.aufwandTransfers || 0);
+    const verkaufDelta = (sfB.ertragTransfers || 0) - (sfA.ertragTransfers || 0);
+    zugaenge.forEach(x => {
+      if (x.leihspieler) { eintrag("transfer", `Leihe: ${beschreibung(x)} kommt von ${x.leihVerein || "einem anderen Verein"}.`); return; }
+      const stufe = CHRONIK_JUGENDSTUFEN.find(([k]) => (prev[k] || []).some(j => j.id === x.id));
+      if (stufe) { eintrag("jugend", `${x.name} (${x.alter}, ${x.posName || x.pos}, ${x.rating}) aus der ${stufe[1]} in die erste Mannschaft befördert.`); return; }
+      eintrag("transfer", zugaenge.length === 1 && kaufDelta > 0 ? `Zugang: ${beschreibung(x)}, Ablöse ${chronikEuro(kaufDelta)}.` : `Zugang: ${beschreibung(x)}.`, { art: "zugang", spieler: x.name, betrag: zugaenge.length === 1 ? kaufDelta : 0 });
+    });
+    abgaenge.forEach(x => {
+      if (x.leihspieler) { eintrag("transfer", `Leihe beendet: ${x.name} kehrt zu ${x.leihVerein || "seinem Verein"} zurück.`); return; }
+      eintrag("transfer", abgaenge.length === 1 && verkaufDelta > 0 ? `Verkauf: ${beschreibung(x)}, Ablöse ${chronikEuro(verkaufDelta)}.` : `Abgang: ${beschreibung(x)} verlässt den Verein.`, { art: "abgang", spieler: x.name, betrag: abgaenge.length === 1 ? verkaufDelta : 0 });
+    });
+    b.forEach(x => {
+      const alt = aIds.get(x.id);
+      if (!alt) return;
+      if (x.verletzung && !alt.verletzung) {
+        const t = x.verletzung.gesamtTage || x.verletzung.tageVerbleibend || 0;
+        const dauer = t >= 14 ? `ca. ${Math.round(t / 7)} Wochen` : `ca. ${t} Tage`;
+        eintrag("verletzung", `${x.name} (${x.posName || x.pos}) verletzt sich (${x.verletzung.art}), Ausfall ${dauer}.`, { art: "verletzung", spieler: x.name, tage: t });
+      }
+      if (x.akademieProdukt && !x.leihspieler) {
+        // Nachwuchs-Meilensteine: Debüt, erstes Tor und runde Zahlen bei Einsätzen und Toren im Profikader
+        const spieleA = (alt.karriereSpiele || 0) + (alt.spiele || 0), spieleB = (x.karriereSpiele || 0) + (x.spiele || 0);
+        const toreA = (alt.karriereTore || 0) + (alt.tore || 0), toreB = (x.karriereTore || 0) + (x.tore || 0);
+        const kopf = `${x.name} (${x.alter}, ${x.posName || x.pos})`;
+        if (spieleA === 0 && spieleB > 0) eintrag("jugend", `Debüt: Eigengewächs ${kopf} bestreitet sein erstes Spiel für die Profis.`, { art: "meilenstein" });
+        if (toreA === 0 && toreB > 0) eintrag("jugend", `Erstes Profitor: Eigengewächs ${kopf} trifft.`, { art: "meilenstein" });
+        [10, 25, 50, 100].forEach(m => { if (toreA < m && toreB >= m) eintrag("jugend", `Eigengewächs ${kopf} erzielt sein ${m}. Tor für den Verein.`, { art: "meilenstein" }); });
+        [25, 50, 100, 200, 300].forEach(m => { if (spieleA < m && spieleB >= m) eintrag("jugend", `Eigengewächs ${kopf} bestreitet sein ${m}. Spiel für den Verein.`, { art: "meilenstein" }); });
+      }
+      if ((x.vertragBisSaison || 0) > (alt.vertragBisSaison || 0) && !x.leihspieler) {
+        eintrag("lohn", `Vertrag verlängert: ${x.name} bis ${x.vertragBisSaison}, Gehalt ${chronikEuro(x.gehalt || 0)} pro Jahr.`);
+      }
+    });
+  }
+  (next.kabinenLog || []).filter(l => !(prev.kabinenLog || []).some(x => x.id === l.id)).forEach(l => eintrag("kabine", l.text));
+  if (a && b) {
+    b.forEach(x => {
+      const alt = a.find(q => q.id === x.id);
+      if (!alt || !alt.einsatzZusage || x.einsatzZusage) return;
+      const dz = (x.zufriedenheit ?? 70) - (alt.zufriedenheit ?? 70);
+      if (dz >= 3) eintrag("kabine", `Versprechen gehalten: ${x.name} hat die zugesagte Einsatzzeit bekommen.`);
+      else if (dz <= -8) eintrag("kabine", `Versprechen gebrochen: ${x.name} blieb trotz Zusage auf der Bank, seine Stimmung leidet.`);
+    });
+  }
+  const fA = prev.gehaltsforderungen || [], fB = next.gehaltsforderungen || [];
+  fB.filter(f => !fA.some(g => g.id === f.id)).forEach(f => eintrag("lohn", `${f.name} fordert mehr Lohn: ${chronikEuro(f.gehalt)} statt ${chronikEuro(f.altesGehalt)} (${f.grund}).`));
+  fA.filter(f => !fB.some(g => g.id === f.id)).forEach(f => {
+    const jetzt = b && b.find(x => x.id === f.spielerId);
+    if (jetzt && (jetzt.gehalt || 0) >= f.gehalt && f.gehalt > f.altesGehalt) eintrag("lohn", `Lohnforderung bewilligt: ${f.name} erhält ${chronikEuro(f.gehalt)} (vorher ${chronikEuro(f.altesGehalt)}).`);
+    else eintrag("lohn", `Lohnforderung von ${f.name} (${chronikEuro(f.gehalt)}) nicht erfüllt.`);
+  });
+  CHRONIK_JUGENDSTUFEN.forEach(([k, label]) => {
+    const vor = new Set((prev[k] || []).map(j => j.id));
+    (next[k] || []).filter(j => !vor.has(j.id)).forEach(j => {
+      if (a && b && b.some(x => x.id === j.id)) return;
+      if (vor.size === 0 && (prev[k] || []).length === 0) return;
+      eintrag("jugend", `Sichtung: ${j.name} (${j.alter}, ${j.posName || j.pos}) in die ${label} aufgenommen.`);
+    });
+  });
+  return out;
+}
+
 function verarbeiteVerletzungen(squad, spielendeIds, arzt, tageVergangen, zusatzFaktor = 1, heilungsBonus = 0) {
   const arztRating = arzt?.rating || 0;
   // Ein guter Arzt senkt zusätzlich das Trainingsrisiko selbst (Prävention)
@@ -2188,6 +2423,8 @@ function generiereAngebotFuerGelisteten(alleDivisionen, managerDivId, managerTea
 
 // Aktuelle Saison für die vertragsabhängige Ablöse — wird bei jedem Render des Spielbildschirms gesetzt, damit
 // die zentrale Preisfunktion die Restlaufzeit kennt, ohne jeden Aufruf (rund 25) umzubauen.
+// Daten für die Karriereansicht im Spieler-Detail (siehe SpielerDetailModal) — wird wie PREIS_SAISON bei jedem Render des Spielbildschirms gesetzt
+let KARRIERE_DATEN = { spielerArchiv: [], chronik: [], eigeneIds: new Set(), season: null };
 let PREIS_SAISON = null;
 // Restlaufzeit: Wer ohnehin bald ablösefrei gehen kann, kostet deutlich weniger (letztes Vertragsjahr ca. −45 %,
 // ein Jahr Restlaufzeit ca. −20 %). So wie im echten Fussball.
@@ -2648,6 +2885,20 @@ const U17_KADERGROESSE = U19_KADERGROESSE; // beide Jugendkader müssen gleich g
 // garantiert in den U19-Kader hinüber (komplette Durchlässigkeit, wie vom Manager gefordert). Passt
 // der U19-Kader dadurch kurzzeitig über U19_KADERGROESSE hinaus, ist das unproblematisch — er normalisiert
 // sich von selbst, sobald der Manager wieder jemanden hochzieht oder der nächste U19-Jahrgang ausscheidet.
+// Kombiniert den gealterten Kader mit den Aufsteigern der Stufe darunter und hält die Kadergrösse ein:
+// Die Alterungsfunktionen füllen verlassene Plätze selbst mit Neugenerierten auf, ohne die Aufsteiger zu kennen.
+// Überschüssige NEUE Spieler (ids nicht im Kader vor der Alterung) werden daher wieder entfernt, bis die Grösse stimmt.
+function kombiniereMitZugaengen(kaderNachAlterung, kaderVorAlterung, zugaenge, groesse) {
+  const vorherIds = new Set((kaderVorAlterung || []).map(p => p.id));
+  let ueberschuss = kaderNachAlterung.length + zugaenge.length - groesse;
+  if (ueberschuss <= 0) return [...kaderNachAlterung, ...zugaenge];
+  const behalten = [...kaderNachAlterung];
+  for (let i = behalten.length - 1; i >= 0 && ueberschuss > 0; i--) {
+    if (!vorherIds.has(behalten[i].id)) { behalten.splice(i, 1); ueberschuss--; }
+  }
+  return [...behalten, ...zugaenge];
+}
+
 function alterJugendKader17(kader, teamName, baseRating, season) {
   const aufgestiegen = kader.filter(p => p.alter >= 16).map(p => {
     const { u17, ...basisSpieler } = p;
@@ -3731,18 +3982,6 @@ function planeJuniorTermine(gesamtSpieltage, akademieLevel = 0, scoutZusatzChanc
     termine.push(Math.floor(Math.random() * (ende - start + 1)) + start);
   }
   return termine.sort((a, b) => a - b);
-}
-
-// Der Trainer bewertet den Kader und empfiehlt die Spieler, die er am ehesten abgeben würde:
-// niedrige Spielstärke kombiniert mit fortgeschrittenem Alter wiegt am schwersten.
-function empfehleVerkauf(squad, maxAnzahl = 3) {
-  if (squad.length <= 12) return [];
-  const bewertet = squad.map(p => ({
-    id: p.id,
-    effektiv: p.rating - Math.max(0, p.alter - 29) * 1.5
-  }));
-  bewertet.sort((a, b) => a.effektiv - b.effektiv);
-  return bewertet.slice(0, maxAnzahl).map(p => p.id);
 }
 
 /* =========================================================================
@@ -6463,13 +6702,57 @@ function teamgeistEinordnung(gesamt) {
    generischer Textbausteine.
    ========================================================================= */
 
+// Sachlicher Saisonrückblick: Bilanz, Highlights und Finanzen der abgelaufenen Saison (Gegenstück zur
+// Bewertung "Darauf achten / Läuft gut" im Jahresbericht). Alles wird aus vorhandenen Daten berechnet.
+function erstelleSaisonRueckblick({ platz, anzahlTeams, tabellenzeile, spielHistorie = [], squad = [], chronik = [], season, stadion, finanzen = {}, budget, trophaeenDieseSaison = [], pokalRundeErreicht, europapokalTeilnahme, aufgestiegen, abgestiegen }) {
+  const liga = (spielHistorie || []).filter(h => (h.wettbewerb || "Liga") === "Liga" && h.tHeim != null).map(h => {
+    const eigen = h.istHeim ? h.tHeim : h.tGast, gegen = h.istHeim ? h.tGast : h.tHeim;
+    return { eigen, gegen, gegner: h.istHeim ? h.gast : h.heim, heim: h.istHeim, spieltag: h.spieltag, res: eigen > gegen ? "S" : eigen === gegen ? "U" : "N" };
+  });
+  let serieU = 0, besteU = 0, serieS = 0, besteS = 0;
+  liga.forEach(e => { serieU = e.res === "N" ? 0 : serieU + 1; besteU = Math.max(besteU, serieU); serieS = e.res === "S" ? serieS + 1 : 0; besteS = Math.max(besteS, serieS); });
+  const siege = liga.filter(e => e.res === "S"), niederlagen = liga.filter(e => e.res === "N");
+  const hoechsterSieg = siege.length ? siege.reduce((m, e) => (e.eigen - e.gegen) > (m.eigen - m.gegen) ? e : m) : null;
+  const hoechsteNiederlage = niederlagen.length ? niederlagen.reduce((m, e) => (e.gegen - e.eigen) > (m.gegen - m.eigen) ? e : m) : null;
+  const beste = (feld) => { const k = squad.filter(p => (p[feld] || 0) > 0); return k.length ? k.reduce((m, p) => (p[feld] || 0) > (m[feld] || 0) ? p : m) : null; };
+  const spieler = (feld, einheit) => { const p = beste(feld); return p ? { name: p.name, wert: p[feld], einheit } : null; };
+  const chronikSaison = chronik.filter(e => e.saison === season);
+  const teuersterZugang = chronikSaison.filter(e => e.art === "zugang" && e.betrag > 0).reduce((m, e) => !m || e.betrag > m.betrag ? e : m, null);
+  const teuersterVerkauf = chronikSaison.filter(e => e.art === "abgang" && e.betrag > 0).reduce((m, e) => !m || e.betrag > m.betrag ? e : m, null);
+  const verletzungen = chronikSaison.filter(e => e.art === "verletzung");
+  const schwerste = verletzungen.reduce((m, e) => !m || e.tage > m.tage ? e : m, null);
+  const zh = stadion?.zuschauerHistorie || [];
+  const rekord = zh.length ? zh.reduce((m, h) => (h.zuschauer || 0) > (m.zuschauer || 0) ? h : m, zh[0]) : null;
+  const ertrag = ["ertragTicketing", "ertragFanartikel", "ertragImbiss", "ertragTransfers", "ertragSponsoring", "ertragTV", "ertragEuropapokal", "ertragLaenderspiel", "ertragEvents", "ertragFanclub"].reduce((t, k) => t + (finanzen[k] || 0), 0);
+  const aufwand = ["aufwandGehalt", "aufwandMitarbeiterstab", "aufwandManagerlohn", "aufwandSpielerloehne", "aufwandReisen", "aufwandTransfers", "aufwandBerater", "aufwandFanartikel", "aufwandImbiss", "aufwandStadion", "aufwandMaterial", "aufwandPersonal", "aufwandTrainingslager", "aufwandJugend"].reduce((t, k) => t + (finanzen[k] || 0), 0);
+  return {
+    platz, anzahlTeams, aufgestiegen: !!aufgestiegen, abgestiegen: !!abgestiegen,
+    tabelle: tabellenzeile ? { sp: tabellenzeile.sp, s: tabellenzeile.s, u: tabellenzeile.u, n: tabellenzeile.n, tore: tabellenzeile.tore, gegentore: tabellenzeile.gegentore, pkt: tabellenzeile.pkt } : null,
+    serieOhneNiederlage: besteU, siegesserie: besteS,
+    heim: liga.length ? [liga.filter(e => e.heim && e.res === "S").length, liga.filter(e => e.heim && e.res === "U").length, liga.filter(e => e.heim && e.res === "N").length] : null,
+    auswaerts: liga.length ? [liga.filter(e => !e.heim && e.res === "S").length, liga.filter(e => !e.heim && e.res === "U").length, liga.filter(e => !e.heim && e.res === "N").length] : null,
+    hoechsterSieg: hoechsterSieg ? `${hoechsterSieg.eigen}:${hoechsterSieg.gegen} gegen ${hoechsterSieg.gegner}${hoechsterSieg.spieltag ? ` (Spieltag ${hoechsterSieg.spieltag})` : ""}` : null,
+    hoechsteNiederlage: hoechsteNiederlage ? `${hoechsteNiederlage.eigen}:${hoechsteNiederlage.gegen} gegen ${hoechsteNiederlage.gegner}${hoechsteNiederlage.spieltag ? ` (Spieltag ${hoechsteNiederlage.spieltag})` : ""}` : null,
+    topTorjaeger: spieler("tore", "Tore"), topVorlagen: spieler("vorlagen", "Vorlagen"), meisteEinsaetze: spieler("spiele", "Spiele"), spielerDesSpieltages: spieler("motmAnzahl", "x Spieler des Spieltages"),
+    teuersterZugang: teuersterZugang ? { name: teuersterZugang.spieler, betrag: teuersterZugang.betrag } : null,
+    teuersterVerkauf: teuersterVerkauf ? { name: teuersterVerkauf.spieler, betrag: teuersterVerkauf.betrag } : null,
+    verletzungenAnzahl: verletzungen.length,
+    schwersteVerletzung: schwerste ? { name: schwerste.spieler, tage: schwerste.tage } : null,
+    zuschauerSchnitt: zh.length ? Math.round(zh.reduce((t, h) => t + (h.zuschauer || 0), 0) / zh.length) : null,
+    zuschauerRekord: rekord ? { zuschauer: rekord.zuschauer, gegner: rekord.gegner || null } : null,
+    ertrag, aufwand, reingewinn: ertrag - aufwand, kontostand: budget,
+    pokalRunde: pokalRundeErreicht || 1, europapokal: !!europapokalTeilnahme,
+    titel: (trophaeenDieseSaison || []).map(t => t.text)
+  };
+}
+
 function generiereJahresbericht(kontext) {
   const {
     platz, anzahlTeams, aufgestiegen, abgestiegen, trophaeenDieseSaison, finanzen,
     vereinsversammlung, trainerZielAuswertung, teamgeist, budget, squad, torschuetzenkoenig,
     stab, trainingsmaterial, werbebanner, fanclub, trainingslager, fanshop, trikotsponsor,
     jugend, akademie, pokalRundeErreicht, europapokalTeilnahme, stadion, tabellenzeile, trainerZufriedenheit, season,
-    philosophiePaket, saisonAuszeichnungen, jugendStufenErgebnisse = []
+    philosophiePaket, saisonAuszeichnungen, jugendStufenErgebnisse = [], spielHistorie = [], chronik = []
   } = kontext;
 
   const ertragGesamt = (finanzen.ertragTicketing || 0) + (finanzen.ertragFanartikel || 0) + (finanzen.ertragImbiss || 0)
@@ -6640,7 +6923,8 @@ function generiereJahresbericht(kontext) {
   }
 
   // Auf das Wesentliche kürzen: höchstens 5 pro Kategorie, sonst wird der Bericht wieder zu lang.
-  return { positiv: positiv.slice(0, 5), achtung: achtung.slice(0, 5), jugendStufen: jugendStufenErgebnisse };
+  const rueckblick = erstelleSaisonRueckblick({ platz, anzahlTeams, tabellenzeile, spielHistorie, squad, chronik, season, stadion, finanzen, budget, trophaeenDieseSaison, pokalRundeErreicht, europapokalTeilnahme, aufgestiegen, abgestiegen });
+  return { positiv: positiv.slice(0, 5), achtung: achtung.slice(0, 5), jugendStufen: jugendStufenErgebnisse, rueckblick };
 }
 
 function berechneFanzufriedenheit(kontext) {
@@ -7135,26 +7419,6 @@ function simuliereNationalmannschaftsSpiel(kader, gegner, formation) {
     elfmeter = gewonnen ? "gewonnen" : "verloren";
   }
   return { gegner: gegner.name, tHeim: ergebnis.eigeneTore, tGast: ergebnis.gegnerTore, gewonnen, elfmeter };
-}
-
-// Qualifikation grob an der Kaderstärke bemessen — ein starker Kader qualifiziert sich so gut wie
-// sicher, ein schwacher Jahrgang kann (wie in der Realität schon vorgekommen) auch mal scheitern.
-// Historische Anmerkung: eine frühere Version dieser Datei prüfte die Turnier-Qualifikation über
-// einen einzelnen Würfelwurf hier — das wurde durch echte Qualifikationsspiele während der
-// Länderspielpausen ersetzt (siehe simuliereQualifikationsspiel weiter unten sowie die Auswertung
-// der gesammelten Bilanz in neueSaisonStarten), realistischer und näher am echten Fussball.
-// Nach jedem Turnierspiel bekommt nur ein realistischer Teil des 23er-Kaders (Startelf + ein paar
-// Einwechslungen, nicht der ganze Kader) einen weiteren Länderspiel-Eintrag gutgeschrieben — sichtbar
-// im Spieler-Datenblatt. Die Spieler kommen von verschiedenen Vereinen/Ligen, daher wird hier über
-// ALLE Divisionen hinweg nach der jeweiligen Spieler-ID gesucht.
-// Qualifikationsspiel während einer Länderspielpause: Unentschieden erlaubt (Gruppenphase, kein
-// K.o.-Spiel) — reale Qualifikationsgegner sind meist deutlich schwächer im Schnitt als die K.o.-Gegner
-// beim eigentlichen Turnier, daher eine eigene, moderatere Gegnerauswahl statt waehleGegnerNation.
-function generiereQualifikationsGegner(wettbewerb) {
-  const liste = wettbewerb === "EM" ? EM_NATIONEN : WM_NATIONEN;
-  const gewaehlt = liste[Math.floor(Math.random() * liste.length)];
-  const staerke = Math.round(Math.max(35, Math.min(92, gewaehlt.staerke + (Math.random() * 10 - 5))));
-  return { name: gewaehlt.name, staerke };
 }
 
 // Vollständige Länderspiel-Simulation mit echten Einzelspieler-Ereignissen — genau wie ein Vereinsspiel:
@@ -8274,6 +8538,7 @@ const TAB_GRUPPEN = [
   { id: "kadertaktik", label: "Kader & Taktik", icon: Users, tabs: [
     { id: "kader", label: "Kader", icon: Users },
     { id: "taktik", label: "Taktik", icon: ClipboardList },
+    { id: "kabine", label: "Kabine", icon: Megaphone },
     { id: "material", label: "Training", icon: Dumbbell },
     { id: "trainingslager", label: "Trainingslager", icon: Tent }
   ]},
@@ -8307,6 +8572,9 @@ const TAB_GRUPPEN = [
   ]},
   { id: "historie", label: "Historie", icon: TrendingUp, tabs: [
     { id: "statistik", label: "Statistik", icon: TrendingUp },
+    { id: "ruhmeshalle", label: "Ruhmeshalle", icon: Trophy },
+    { id: "chronik", label: "Chronik", icon: FileText },
+    { id: "jahresbericht", label: "Jahresbericht", icon: Info },
     { id: "trophaeen", label: "Trophäen", icon: Trophy },
     { id: "karriere", label: "Karriere", icon: Medal }
   ]},
@@ -8314,7 +8582,6 @@ const TAB_GRUPPEN = [
     { id: "vereinsinfos", label: "Vereinsinfos", icon: Newspaper },
     { id: "vorstand", label: "Vorstand & Presse", icon: Megaphone },
     { id: "fanclub", label: "Fanclub", icon: Heart },
-    { id: "jahresbericht", label: "Jahresbericht", icon: Info },
     { id: "regeln", label: "Spielregeln", icon: BookOpen }
   ]}
 ];
@@ -9533,6 +9800,47 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
           </div>
         </div>
 
+        {(() => {
+          const eigener = KARRIERE_DATEN.eigeneIds.has(p.id);
+          const alt = (KARRIERE_DATEN.spielerArchiv || []).filter(z => z.id === p.id);
+          if (!eigener && alt.length === 0) return null;
+          const live = eigener && ((p.spiele || 0) > 0 || (p.tore || 0) > 0 || (p.vorlagen || 0) > 0) ? [{ saison: KARRIERE_DATEN.season, spiele: p.spiele || 0, tore: p.tore || 0, vorlagen: p.vorlagen || 0, rating: p.rating, alter: p.alter, laufend: true }] : [];
+          const map = new Map();
+          [...alt, ...live].forEach(z => {
+            const a = map.get(z.saison);
+            map.set(z.saison, a ? { ...a, spiele: a.spiele + z.spiele, tore: a.tore + z.tore, vorlagen: a.vorlagen + z.vorlagen, rating: z.rating, alter: z.alter, laufend: a.laufend || z.laufend } : z);
+          });
+          const rows = [...map.values()].sort((x, y) => x.saison - y.saison);
+          const ereignisse = (KARRIERE_DATEN.chronik || []).filter(e => e.text && e.text.includes(p.name)).slice(-5).reverse();
+          if (!rows.length && !ereignisse.length) return null;
+          return (
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1.5">Karriereverlauf beim Verein</div>
+              {rows.length > 0 && (
+                <table className="w-full text-[11px]">
+                  <thead><tr className="text-emerald-600 text-left"><th className="py-0.5">Saison</th><th className="text-right">Stärke</th><th className="text-right">Sp</th><th className="text-right">⚽</th><th className="text-right">🅰️</th></tr></thead>
+                  <tbody>
+                    {rows.map(z => (
+                      <tr key={z.saison} className="border-t border-emerald-950 text-emerald-200">
+                        <td className="py-0.5">{z.saison}/{String(z.saison + 1).slice(-2)}{z.laufend ? " ▸" : ""}</td>
+                        <td className="text-right">{z.rating}</td><td className="text-right">{z.spiele}</td><td className="text-right text-amber-300">{z.tore}</td><td className="text-right">{z.vorlagen}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {ereignisse.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {ereignisse.map((e, i) => (
+                    <div key={i} className="border-l-2 border-emerald-800 pl-2 text-[11px] text-emerald-300"><span className="text-emerald-600">{e.datum ? formatDatum(e.datum) : ""} · </span>{e.text}</div>
+                  ))}
+                </div>
+              )}
+              <div className="text-[10px] text-emerald-700 mt-1">▸ laufende Saison. Alle Details und Ranglisten: Historie → Ruhmeshalle.</div>
+            </div>
+          );
+        })()}
+
         {alleTitel.length > 0 && (
           <div>
             <div className="text-[11px] uppercase tracking-wider text-amber-400/80 mb-1.5">Titel der Karriere</div>
@@ -10248,101 +10556,6 @@ function SpielplanView({ division, managerTeam, testspiele, season, pokal, europ
   );
 }
 
-function CoachScreen({ profile, onCoachChosen }) {
-  const [kandidaten] = useState(() => generateTrainerKandidaten(profile.team, 26, Math.floor(Math.random() * 1000000), profile.easterEgg ? "BL" : "OL"));
-  const [ausgewaehlt, setAusgewaehlt] = useState(null);
-  const [dauer, setDauer] = useState(2);
-  // Kalibriert am spielinternen Oberliga-Budgetbereich (50'000-150'000€, siehe NEUES_BUDGET_BEREICH.OL)
-  // und an realen Vergleichszahlen: selbst ein bescheidener Regionalliga-Verein (eine Liga über der
-  // Oberliga) kommt laut Recherche mit rund 650'000€ Jahresetat aus — 200'000€ Startkapital lag damit
-  // sowohl über der eigenen Spiellogik als auch unrealistisch hoch für einen Oberliga-Verein.
-  const budget = profile.easterEgg ? 100000000 : 120000;
-
-  const sterne = (rating) => Math.max(1, Math.min(5, Math.round(rating / 20)));
-
-  return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
-      <div className="w-full max-w-2xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
-        <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-6 py-5 text-center">
-          <div className="flex items-center justify-center gap-2 text-amber-400 mb-1">
-            <Users size={22} />
-            <span className="text-xs tracking-[0.3em] uppercase">Erste Amtshandlung</span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-wide text-white">Trainer verpflichten</h1>
-          <p className="text-emerald-400/70 text-xs mt-1">{profile.team}</p>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <div className="flex items-center justify-between border border-emerald-800 rounded px-4 py-2.5 bg-emerald-950/30 text-sm">
-            <span className="text-emerald-500">Startguthaben</span>
-            <span className="font-bold text-amber-400">{budget.toLocaleString("de-CH")} €</span>
-          </div>
-
-          <div className="space-y-2">
-            {kandidaten.map(k => {
-              const gewaehlt = ausgewaehlt === k.id;
-              return (
-                <button
-                  key={k.id}
-                  type="button"
-                  onClick={() => setAusgewaehlt(k.id)}
-                  className={`w-full text-left rounded border px-4 py-3 transition-colors ${
-                    gewaehlt ? "border-amber-400" : "border-emerald-800 hover:border-emerald-600"
-                  }`}
-                  style={{ backgroundColor: gewaehlt ? "rgba(251,191,36,0.08)" : "var(--fm-surface)" }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className={`font-semibold text-sm ${gewaehlt ? "text-amber-300" : "text-emerald-100"}`}>{k.name}</div>
-                      <div className="text-[11px] text-emerald-500 mt-0.5">{k.alter} Jahre · {k.stil}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-amber-400 text-sm tracking-tight">{"★".repeat(sterne(k.rating))}<span className="text-emerald-800">{"★".repeat(5 - sterne(k.rating))}</span></div>
-                      <div className="text-xs text-emerald-400 mt-0.5">{k.jahressalaer.toLocaleString("de-CH")} €/Jahr</div>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {ausgewaehlt && (
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-emerald-400/80 mb-2">Vertragsdauer</label>
-              <div className="flex gap-1.5">
-                {[1, 2, 3, 4].map(j => (
-                  <button
-                    key={j}
-                    type="button"
-                    onClick={() => setDauer(j)}
-                    className={`flex-1 text-xs py-2 rounded border ${dauer === j ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-400"}`}
-                  >
-                    {j} {j === 1 ? "Jahr" : "Jahre"}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-emerald-600 mt-2">
-                Monatslohn: {Math.round(kandidaten.find(k => k.id === ausgewaehlt).jahressalaer / 12).toLocaleString("de-CH")} € — kein Antrittsgeld, das Salär wird laufend aus dem Kontostand bezahlt.
-              </p>
-            </div>
-          )}
-
-          <button
-            disabled={!ausgewaehlt}
-            onClick={() => {
-              const trainer = kandidaten.find(k => k.id === ausgewaehlt);
-              onCoachChosen({ trainer, dauer, restbudget: budget });
-            }}
-            className="w-full mt-1 bg-amber-500 hover:bg-amber-400 disabled:bg-emerald-900 disabled:text-emerald-700 disabled:cursor-not-allowed text-[#0b1f14] font-bold rounded py-3 flex items-center justify-center gap-2 transition-colors"
-          >
-            <Play size={18} /> Vertrag unterzeichnen &amp; Karriere starten
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Kleine Sortierleiste für Transfermarkt und eigenen Kader: ein Tipp wählt das Kriterium, ein zweiter Tipp
 // auf dasselbe Kriterium dreht die Richtung um.
 const SORT_STANDARD_RICHTUNG = { staerke: true, preis: false, marktwert: true, alter: false, potenzial: true, position: true, vertrag: false };
@@ -11020,57 +11233,6 @@ function TrainingslagerView({ verfuegbar, phase, budget, campBonus, onBook }) {
       >
         <Tent size={15} /> Trainingslager buchen
       </button>
-    </div>
-  );
-}
-
-function SponsorScreen({ managerDivId, season, saisonLabel, onConfirm }) {
-  const [kandidaten] = useState(() => generateSponsorKandidaten(managerDivId, season, Math.floor(Math.random() * 1000000)));
-  const [ausgewaehlt, setAusgewaehlt] = useState(null);
-
-  return (
-    <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
-      <div className="w-full max-w-2xl border border-emerald-700/50 rounded-lg shadow-2xl overflow-hidden" style={{backgroundColor: "var(--fm-surface-raised)"}}>
-        <div className="bg-emerald-900/60 border-b border-emerald-700/50 px-6 py-5 text-center">
-          <div className="flex items-center justify-center gap-2 text-amber-400 mb-1">
-            <Shirt size={22} />
-            <span className="text-xs tracking-[0.3em] uppercase">Sponsoring</span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-wide text-white">Trikotsponsor — {saisonLabel}</h1>
-          <p className="text-emerald-400/70 text-xs mt-1">Das Trikot vorne ist eure wertvollste Werbefläche. Wähle einen Partner.</p>
-        </div>
-
-        <div className="p-5 space-y-2">
-          {kandidaten.map(k => {
-            const gewaehlt = ausgewaehlt === k.id;
-            return (
-              <button
-                key={k.id}
-                type="button"
-                onClick={() => setAusgewaehlt(k.id)}
-                className={`w-full text-left rounded border px-4 py-3 transition-colors ${gewaehlt ? "border-amber-400" : "border-emerald-800 hover:border-emerald-600"}`}
-                style={{ backgroundColor: gewaehlt ? "rgba(251,191,36,0.08)" : "var(--fm-surface)" }}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className={`font-semibold text-sm ${gewaehlt ? "text-amber-300" : "text-emerald-100"}`}>{k.firma}</div>
-                    <div className="text-[11px] text-emerald-500 mt-0.5">{k.laufzeit} {k.laufzeit === 1 ? "Jahr" : "Jahre"} Laufzeit</div>
-                  </div>
-                  <div className="text-amber-400 text-sm font-semibold">{k.betragProJahr.toLocaleString("de-CH")} €/Jahr</div>
-                </div>
-              </button>
-            );
-          })}
-
-          <button
-            disabled={!ausgewaehlt}
-            onClick={() => onConfirm(kandidaten.find(k => k.id === ausgewaehlt))}
-            className="w-full mt-2 bg-amber-500 hover:bg-amber-400 disabled:bg-emerald-900 disabled:text-emerald-700 disabled:cursor-not-allowed text-[#0b1f14] font-bold rounded py-3 flex items-center justify-center gap-2"
-          >
-            <Shirt size={18} /> Sponsorenvertrag unterzeichnen
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -12878,6 +13040,31 @@ const SPIELREGELN_KATEGORIEN = [
     ]
   },
   {
+    icon: Users, farbe: "#c084fc", titel: "Kabine",
+    kurz: "Konflikte, Entscheidungen, Folgen",
+    punkte: [
+      "Im Tab Kader & Taktik > Kabine siehst du die Stimmung und offene Konflikte. Sie entstehen aus der Lage: lange Bankzeit eines starken Spielers, Lohnschere zu einem Neuzugang, Kapitänsfrage, Positionskampf zweier Ehrgeiziger oder Hitzköpfe, Niederlagenserie. Höchstens 2 gleichzeitig, grob 3 bis 6 pro Saison.",
+      "Du entscheidest je nach Konflikt: Gespräch (kostenlos, ein Versuch, Chance hängt von Persönlichkeit, Team-Psychologe, Assistent und Mentalcoach ab), Einsatzzeit zusichern (5 Spiele, bricht das Versprechen, leidet er stark), Lohn anpassen, Binde übergeben, Geldstrafe oder Verkaufsliste.",
+      "Ohne Entscheidung eskaliert der Konflikt nach 5 Liga-Spieltagen: Form und Stimmung brechen ein, mit etwas Pech will der Spieler weg und ein Angebot liegt vor. Offene Konflikte drücken schon vorher leicht auf Form und Stimmung. Alles landet in der Chronik."
+    ]
+  },
+  {
+    icon: Trophy, farbe: "#f59e0b", titel: "Ruhmeshalle",
+    kurz: "Rekorde, Bestenlisten, Spielerbilanz",
+    punkte: [
+      "Unter Historie > Ruhmeshalle: Vereinsrekorde (höchster Sieg und Niederlage, Serien, Zuschauer, Transfers, Torschützen, Einsätze, Punkte), ewige Bestenlisten, Saisonübersicht und die Spielerbilanz je Saison.",
+      "Die laufende Saison zählt live mit. Spieler, die den Verein verlassen haben, bleiben mit ihren Zahlen erhalten. Tippst du in Bestenlisten oder Spielerbilanz auf einen Namen, siehst du seinen Karriereverlauf mit Summen, Stärke-Entwicklung und Chronik-Ereignissen. Neue Rekorde melden sich am Saisonende in der Chronik."
+    ]
+  },
+  {
+    icon: FileText, farbe: "#93c5fd", titel: "Vereinschronik",
+    kurz: "Archiv pro Saison",
+    punkte: [
+      "Unter Historie > Chronik hält das Spiel automatisch fest: Zu- und Abgänge mit Ablöse, Leihen, Verletzungen, Lohnforderungen, Vertragsverlängerungen und Jugend-Beförderungen.",
+      "Am Saisonende kommen die Zuschauerbilanz (Schnitt, Auslastung, Rekord) und der ausgemusterte U19-Jahrgang dazu. Dazu kommen Nachwuchs-Meilensteine: Debüt, erstes Tor sowie 10/25/50/100 Tore und 25/50/100/200/300 Spiele von Eigengewächsen, und am Saisonende Ex-Eigengewächse, die sich bei anderen Vereinen stark verbessert haben. Alles ist nach Saison gegliedert und nach Art filterbar. Das Pressearchiv ist ebenfalls nach Saison sortiert. Am Saisonende erscheint im Jahresbericht ein Saisonrückblick mit Bilanz, Highlights und Finanzen; er bleibt im Tab Jahresbericht nachlesbar."
+    ]
+  },
+  {
     icon: Mic, farbe: "#fcd34d", titel: "Pressekonferenz",
     kurz: "Fragen, Ereignisse, Pressearchiv",
     punkte: [
@@ -12917,6 +13104,7 @@ function aktuelleVereinsHinweise(cs) {
     const frei = fenster.name === "Sommer-Transferfenster" ? !camp.vorrunde : !camp.rueckrunde;
     if (frei) liste.push({ key: `camp-${cs.season}-${fenster.name}`, art: "camp", text: `Ein Trainingslager ist jetzt buchbar (einmal pro Saisonhälfte, gibt einen temporären Stärkebonus). Das Fenster schliesst am ${fenster.bisText}` });
   }
+  (cs.kabinenKonflikte || []).forEach(k => liste.push({ key: `kabine-${k.id}`, art: "kabine", text: `Kabine: ${k.text} Noch ${k.restSpieltage} Liga-Spieltage Zeit, dann eskaliert es. Entscheide im Tab Kabine.` }));
   (cs.gehaltsforderungen || []).forEach(f => liste.push({ key: `forderung-${f.id}`, art: "forderung", text: `${f.name} fordert ${f.gehalt.toLocaleString("de-CH")} € Jahresgehalt (${f.grund}). Noch ${f.restSpieltage} Liga-Spieltage Zeit, zu entscheiden: Tab Spielerverträge.` }));
   return liste;
 }
@@ -12946,7 +13134,7 @@ function VereinsinfosView({ careerState }) {
       <div className="border border-t-0 rounded-b-lg p-5 space-y-3" style={{ backgroundColor: "#fefefe", fontFamily: "Georgia, 'Times New Roman', serif" }}>
         {hinweise.map(h => (
           <div key={h.key} className="flex items-start gap-2 border border-sky-300 rounded px-4 py-2 text-xs" style={{ backgroundColor: "#eaf4fb" }}>
-            {h.art === "camp" ? <Tent size={14} className="text-sky-700 shrink-0 mt-0.5" /> : h.art === "forderung" ? <Users size={14} className="text-sky-700 shrink-0 mt-0.5" /> : <Repeat size={14} className="text-sky-700 shrink-0 mt-0.5" />}
+            {h.art === "camp" ? <Tent size={14} className="text-sky-700 shrink-0 mt-0.5" /> : h.art === "forderung" || h.art === "kabine" ? <Users size={14} className="text-sky-700 shrink-0 mt-0.5" /> : <Repeat size={14} className="text-sky-700 shrink-0 mt-0.5" />}
             <span className="text-sky-900">{h.text}</span>
           </div>
         ))}
@@ -13753,6 +13941,375 @@ function NationalmannschaftView({ divisions, bundestrainerAmt, onNationalkaderSe
           onClose={() => setSpielerFuerDetail(null)}
         />
       )}
+    </div>
+  );
+}
+
+function RuhmeshalleView({ squad = [], season, spielerArchiv = [], saisonBilanzen = [], vereinsRekorde = null, spielHistorie = [], chronik = [], teamName }) {
+  const [ansicht, setAnsicht] = useState("rekorde");
+  const [gewaehlteSaison, setGewaehlteSaison] = useState(null);
+  const [detailId, setDetailId] = useState(null);
+  const karte = { backgroundColor: "var(--fm-surface)" };
+  const euro = n => `${Math.round(n).toLocaleString("de-CH")} €`;
+  const zeilen = spielerSaisonZeilenAlle(spielerArchiv, squad, season);
+  const aktiveIds = new Set(squad.map(p => p.id));
+  // Ewige Summen je Spieler
+  const proSpieler = new Map();
+  zeilen.forEach(z => {
+    const a = proSpieler.get(z.id) || { id: z.id, name: z.name, posName: z.posName, spiele: 0, tore: 0, vorlagen: 0, saisons: 0 };
+    proSpieler.set(z.id, { ...a, name: z.name, posName: z.posName, spiele: a.spiele + z.spiele, tore: a.tore + z.tore, vorlagen: a.vorlagen + z.vorlagen, saisons: a.saisons + 1 });
+  });
+  const summen = [...proSpieler.values()];
+  const top = (feld) => [...summen].filter(x => x[feld] > 0).sort((x, y) => y[feld] - x[feld]).slice(0, 10);
+  const besteSaison = zeilen.length ? zeilen.reduce((m, z) => z.tore > m.tore ? z : m, zeilen[0]) : null;
+  const rekorde = mergeRekorde(vereinsRekorde, berechneSpielRekorde(spielHistorie, season));
+  const zugaenge = chronik.filter(e => e.art === "zugang" && e.betrag > 0), abgaenge = chronik.filter(e => e.art === "abgang" && e.betrag > 0);
+  const teuerster = liste => liste.reduce((m, e) => !m || e.betrag > m.betrag ? e : m, null);
+  const tz = teuerster(zugaenge), tv = teuerster(abgaenge);
+  const bilanzen = [...saisonBilanzen].sort((x, y) => y.saison - x.saison);
+  const bestePunkte = bilanzen.filter(b => b.tabelle).reduce((m, b) => !m || b.tabelle.pkt > m.tabelle.pkt ? b : m, null);
+  const saisonsListe = [...new Set(zeilen.map(z => z.saison))].sort((x, y) => y - x);
+  const aktiveSaison = gewaehlteSaison ?? saisonsListe[0] ?? season;
+  const saisonZeilen = zeilen.filter(z => z.saison === aktiveSaison).sort((x, y) => y.tore - x.tore || y.vorlagen - x.vorlagen || y.spiele - x.spiele);
+  const sl = sn => `${sn}/${String(sn + 1).slice(-2)}`;
+  const Zeile = ({ k, v, sub }) => (
+    <div className="flex justify-between gap-3 text-[11px] py-1 border-b border-emerald-950 last:border-0">
+      <span className="text-emerald-500 shrink-0">{k}</span>
+      <span className="text-right"><span className="text-emerald-100 font-semibold">{v}</span>{sub && <span className="text-emerald-600"> · {sub}</span>}</span>
+    </div>
+  );
+  const Rangliste = ({ titel, feld, einheit }) => (
+    <div className="border border-emerald-800 rounded p-3" style={karte}>
+      <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1.5">{titel}</div>
+      {top(feld).length === 0 ? <div className="text-[11px] text-emerald-700">Noch keine Einträge.</div> : top(feld).map((x, i) => (
+        <div key={x.id} className="flex justify-between gap-2 text-[11px] py-0.5">
+          <span className="text-emerald-200"><span className="text-emerald-600 inline-block w-5">{i + 1}.</span><NameLink id={x.id} name={x.name} />{!aktiveIds.has(x.id) && <span className="text-emerald-700"> (ehemalig)</span>}</span>
+          <span className="text-amber-300 font-semibold">{x[feld]} {einheit}</span>
+        </div>
+      ))}
+    </div>
+  );
+  const NameLink = ({ id, name, extra }) => (
+    <button type="button" onClick={() => setDetailId(id)} className="text-left underline decoration-dotted underline-offset-2 hover:text-amber-300">{name}{extra}</button>
+  );
+  if (detailId) {
+    const meine = zeilen.filter(z => z.id === detailId).sort((x, y) => x.saison - y.saison);
+    const aktuell = squad.find(p => p.id === detailId);
+    const name = aktuell?.name || meine[meine.length - 1]?.name || "Spieler";
+    const pos = aktuell?.posName || meine[meine.length - 1]?.posName;
+    const summe = f => meine.reduce((t, z) => t + (z[f] || 0), 0);
+    const spieleGes = summe("spiele"), toreGes = summe("tore");
+    const besteTore = meine.length ? Math.max(...meine.map(z => z.tore)) : 0;
+    const maxRating = meine.length ? Math.max(...meine.map(z => z.rating || 0), 1) : 1;
+    const minRating = meine.length ? Math.min(...meine.map(z => z.rating || 0)) : 0;
+    const ereignisse = chronik.filter(e => e.text && e.text.includes(name)).slice(-40).reverse();
+    const pers = aktuell ? PERSOENLICHKEITEN[aktuell.persoenlichkeit] : null;
+    return (
+      <div>
+        <button type="button" onClick={() => setDetailId(null)} className="text-xs text-emerald-400 mb-3 underline">← Zurück zur Ruhmeshalle</button>
+        <div className="border border-amber-400/40 rounded p-4 mb-3" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
+          <div className="text-lg font-bold text-amber-300">{name}</div>
+          <div className="text-[11px] text-emerald-400">
+            {pos}{aktuell ? ` · ${aktuell.alter} Jahre · Stärke ${aktuell.rating}` : " · ehemaliger Spieler"}
+            {aktuell?.akademieProdukt ? " · Eigengewächs" : ""}
+            {pers ? ` · ${PERSOENLICHKEITEN_ICON[aktuell.persoenlichkeit] || ""} ${pers.name}` : ""}
+          </div>
+          {aktuell && <div className="text-[11px] text-emerald-500 mt-0.5">Beim Verein seit {aktuell.beimVereinSeitSaison ?? "Beginn"} · Vertrag bis {aktuell.vertragBisSaison ?? "—"} · Gehalt {euro(aktuell.gehalt || 0)} pro Jahr</div>}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+          {[["Saisons", meine.length], ["Spiele", spieleGes], ["Tore", toreGes], ["Vorlagen", summe("vorlagen")], ["Tore pro Spiel", spieleGes ? (toreGes / spieleGes).toFixed(2) : "—"], ["Gelb / Rot", `${summe("gelb")} / ${summe("rot")}`], ["Spieler des Spieltages", summe("motm")], ["Elf des Tages", summe("elf")]].map(([k, v]) => (
+            <div key={k} className="border border-emerald-800 rounded p-2 text-center" style={karte}>
+              <div className="text-base font-bold text-emerald-100">{v}</div>
+              <div className="text-[10px] text-emerald-600">{k}</div>
+            </div>
+          ))}
+        </div>
+        <div className="border border-emerald-800 rounded p-4 mb-3" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Karriereverlauf pro Saison</div>
+          {meine.length === 0 ? <div className="text-[11px] text-emerald-700">Noch keine Einsätze für den Verein.</div> : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead><tr className="text-emerald-600 text-left"><th className="py-1 pr-2">Saison</th><th className="px-1 text-right">Alter</th><th className="px-1 text-right">Stärke</th><th className="px-1 text-right">Sp</th><th className="px-1 text-right">Tore</th><th className="px-1 text-right">Vorl.</th><th className="px-1 text-right">Gelb</th><th className="px-1 text-right">Rot</th><th className="px-1 text-right">SdS</th></tr></thead>
+                <tbody>
+                  {meine.map(z => (
+                    <tr key={z.saison} className="border-t border-emerald-950 text-emerald-200">
+                      <td className="py-1 pr-2">{z.saison}/{String(z.saison + 1).slice(-2)}{z.saison === season ? " (laufend)" : ""}{z.abgang ? " ✈" : ""}</td>
+                      <td className="px-1 text-right">{z.alter}</td><td className="px-1 text-right">{z.rating}</td><td className="px-1 text-right">{z.spiele}</td>
+                      <td className="px-1 text-right" style={{ color: z.tore === besteTore && besteTore > 0 ? "#fbbf24" : undefined, fontWeight: z.tore === besteTore && besteTore > 0 ? 700 : 400 }}>{z.tore}</td>
+                      <td className="px-1 text-right">{z.vorlagen}</td><td className="px-1 text-right">{z.gelb}</td><td className="px-1 text-right">{z.rot}</td><td className="px-1 text-right">{z.motm}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="text-[10px] text-emerald-700 mt-2">Gold markiert die torreichste Saison. ✈ heisst: Er hat den Verein in dieser Saison verlassen.</div>
+        </div>
+        {meine.length > 1 && (
+          <div className="border border-emerald-800 rounded p-4 mb-3" style={karte}>
+            <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Stärke-Entwicklung</div>
+            <div className="flex items-end gap-2 h-24">
+              {meine.map(z => {
+                const spanne = Math.max(1, maxRating - minRating);
+                const h = 20 + ((z.rating - minRating) / spanne) * 70;
+                return (
+                  <div key={z.saison} className="flex-1 flex flex-col items-center justify-end h-full">
+                    <div className="text-[10px] text-emerald-300 mb-0.5">{z.rating}</div>
+                    <div className="w-full rounded-t" style={{ height: `${h}%`, backgroundColor: "#34d399" }} />
+                    <div className="text-[9px] text-emerald-600 mt-0.5">{String(z.saison).slice(-2)}/{String(z.saison + 1).slice(-2)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        <div className="border border-emerald-800 rounded p-4" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Ereignisse in der Chronik</div>
+          {ereignisse.length === 0 ? <div className="text-[11px] text-emerald-700">Keine Einträge zu diesem Spieler.</div> : (
+            <div className="space-y-2">
+              {ereignisse.map((e, i) => {
+                const t = CHRONIK_TYPEN[e.typ] || { farbe: "#8a99b0", label: e.typ };
+                return (
+                  <div key={i} className="border-l-2 pl-3" style={{ borderColor: t.farbe }}>
+                    <div className="text-[10px] text-emerald-600">{e.datum ? formatDatum(e.datum) : ""} · <span style={{ color: t.farbe }}>{t.label}</span></div>
+                    <div className="text-xs text-emerald-200">{e.text}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  const tabs = [["rekorde", "Rekorde"], ["listen", "Bestenlisten"], ["saisons", "Saisons"], ["bilanz", "Spielerbilanz"]];
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-4">
+        {tabs.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setAnsicht(id)} className="text-xs rounded px-3 py-1.5 border"
+            style={{ borderColor: ansicht === id ? "#fbbf24" : "#263247", color: ansicht === id ? "#fbbf24" : "#8a99b0", backgroundColor: ansicht === id ? "rgba(251,191,36,0.08)" : "transparent" }}>{label}</button>
+        ))}
+      </div>
+
+      {ansicht === "rekorde" && (
+        <div className="border border-emerald-800 rounded p-4" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Vereinsrekorde {teamName}</div>
+          <Zeile k="Höchster Sieg" v={rekorde.hoechsterSieg?.text || "—"} sub={rekorde.hoechsterSieg ? sl(rekorde.hoechsterSieg.saison) : null} />
+          <Zeile k="Höchste Niederlage" v={rekorde.hoechsteNiederlage?.text || "—"} sub={rekorde.hoechsteNiederlage ? sl(rekorde.hoechsteNiederlage.saison) : null} />
+          <Zeile k="Längste Siegesserie" v={rekorde.siegesserie?.text || "—"} sub={rekorde.siegesserie ? sl(rekorde.siegesserie.saison) : null} />
+          <Zeile k="Längste Serie ohne Niederlage" v={rekorde.serieUngeschlagen?.text || "—"} sub={rekorde.serieUngeschlagen ? sl(rekorde.serieUngeschlagen.saison) : null} />
+          <Zeile k="Meiste Zuschauer" v={rekorde.zuschauer?.text || "—"} sub={rekorde.zuschauer ? sl(rekorde.zuschauer.saison) : null} />
+          <Zeile k="Teuerster Zugang" v={tz ? `${tz.spieler}, ${euro(tz.betrag)}` : "—"} sub={tz ? sl(tz.saison) : null} />
+          <Zeile k="Teuerster Verkauf" v={tv ? `${tv.spieler}, ${euro(tv.betrag)}` : "—"} sub={tv ? sl(tv.saison) : null} />
+          <Zeile k="Rekordtorschütze" v={top("tore")[0] ? `${top("tore")[0].name}, ${top("tore")[0].tore} Tore` : "—"} />
+          <Zeile k="Rekord-Einsätze" v={top("spiele")[0] ? `${top("spiele")[0].name}, ${top("spiele")[0].spiele} Spiele` : "—"} />
+          <Zeile k="Meiste Tore in einer Saison" v={besteSaison && besteSaison.tore > 0 ? `${besteSaison.name}, ${besteSaison.tore} Tore` : "—"} sub={besteSaison && besteSaison.tore > 0 ? sl(besteSaison.saison) : null} />
+          <Zeile k="Punkterekord einer Saison" v={bestePunkte ? `${bestePunkte.tabelle.pkt} Punkte` : "—"} sub={bestePunkte ? `${sl(bestePunkte.saison)}, ${bestePunkte.liga}` : null} />
+          <div className="text-[10px] text-emerald-700 mt-2">Die laufende Saison wird live eingerechnet. Transferrekorde gelten ab der Chronik, Serien innerhalb einer Saison.</div>
+        </div>
+      )}
+
+      {ansicht === "listen" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Rangliste titel="Ewige Torschützen" feld="tore" einheit="Tore" />
+          <Rangliste titel="Meiste Einsätze" feld="spiele" einheit="Spiele" />
+          <Rangliste titel="Ewige Vorlagengeber" feld="vorlagen" einheit="Vorlagen" />
+        </div>
+      )}
+
+      {ansicht === "saisons" && (
+        <div className="border border-emerald-800 rounded p-4" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Saisonübersicht</div>
+          {bilanzen.length === 0 ? <div className="text-[11px] text-emerald-700">Nach der ersten abgeschlossenen Saison erscheint hier die Übersicht.</div> : (
+            <div className="space-y-2">
+              {bilanzen.map(b => (
+                <div key={b.saison} className="border-l-2 pl-3" style={{ borderColor: b.titel?.length ? "#fbbf24" : "#34d399" }}>
+                  <div className="text-xs text-emerald-200 font-semibold">{sl(b.saison)} · {b.liga} · Platz {b.platz}/{b.anzahlTeams}{b.aufgestiegen ? " · Aufstieg" : b.abgestiegen ? " · Abstieg" : ""}</div>
+                  <div className="text-[11px] text-emerald-500">
+                    {b.tabelle ? `${b.tabelle.pkt} Punkte · ${b.tabelle.s}-${b.tabelle.u}-${b.tabelle.n} · Tore ${b.tabelle.tore}:${b.tabelle.gegentore}` : ""}
+                    {b.torjaeger ? ` · Torjäger ${b.torjaeger.name} (${b.torjaeger.wert})` : ""}
+                    {b.zuschauerSchnitt ? ` · Ø ${b.zuschauerSchnitt.toLocaleString("de-CH")} Zuschauer` : ""}
+                  </div>
+                  {b.titel?.length > 0 && <div className="text-[11px] text-amber-300">🏆 {b.titel.join(", ")}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {ansicht === "bilanz" && (
+        <div className="border border-emerald-800 rounded p-4" style={karte}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Spielerbilanz pro Saison</div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {(saisonsListe.length ? saisonsListe : [season]).map(sn => (
+              <button key={sn} type="button" onClick={() => setGewaehlteSaison(sn)} className="text-xs rounded px-2.5 py-1 border"
+                style={{ borderColor: aktiveSaison === sn ? "#fbbf24" : "#263247", color: aktiveSaison === sn ? "#fbbf24" : "#8a99b0" }}>{sl(sn)}{sn === season ? " (laufend)" : ""}</button>
+            ))}
+          </div>
+          {saisonZeilen.length === 0 ? <div className="text-[11px] text-emerald-700">Für diese Saison gibt es noch keine Einsätze.</div> : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead><tr className="text-emerald-600 text-left"><th className="py-1 pr-2">Spieler</th><th className="px-1 text-right">Sp</th><th className="px-1 text-right">Tore</th><th className="px-1 text-right">Vorl.</th><th className="px-1 text-right">Gelb</th><th className="px-1 text-right">Rot</th><th className="px-1 text-right">SdS</th></tr></thead>
+                <tbody>
+                  {saisonZeilen.map(z => (
+                    <tr key={`${z.id}-${z.saison}`} className="border-t border-emerald-950 text-emerald-200">
+                      <td className="py-1 pr-2"><NameLink id={z.id} name={z.name} /> <span className="text-emerald-700">{z.posName}{!aktiveIds.has(z.id) ? ", ehemalig" : ""}</span></td>
+                      <td className="px-1 text-right">{z.spiele}</td><td className="px-1 text-right text-amber-300">{z.tore}</td><td className="px-1 text-right">{z.vorlagen}</td>
+                      <td className="px-1 text-right">{z.gelb}</td><td className="px-1 text-right">{z.rot}</td><td className="px-1 text-right">{z.motm}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="text-[10px] text-emerald-700 mt-2">Zählt alle Wettbewerbe. SdS = Spieler des Spieltages. Spieler, die den Verein verlassen haben, bleiben mit ihren Zahlen erhalten. Eine Schnittnote wird im Spiel nicht geführt. Name antippen öffnet den Karriereverlauf des Spielers.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KabineView({ squad, konflikte = [], log = [], kapitaenId, teamgeist, stab, onEntscheidung }) {
+  const karte = { backgroundColor: "var(--fm-surface)" };
+  const stimmung = kabinenStimmung(teamgeist.gesamt, konflikte.length);
+  const kapitaen = squad.find(p => p.id === kapitaenId);
+  const fuehrung = squad.filter(p => p.persoenlichkeit === "fuehrungsspieler");
+  const kandidaten = [...squad.filter(p => p.alter >= 22)].sort((a, b) => ((b.rating + b.alter * 0.5 + (PERSOENLICHKEITEN[b.persoenlichkeit]?.kapitaenBonus || 0)) - (a.rating + a.alter * 0.5 + (PERSOENLICHKEITEN[a.persoenlichkeit]?.kapitaenBonus || 0)))).slice(0, 3);
+  const zusagen = squad.filter(p => p.einsatzZusage);
+  const dimensionen = [["Kontinuität", teamgeist.kontinuitaet], ["Persönlichkeitsmix", teamgeist.persoenlichkeitsmix], ["Gehaltsgleichheit", teamgeist.gehaltsgleichheit], ["Bankzufriedenheit", teamgeist.bankzufriedenheit], ["Kapitänsführung", teamgeist.kapitaensfuehrung]];
+  const chanceLabel = c => c >= 0.65 ? "gute" : c >= 0.4 ? "mittlere" : "geringe";
+  return (
+    <div>
+      <div className="border rounded p-4 mb-4" style={{ ...karte, borderColor: stimmung.farbe }}>
+        <div className="flex items-baseline justify-between mb-2">
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Stimmung in der Kabine</div>
+          <div className="text-sm font-bold" style={{ color: stimmung.farbe }}>{stimmung.label} · {stimmung.wert}</div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+          {dimensionen.map(([n, w]) => (
+            <div key={n} className="flex items-center gap-2 text-[11px] text-emerald-500">
+              <span className="w-36 shrink-0">{n}</span>
+              <div className="flex-1 h-1.5 rounded bg-emerald-950"><div className="h-1.5 rounded" style={{ width: `${w}%`, backgroundColor: w >= 60 ? "#34d399" : w >= 40 ? "#fbbf24" : "#f87171" }} /></div>
+              <span className="w-7 text-right text-emerald-300">{w}</span>
+            </div>
+          ))}
+        </div>
+        <div className="text-[10px] text-emerald-600 mt-2">Jeder offene Konflikt senkt die Stimmung. Konflikte entstehen aus der Lage im Kader, etwa bei langer Bankzeit, Lohnschere, Kapitänsfrage, Positionskampf oder Niederlagenserie.</div>
+      </div>
+
+      <div className="mb-4">
+        <div className="text-[11px] uppercase tracking-wider text-red-400/80 mb-1.5">Offene Konflikte</div>
+        {konflikte.length === 0 ? (
+          <div className="text-[11px] text-emerald-700 border border-emerald-900 rounded p-3" style={karte}>Aktuell ist die Kabine ruhig.</div>
+        ) : (
+          <div className="space-y-2">
+            {konflikte.map(k => {
+              const haupt = squad.find(p => p.id === k.hauptId);
+              const chance = kabinenGespraechChance(haupt, stab);
+              return (
+                <div key={k.id} className="border border-red-400/40 rounded p-3 text-xs space-y-2" style={{ backgroundColor: "rgba(248,113,113,0.06)" }}>
+                  <div className="text-red-300 font-semibold">{k.titel}</div>
+                  <div className="text-emerald-200">{k.text}</div>
+                  <div className="text-[10px] text-emerald-600">Noch {k.restSpieltage} Liga-Spieltage Zeit, danach eskaliert es (Form- und Stimmungseinbruch, evtl. Wechselwunsch).</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {KABINE_TYP_OPTIONEN[k.typ].map(o => {
+                      const gesperrt = o === "gespraech" && k.gespraechVersucht;
+                      return (
+                        <button key={o} type="button" disabled={gesperrt} onClick={() => onEntscheidung(k.id, o)}
+                          className="text-left border border-emerald-700 rounded px-2.5 py-2 disabled:opacity-40 hover:bg-emerald-900/30">
+                          <div className="text-emerald-200 font-semibold">{KABINE_OPTIONEN[o].label}{o === "gespraech" ? ` (${gesperrt ? "bereits versucht" : `${chanceLabel(chance)} Chance`})` : ""}</div>
+                          <div className="text-[10px] text-emerald-600">{KABINE_OPTIONEN[o].info}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={karte}>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Kapitän & Führung</div>
+        <div className="space-y-1 text-[11px]">
+          <div className="flex justify-between"><span className="text-emerald-500">Kapitän</span><span className="text-emerald-100 font-semibold">{kapitaen ? `${kapitaen.name} ${PERSOENLICHKEITEN_ICON[kapitaen.persoenlichkeit] || ""} ${PERSOENLICHKEITEN[kapitaen.persoenlichkeit]?.name || ""}` : "—"}</span></div>
+          <div className="flex justify-between gap-3"><span className="text-emerald-500 shrink-0">Führungsspieler</span><span className="text-emerald-100 text-right">{fuehrung.length ? fuehrung.map(p => p.name).join(", ") : "keiner im Kader"}</span></div>
+          <div className="flex justify-between gap-3"><span className="text-emerald-500 shrink-0">Kapitänskandidaten</span><span className="text-emerald-100 text-right">{kandidaten.map(p => p.name).join(", ") || "—"}</span></div>
+          {zusagen.length > 0 && <div className="flex justify-between gap-3"><span className="text-emerald-500 shrink-0">Einsatz-Zusagen</span><span className="text-amber-300 text-right">{zusagen.map(p => `${p.name} (${p.einsatzZusage.rest})`).join(", ")}</span></div>}
+        </div>
+      </div>
+
+      <div className="border border-emerald-800 rounded p-4" style={karte}>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Verlauf</div>
+        {log.length === 0 ? <div className="text-[11px] text-emerald-700">Noch nichts vorgefallen.</div> : (
+          <div className="space-y-2">
+            {[...log].reverse().slice(0, 12).map(l => (
+              <div key={l.id} className="border-l-2 pl-3" style={{ borderColor: "#c084fc" }}>
+                <div className="text-[10px] text-emerald-600">{l.datum ? formatDatum(l.datum) : ""}</div>
+                <div className="text-xs text-emerald-200">{l.text}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChronikView({ chronik = [], season }) {
+  const [filter, setFilter] = useState("alle");
+  const [offen, setOffen] = useState({});
+  const gefiltert = chronik.filter(e => filter === "alle" || e.typ === filter);
+  const saisons = [...new Set(chronik.map(e => e.saison))].sort((x, y) => y - x);
+  if (!saisons.includes(season)) saisons.unshift(season);
+  const istOffen = sn => offen[sn] !== undefined ? offen[sn] : sn === season;
+  const karte = { backgroundColor: "var(--fm-surface)" };
+  return (
+    <div>
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={karte}>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Vereinschronik</div>
+        <div className="text-[11px] text-emerald-600 mb-3">Zu- und Abgänge mit Ablöse, Leihen, Verletzungen, Lohnforderungen, Vertragsverlängerungen, Jugend und Zuschauer, gegliedert nach Saison.</div>
+        <div className="flex flex-wrap gap-2">
+          {[["alle", { label: "Alles", farbe: "#e6edf6" }], ...Object.entries(CHRONIK_TYPEN)].map(([id, t]) => (
+            <button key={id} type="button" onClick={() => setFilter(id)}
+              className="text-xs rounded px-2.5 py-1 border"
+              style={{ borderColor: filter === id ? t.farbe : "#263247", color: filter === id ? t.farbe : "#8a99b0", backgroundColor: filter === id ? "rgba(255,255,255,0.05)" : "transparent" }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-2">
+        {saisons.map(sn => {
+          const liste = gefiltert.filter(e => e.saison === sn);
+          const o = istOffen(sn);
+          return (
+            <div key={sn} className="border border-emerald-800 rounded" style={karte}>
+              <button type="button" onClick={() => setOffen(v => ({ ...v, [sn]: !o }))} className="w-full flex items-center justify-between px-4 py-3 text-left">
+                <span className="text-sm text-emerald-300 font-semibold">Saison {sn}/{String(sn + 1).slice(-2)}{sn === season ? " · laufend" : ""}</span>
+                <span className="text-[11px] text-emerald-600 flex items-center gap-1.5">{liste.length} Einträge<ChevronRight size={14} style={{ transform: o ? "rotate(90deg)" : "none" }} /></span>
+              </button>
+              {o && (
+                <div className="px-4 pb-3 space-y-2">
+                  {liste.length === 0 && <div className="text-[11px] text-emerald-700">Noch keine Einträge.</div>}
+                  {[...liste].reverse().map((e, i) => {
+                    const t = CHRONIK_TYPEN[e.typ] || { label: e.typ, farbe: "#8a99b0" };
+                    return (
+                      <div key={i} className="border-l-2 pl-3" style={{ borderColor: t.farbe }}>
+                        <div className="text-[10px] text-emerald-600">{e.datum ? formatDatum(e.datum) : ""} · <span style={{ color: t.farbe }}>{t.label}</span></div>
+                        <div className="text-xs text-emerald-200">{e.text}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -15583,7 +16140,8 @@ function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, o
 
 // Vorstand & Presse: laufender Stand der Vorstandsziele (wie am Saisonende in der Vereinsversammlung
 // ausgewertet), die Wiederwahl-Aussicht und das Archiv der bisherigen Pressekonferenzen.
-function VorstandView({ ziele, zielStand, archiv = [], saisonLabel, historie = [] }) {
+function VorstandView({ ziele, zielStand, archiv = [], saisonLabel, historie = [], season }) {
+  const [offeneArchivSaison, setOffeneArchivSaison] = useState(null);
   const karte = { backgroundColor: "var(--fm-surface)" };
   const anzahl = zielStand.length;
   const erfuellt = zielStand.filter(z => z.erfuellt).length;
@@ -15640,23 +16198,53 @@ function VorstandView({ ziele, zielStand, archiv = [], saisonLabel, historie = [
         )}
       </div>
 
-      <div className="border border-emerald-800 rounded p-4" style={karte}>
-        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Pressearchiv</div>
-        {archiv.length === 0 ? (
-          <div className="text-[11px] text-emerald-700">Noch keine Pressekonferenz gegeben. Deine Antworten erscheinen hier.</div>
-        ) : (
-          <div className="space-y-3">
-            {[...archiv].reverse().map((e, i) => (
-              <div key={i} className="border-l-2 border-emerald-800 pl-3">
-                <div className="text-[10px] text-emerald-600">Saison {e.saison}/{String(e.saison + 1).slice(-2)} · Spieltag {e.spieltag} · {e.journalist}</div>
-                <div className="text-xs text-emerald-300 italic">„{e.frage}"</div>
-                <div className="text-xs text-amber-200 mt-0.5">Deine Antwort: {e.antwort}</div>
-                <div className="text-[10px] text-emerald-500">{e.wirkung}</div>
-              </div>
-            ))}
+      {(() => {
+        const eintrag = (e, i) => (
+          <div key={i} className="border-l-2 border-emerald-800 pl-3">
+            <div className="text-[10px] text-emerald-600">Spieltag {e.spieltag} · {e.journalist}</div>
+            <div className="text-xs text-emerald-300 italic">„{e.frage}"</div>
+            <div className="text-xs text-amber-200 mt-0.5">Deine Antwort: {e.antwort}</div>
+            <div className="text-[10px] text-emerald-500">{e.wirkung}</div>
           </div>
-        )}
-      </div>
+        );
+        const aktuelle = archiv.filter(e => e.saison === season);
+        const fruehere = archiv.filter(e => e.saison !== season);
+        const saisons = [...new Set(fruehere.map(e => e.saison))].sort((x, y) => y - x);
+        return (
+          <>
+            <div className="border border-emerald-800 rounded p-4 mb-4" style={karte}>
+              <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Pressearchiv · {saisonLabel}</div>
+              {aktuelle.length === 0 ? (
+                <div className="text-[11px] text-emerald-700">Noch keine Pressekonferenz in dieser Saison. Deine Antworten erscheinen hier.</div>
+              ) : (
+                <div className="space-y-3">{[...aktuelle].reverse().map(eintrag)}</div>
+              )}
+            </div>
+            <div className="border border-emerald-800 rounded p-4" style={karte}>
+              <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Archiv früherer Saisons</div>
+              {saisons.length === 0 ? (
+                <div className="text-[11px] text-emerald-700">Nach jeder Saison wandert das Pressearchiv hierher, gegliedert nach Saison.</div>
+              ) : (
+                <div className="space-y-2">
+                  {saisons.map(sn => {
+                    const liste = fruehere.filter(e => e.saison === sn);
+                    const offen = offeneArchivSaison === sn;
+                    return (
+                      <div key={sn} className="border border-emerald-900 rounded">
+                        <button type="button" onClick={() => setOffeneArchivSaison(offen ? null : sn)} className="w-full flex items-center justify-between px-3 py-2 text-left">
+                          <span className="text-sm text-emerald-300">Saison {sn}/{String(sn + 1).slice(-2)}</span>
+                          <span className="text-[11px] text-emerald-600 flex items-center gap-1.5">{liste.length} Fragen<ChevronRight size={14} style={{ transform: offen ? "rotate(90deg)" : "none" }} /></span>
+                        </button>
+                        {offen && <div className="space-y-3 px-3 pb-3">{[...liste].reverse().map(eintrag)}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -16399,9 +16987,19 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 160; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "21.11.2026, 14:00";
+const APP_BUILD = 170; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "21.11.2026, 23:30";
 const APP_NEUIGKEITEN = [
+  { build: 170, titel: "Karriereverlauf im Spieler-Detail", text: "Tippst du im Kader (oder überall sonst, wo ein Spieler-Detail aufgeht) auf einen eigenen Spieler, zeigt das Detail jetzt zusätzlich den Karriereverlauf beim Verein: Saison für Saison mit Stärke, Spielen, Toren und Vorlagen, dazu die letzten Chronik-Ereignisse zu diesem Spieler." },
+  { build: 169, titel: "Karriereverlauf pro Spieler", text: "In der Ruhmeshalle (Bestenlisten und Spielerbilanz) öffnet ein Tipp auf den Spielernamen den Karriereverlauf: Summen, Saison für Saison mit Stärke, Spielen, Toren, Vorlagen und Karten, Stärke-Entwicklung und alle Chronik-Ereignisse zu diesem Spieler, auch für ehemalige Spieler." },
+  { build: 168, titel: "Aufräumen", text: "Menü: Ruhmeshalle, Chronik und Jahresbericht liegen jetzt gebündelt unter Historie, Verein/Fans bleibt bei Vereinsinfos, Vorstand & Presse, Fanclub und Spielregeln. Im Code wurden ungenutzte Altlasten entfernt (alte Trainer- und Sponsorenauswahl, unbenutzte Hilfsfunktionen). Keine Änderung am Spielverhalten." },
+  { build: 167, titel: "Ruhmeshalle", text: "Neuer Reiter Ruhmeshalle unter Historie: Vereinsrekorde (höchster Sieg, Serien, Zuschauer, Transfers, Rekordtorschütze und mehr), ewige Bestenlisten, Saisonübersicht und die Spielerbilanz pro Saison mit Einsätzen, Toren, Vorlagen und Karten, auch für ehemalige Spieler." },
+  { build: 166, titel: "Kabinenstimmung", text: "Neuer Tab Kabine (Kader & Taktik): Konflikte entstehen aus der Lage im Kader (lange Bankzeit, Lohnschere, Kapitänsfrage, Positionskampf, Niederlagenserie). Du entscheidest per Gespräch, Einsatzzusage, Lohnanpassung, Kapitänsbinde, Geldstrafe oder Verkaufsliste. Ohne Entscheidung eskaliert es nach 5 Spieltagen. Meldungen erscheinen in den Vereinsinfos, alles steht in der Chronik." },
+  { build: 165, titel: "Nachwuchs-Meilensteine", text: "Die Chronik hält jetzt Meilensteine deiner Eigengewächse fest: Profi-Debüt, erstes Tor, 10/25/50/100 Tore und 25/50/100/200/300 Spiele für den Verein. Am Saisonende kommen Ex-Eigengewächse dazu, die sich bei ihrem neuen Verein deutlich verbessert haben." },
+  { build: 164, titel: "Saisonrückblick", text: "Der Jahresbericht beginnt jetzt mit einem sachlichen Saisonrückblick: Platz, Punkte, Bilanz heim und auswärts, höchster Sieg, Serien, Torjäger, Vorlagen, teuerster Zu- und Abgang, schwerste Verletzung, Zuschauerschnitt und Rekord, Ertrag, Aufwand und Kontostand. Die bisherige Bewertung heisst jetzt \"worauf achten\" und steht darunter." },
+  { build: 163, titel: "Vereinschronik", text: "Neuer Reiter Chronik unter Historie: Alle Zu- und Abgänge mit Ablöse, Leihen, Verletzungen, Lohnforderungen, Vertragsverlängerungen und Jugend-Beförderungen werden automatisch festgehalten. Am Saisonende kommen die Zuschauerbilanz und der ausgemusterte U19-Jahrgang dazu. Die Einträge sind nach Saison gegliedert, einklappbar und nach Art filterbar." },
+  { build: 162, titel: "Pressearchiv nach Saisons", text: "Unter Vorstand & Presse zeigt das Pressearchiv nur noch die laufende Saison. Alle früheren Pressekonferenzen liegen im neuen Archiv, gegliedert nach Saison und einklappbar. Es bleiben bis zu 600 Einträge gespeichert (vorher 60)." },
+  { build: 161, titel: "Jugendkader bleiben bei 18", text: "Nach dem Saisonwechsel hatten U17 bis U9 bis zu 27 Spieler, weil Aufsteiger aus der Stufe darunter zusätzlich zu den neu aufgefüllten Spielern kamen. Jetzt bleibt jeder Jugendkader bei 18 Spielern. Zieht du einen Junior in die erste Mannschaft hoch, entsteht in der Jugend eine Lücke, die erst beim nächsten Saisonwechsel mit einem neuen Spieler aufgefüllt wird." },
   { build: 160, titel: "Easter Egg: Vollausbau", text: "Wer sich mit 1 / 1 anmeldet, startet jetzt mit einem komplett ausgebauten Verein: Stadion mit allen Anlagen und Namensrechten, alle Marketing-Kampagnen, bestes Trainingsmaterial, voller Mitarbeiter- und Jugendstab, gefüllte Lager, alle Sponsoren, Akademie auf Stufe 5 und alle Jugendteams in der obersten Liga." },
   { build: 159, titel: "Hinweise in den Vereinsinfos", text: "Die Vereinsinfos melden jetzt, sobald ein Transferfenster öffnet, ein Trainingslager buchbar ist oder ein Spieler mehr Lohn fordert (mit roter Markierung, bis du sie gelesen hast)." },
   { build: 158, titel: "Grosses Update: Finanzen, Kader, Transfers", text: "Buchhaltung: Stadionkauf, Umbauten und Infrastruktur sind jetzt Investitionen und belasten das Ergebnis nicht mehr. Neu: Mehrjahres-Bilanz und Bankdarlehen (bis 80 % des Stadionpreises). Kader: Nach längeren Verletzungen gibt es eine Aufbauphase mit Leistungsabzug und höherem Rückfallrisiko, starke Spieler stellen von sich aus Gehaltsforderungen, und du wählst Elfmeter- und Freistoss-Schützen selbst. Transfers: Um gefragte Spieler bewirbt sich manchmal ein Rivale (mit Gerücht über sein Gebot). Dazu eine Team-Bilanz in der Statistik, ein Titelzähler im Trophäenschrank, ein Vorstands-Verlauf und die Spielregeln als Unter-Tab unter Verein/Fans." },
@@ -16795,10 +17393,70 @@ function SaisonAuswertungInhalt({ statistik, ligaName, managerTeam }) {
   );
 }
 
+function RueckblickKarte({ r }) {
+  if (!r) return null;
+  const euro = n => `${Math.round(n).toLocaleString("de-CH")} €`;
+  const Zeile = ({ k, v }) => (v === null || v === undefined || v === "") ? null : (
+    <div className="flex justify-between gap-3 text-[11px]"><span className="text-emerald-500">{k}</span><span className="text-emerald-100 font-semibold text-right">{v}</span></div>
+  );
+  const Block = ({ titel, children }) => (
+    <div className="border border-emerald-800 rounded p-3" style={{ backgroundColor: "var(--fm-surface)" }}>
+      <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1.5">{titel}</div>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+  const t = r.tabelle;
+  const person = x => x ? `${x.name} (${x.wert} ${x.einheit})` : null;
+  return (
+    <div className="mb-4">
+      <div className="text-xs uppercase tracking-wider text-amber-400 font-semibold mb-2">🏁 Saisonrückblick</div>
+      <div className="border border-amber-400/40 rounded p-3 mb-3 text-center" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
+        <div className="text-lg font-bold text-amber-300">Platz {r.platz} von {r.anzahlTeams}{r.aufgestiegen ? " · Aufstieg" : r.abgestiegen ? " · Abstieg" : ""}</div>
+        {t && <div className="text-[11px] text-emerald-400">{t.pkt} Punkte · {t.s} S, {t.u} U, {t.n} N · Tore {t.tore}:{t.gegentore}</div>}
+        {r.titel.length > 0 && <div className="text-[11px] text-amber-200 mt-1">🏆 {r.titel.join(", ")}</div>}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Block titel="Spielverlauf">
+          <Zeile k="Heim (S-U-N)" v={r.heim ? r.heim.join("-") : null} />
+          <Zeile k="Auswärts (S-U-N)" v={r.auswaerts ? r.auswaerts.join("-") : null} />
+          <Zeile k="Höchster Sieg" v={r.hoechsterSieg} />
+          <Zeile k="Höchste Niederlage" v={r.hoechsteNiederlage} />
+          <Zeile k="Längste Serie ohne Niederlage" v={r.serieOhneNiederlage || null} />
+          <Zeile k="Längste Siegesserie" v={r.siegesserie || null} />
+          <Zeile k="Pokal" v={r.pokalRunde > 1 ? `Runde ${r.pokalRunde}` : "Runde 1"} />
+          {r.europapokal && <Zeile k="Europapokal" v="Teilnahme" />}
+        </Block>
+        <Block titel="Spieler der Saison">
+          <Zeile k="Torjäger" v={person(r.topTorjaeger)} />
+          <Zeile k="Meiste Vorlagen" v={person(r.topVorlagen)} />
+          <Zeile k="Meiste Einsätze" v={person(r.meisteEinsaetze)} />
+          <Zeile k="Meiste Spieler des Spieltages" v={person(r.spielerDesSpieltages)} />
+        </Block>
+        <Block titel="Transfers & Gesundheit">
+          <Zeile k="Teuerster Zugang" v={r.teuersterZugang ? `${r.teuersterZugang.name}, ${euro(r.teuersterZugang.betrag)}` : null} />
+          <Zeile k="Teuerster Verkauf" v={r.teuersterVerkauf ? `${r.teuersterVerkauf.name}, ${euro(r.teuersterVerkauf.betrag)}` : null} />
+          <Zeile k="Verletzungen" v={r.verletzungenAnzahl} />
+          <Zeile k="Schwerste Verletzung" v={r.schwersteVerletzung ? `${r.schwersteVerletzung.name}, ${r.schwersteVerletzung.tage >= 14 ? `ca. ${Math.round(r.schwersteVerletzung.tage / 7)} Wochen` : `ca. ${r.schwersteVerletzung.tage} Tage`}` : null} />
+        </Block>
+        <Block titel="Stadion & Finanzen">
+          <Zeile k="Zuschauerschnitt" v={r.zuschauerSchnitt ? r.zuschauerSchnitt.toLocaleString("de-CH") : null} />
+          <Zeile k="Saisonrekord" v={r.zuschauerRekord ? `${(r.zuschauerRekord.zuschauer || 0).toLocaleString("de-CH")}${r.zuschauerRekord.gegner ? ` gegen ${r.zuschauerRekord.gegner}` : ""}` : null} />
+          <Zeile k="Ertrag" v={euro(r.ertrag)} />
+          <Zeile k="Aufwand" v={euro(r.aufwand)} />
+          <Zeile k="Reingewinn" v={`${r.reingewinn < 0 ? "−" : ""}${euro(Math.abs(r.reingewinn))}`} />
+          <Zeile k="Kontostand" v={euro(r.kontostand)} />
+        </Block>
+      </div>
+    </div>
+  );
+}
+
 function JahresberichtInhalt({ bericht }) {
   return (
+    <div>
+    <RueckblickKarte r={bericht.rueckblick} />
     <div className="border border-sky-400/50 rounded p-4" style={{ backgroundColor: "rgba(56,189,248,0.06)" }}>
-      <div className="text-xs uppercase tracking-wider text-sky-400 font-semibold mb-3">📋 Saisonrückblick</div>
+      <div className="text-xs uppercase tracking-wider text-sky-400 font-semibold mb-3">📋 Bewertung: worauf achten</div>
       {bericht.achtung.length > 0 && (
         <div className="mb-3">
           <div className="text-[11px] uppercase tracking-wider text-red-400 mb-1">🔴 Darauf achten</div>
@@ -16842,6 +17500,7 @@ function JahresberichtInhalt({ bericht }) {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }
@@ -16899,9 +17558,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, darlehen = null, vorstandHistorie = [], gehaltsforderungen = [], schuetzenManuell = false, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "trainer", belastung = "trainer", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, dfbAbgang = null, dfbSperreBis = 0, nationenOffsets = {}, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], pressearchiv = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null } = careerState;
+  const { spielerArchiv = [], saisonBilanzen = [], vereinsRekorde = null, kabinenKonflikte = [], kabinenLog = [], chronik = [], divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, darlehen = null, vorstandHistorie = [], gehaltsforderungen = [], schuetzenManuell = false, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "trainer", belastung = "trainer", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, dfbAbgang = null, dfbSperreBis = 0, nationenOffsets = {}, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], pressearchiv = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null } = careerState;
   AKTUELLE_NATIONEN_OFFSETS = nationenOffsets || {};
   PREIS_SAISON = season;
+  KARRIERE_DATEN = { spielerArchiv, chronik, eigeneIds: new Set(((divisions || {})[findManagerDivision(divisions, profile.team)]?.squads?.[profile.team] || []).map(q => q.id)), season };
   const datum = careerState.datum || saisonStartDatum(season);
   // Roter Punkt beim Vereinsinfos-Tab: es gibt etwas Neues UND der Spieler hat es für den aktuellen
   // Spielstand (datum) noch nicht angeschaut. Öffnen des Tabs markiert es als gelesen (siehe onTabWechseln).
@@ -16936,6 +17596,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       case "kader": return kaderBrauchtAktion ? "red" : null;
       case "vertraege": return vertraegeBrauchenAktion ? "red" : ((beraterVerlaengerungsAngebote?.length > 0 || gehaltsforderungen?.length > 0) ? "amber" : null);
       case "taktik": return taktikBrauchtAktion ? "red" : null;
+      case "kabine": return kabinenKonflikte.length > 0 ? "red" : null;
       case "vereinsinfos": return vereinsinfosUngelesen ? "red" : null;
       case "nationalmannschaft": {
         // Wie bei der Kaderauswahl selbst: gespeicherte IDs können über die Zeit ungültig werden
@@ -18783,6 +19444,41 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       }
     }
 
+    // Kabine: offene Konflikte laufen weiter (Druck auf den Hauptbeteiligten), nach 5 Liga-Spieltagen
+    // ohne Entscheidung eskaliert es. Neue Konflikte entstehen aus der Lage im Kader (siehe generiereKabinenKonflikt).
+    let neueKabinenKonflikte = kabinenKonflikte || [];
+    let neuesKabinenLog = kabinenLog || [];
+    const kabineEffekte = [];
+    if (spieltHeute) {
+      const squadK = neueDivisions[managerDivId].squads[profile.team];
+      const weiter = [];
+      neueKabinenKonflikte.forEach(k => {
+        const haupt = squadK.find(q => q.id === k.hauptId);
+        if (!haupt) return;
+        const rest = k.restSpieltage - 1;
+        if (rest > 0) { weiter.push({ ...k, restSpieltage: rest }); kabineEffekte.push({ id: k.hauptId, zuf: -0.8, form: -1 }); return; }
+        kabineEffekte.push({ id: k.hauptId, zuf: -12, form: -8 });
+        if (k.gegenId) kabineEffekte.push({ id: k.gegenId, zuf: -5, form: -3 });
+        let zusatz = "";
+        if (neueEingehendeAngebote.length < 6 && Math.random() < 0.35) {
+          const angebot = generiereAngebotFuerGelisteten(neueDivisions, managerDivId, profile.team, haupt, neueEingehendeAngebote.filter(a => a.spielerId === haupt.id).map(a => a.team));
+          if (angebot) { neueEingehendeAngebote = [...neueEingehendeAngebote, { ...angebot, gelistet: false }]; zusatz = ` ${haupt.name} will weg, ein Angebot liegt vor.`; }
+        }
+        neuesKabinenLog = [...neuesKabinenLog, { id: `${k.id}-eskaliert`, saison: season, datum, text: `Eskaliert: ${k.titel} um ${k.hauptName}${k.gegenName ? ` und ${k.gegenName}` : ""} blieb ohne Entscheidung. Form und Stimmung sind eingebrochen.${zusatz}` }];
+      });
+      neueKabinenKonflikte = weiter;
+      if (neueKabinenKonflikte.length < 2 && Math.random() < 0.13) {
+        const histSerie = (spielHistorie || []).filter(h => (h.wettbewerb || "Liga") === "Liga" && h.tHeim != null).slice(-3);
+        const niederlagenSerie = histSerie.length === 3 && histSerie.every(h => (h.istHeim ? h.tHeim < h.tGast : h.tGast < h.tHeim)) ? 3 : 0;
+        const neuerKonflikt = generiereKabinenKonflikt(squadK, { kapitaenId, season, datum, offeneKonflikte: neueKabinenKonflikte, niederlagenSerie });
+        if (neuerKonflikt) {
+          neueKabinenKonflikte = [...neueKabinenKonflikte, neuerKonflikt];
+          neuesKabinenLog = [...neuesKabinenLog, { id: `${neuerKonflikt.id}-neu`, saison: season, datum, text: `${neuerKonflikt.titel}: ${neuerKonflikt.text}` }];
+        }
+      }
+      neuesKabinenLog = neuesKabinenLog.slice(-40);
+    }
+
     // Spieler, die der Manager selbst auf den Transfermarkt gesetzt hat (eigener Wunsch oder
     // Trainer-Empfehlung): deutlich höhere Chance auf Angebote, damit sich das aktive Verkaufen lohnt,
     // aber über mehrere Spieltage verteilt und mit schwankenden Geboten statt Sofortverkauf.
@@ -19344,6 +20040,12 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Sicherheitssystem, Digitale Infrastruktur, Markenwert).
     let squadNachEreignis = aktualisiereSpielerZufriedenheit(neueDivisions[managerDivId].squads[profile.team], new Set(aktuelleStartelf.elf.map(p => p.id)), season, neueGehaltsforderungen.map(f => f.spielerId));
     if (abgelaufeneForderungIds.length) squadNachEreignis = squadNachEreignis.map(p => abgelaufeneForderungIds.includes(p.id) ? { ...p, zufriedenheit: Math.max(0, (p.zufriedenheit ?? 70) - 8) } : p);
+    if (kabineEffekte.length) squadNachEreignis = squadNachEreignis.map(p => {
+      const effekte = kabineEffekte.filter(e => e.id === p.id);
+      if (!effekte.length) return p;
+      const dz = effekte.reduce((t, e) => t + e.zuf, 0), df = effekte.reduce((t, e) => t + e.form, 0);
+      return { ...p, zufriedenheit: Math.max(0, Math.min(100, (p.zufriedenheit ?? 70) + dz)), form: Math.max(0, Math.min(100, (p.form ?? 60) + df)) };
+    });
     let stadionNachEreignis = neueDivisions[managerDivId].stadien[profile.team];
     let stabNachEreignis = stabNachLohn;
     let materialNachEreignis = neuesTrainingsmaterial;
@@ -19597,6 +20299,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       spielerberaterAngebote: neueSpielerberaterAngebote,
       beraterVerlaengerungsAngebote: neueBeraterVerlaengerungsAngebote,
       gehaltsforderungen: neueGehaltsforderungen,
+      kabinenKonflikte: neueKabinenKonflikte,
+      kabinenLog: neuesKabinenLog,
       verkaufsliste: neueVerkaufsliste,
       fanclub: fanclubDeltaEreignis ? { ...neuerFanclub, groesse: Math.max(50, neuerFanclub.groesse + fanclubDeltaEreignis) } : neuerFanclub,
       saisonFinanzen: sichtungsKosten > 0 ? { ...neueSaisonFinanzenMitZinsen, aufwandJugend: (neueSaisonFinanzenMitZinsen.aufwandJugend || 0) + sichtungsKosten } : neueSaisonFinanzenMitZinsen,
@@ -20279,7 +20983,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         stadion: division.stadien[profile.team],
         tabellenzeile: division.table[profile.team],
         trainerZufriedenheit, season,
-        philosophiePaket, saisonAuszeichnungen: saisonAuszeichnungenFuerArchiv
+        philosophiePaket, saisonAuszeichnungen: saisonAuszeichnungenFuerArchiv,
+        spielHistorie, chronik
       })
     };
 
@@ -20363,7 +21068,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendliga17ErgebnisVorAlterung = verarbeiteJugendliga17Saisonende(jugendliga17BasisVorAlterung, jugendDivId17BasisVorAlterung, profile.team);
     const jugend17BaseRatingVorAlterung = JUGENDLIGA17_DEFS.find(d => d.id === jugendliga17ErgebnisVorAlterung.jugendDivId).baseRating;
     const { kader: u17KaderNachAlterung, aufgestiegen: u17NachU19Aufgestiegen } = alterJugendKader17(jugendKader17BasisVorAlterung, profile.team, jugend17BaseRatingVorAlterung + jugendNachrueckerBonus(stab, "u17", akademie?.level), seasonEndInfo.season);
-    const u19KaderMitU17Zugaengen = [...u19KaderNachAlterung, ...u17NachU19Aufgestiegen];
+    const u19KaderMitU17Zugaengen = kombiniereMitZugaengen(u19KaderNachAlterung, jugendKaderBasisVorAlterung, u17NachU19Aufgestiegen, U19_KADERGROESSE);
     let u17AufstiegsMeldung = u17NachU19Aufgestiegen.length
       ? { anzahl: u17NachU19Aufgestiegen.length, namen: u17NachU19Aufgestiegen.map(p => p.name) }
       : null;
@@ -20376,7 +21081,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendliga15ErgebnisVorAlterung = verarbeiteJugendliga15Saisonende(jugendliga15BasisVorAlterung, jugendDivId15BasisVorAlterung, profile.team);
     const jugend15BaseRatingVorAlterung = JUGENDLIGA15_DEFS.find(d => d.id === jugendliga15ErgebnisVorAlterung.jugendDivId).baseRating;
     const { kader: u15KaderNachAlterung, aufgestiegen: u15NachU17Aufgestiegen } = alterJugendKader15(jugendKader15BasisVorAlterung, profile.team, jugend15BaseRatingVorAlterung + jugendNachrueckerBonus(stab, "u15", akademie?.level), seasonEndInfo.season);
-    const u17KaderMitU15Zugaengen = [...u17KaderNachAlterung, ...u15NachU17Aufgestiegen];
+    const u17KaderMitU15Zugaengen = kombiniereMitZugaengen(u17KaderNachAlterung, jugendKader17BasisVorAlterung, u15NachU17Aufgestiegen, U19_KADERGROESSE);
     let u15AufstiegsMeldung = u15NachU17Aufgestiegen.length
       ? { anzahl: u15NachU17Aufgestiegen.length, namen: u15NachU17Aufgestiegen.map(p => p.name) }
       : null;
@@ -20389,7 +21094,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendliga13ErgebnisVorAlterung = verarbeiteJugendliga13Saisonende(jugendliga13BasisVorAlterung, jugendDivId13BasisVorAlterung, profile.team);
     const jugend13BaseRatingVorAlterung = JUGENDLIGA13_DEFS.find(d => d.id === jugendliga13ErgebnisVorAlterung.jugendDivId).baseRating;
     const { kader: u13KaderNachAlterung, aufgestiegen: u13NachU15Aufgestiegen } = alterJugendKader13(jugendKader13BasisVorAlterung, profile.team, jugend13BaseRatingVorAlterung + jugendNachrueckerBonus(stab, "u13", akademie?.level), seasonEndInfo.season);
-    const u15KaderMitU13Zugaengen = [...u15KaderNachAlterung, ...u13NachU15Aufgestiegen];
+    const u15KaderMitU13Zugaengen = kombiniereMitZugaengen(u15KaderNachAlterung, jugendKader15BasisVorAlterung, u13NachU15Aufgestiegen, U19_KADERGROESSE);
     let u13AufstiegsMeldung = u13NachU15Aufgestiegen.length
       ? { anzahl: u13NachU15Aufgestiegen.length, namen: u13NachU15Aufgestiegen.map(p => p.name) }
       : null;
@@ -20400,7 +21105,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendKader11BasisVorAlterung = jugendliga11 && jugendKader11.length ? jugendKader11 : initialerU11Kader(profile.team, JUGENDLIGA11_DEF.baseRating);
     const jugendliga11ErgebnisVorAlterung = verarbeiteJugendliga11Saisonende(jugendliga11BasisVorAlterung, profile.team);
     const { kader: u11KaderNachAlterung, aufgestiegen: u11NachU13Aufgestiegen } = alterJugendKader11(jugendKader11BasisVorAlterung, profile.team, JUGENDLIGA11_DEF.baseRating + jugendNachrueckerBonus(stab, "u11", akademie?.level), seasonEndInfo.season);
-    const u13KaderMitU11Zugaengen = [...u13KaderNachAlterung, ...u11NachU13Aufgestiegen];
+    const u13KaderMitU11Zugaengen = kombiniereMitZugaengen(u13KaderNachAlterung, jugendKader13BasisVorAlterung, u11NachU13Aufgestiegen, U19_KADERGROESSE);
     let u11AufstiegsMeldung = u11NachU13Aufgestiegen.length
       ? { anzahl: u11NachU13Aufgestiegen.length, namen: u11NachU13Aufgestiegen.map(p => p.name) }
       : null;
@@ -20411,7 +21116,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const jugendKader9BasisVorAlterung = jugendliga9 && jugendKader9.length ? jugendKader9 : initialerU9Kader(profile.team, JUGENDLIGA9_DEF.baseRating);
     const jugendliga9ErgebnisVorAlterung = verarbeiteJugendliga9Saisonende(jugendliga9BasisVorAlterung, profile.team);
     const { kader: u9KaderNachAlterung, aufgestiegen: u9NachU11Aufgestiegen } = alterJugendKader9(jugendKader9BasisVorAlterung, profile.team, JUGENDLIGA9_DEF.baseRating + jugendNachrueckerBonus(stab, "u9", akademie?.level), seasonEndInfo.season);
-    const u11KaderMitU9Zugaengen = [...u11KaderNachAlterung, ...u9NachU11Aufgestiegen];
+    const u11KaderMitU9Zugaengen = kombiniereMitZugaengen(u11KaderNachAlterung, jugendKader11BasisVorAlterung, u9NachU11Aufgestiegen, U19_KADERGROESSE);
     let u9AufstiegsMeldung = u9NachU11Aufgestiegen.length
       ? { anzahl: u9NachU11Aufgestiegen.length, namen: u9NachU11Aufgestiegen.map(p => p.name) }
       : null;
@@ -20420,7 +21125,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // ohne vorherige Saisonende-Verarbeitung einer Tabelle.
     const jugendKader7BasisVorAlterung = jugendKader7.length ? jugendKader7 : initialerU7Kader(profile.team, U7_BASE_RATING);
     const { kader: u7KaderNachAlterung, aufgestiegen: u7NachU9Aufgestiegen } = alterJugendKader7(jugendKader7BasisVorAlterung, profile.team, U7_BASE_RATING + jugendNachrueckerBonus(stab, "u7", akademie?.level), seasonEndInfo.season);
-    const u9KaderMitU7Zugaengen = [...u9KaderNachAlterung, ...u7NachU9Aufgestiegen];
+    const u9KaderMitU7Zugaengen = kombiniereMitZugaengen(u9KaderNachAlterung, jugendKader9BasisVorAlterung, u7NachU9Aufgestiegen, U19_KADERGROESSE);
     let u7AufstiegsMeldung = u7NachU9Aufgestiegen.length
       ? { anzahl: u7NachU9Aufgestiegen.length, namen: u7NachU9Aufgestiegen.map(p => p.name) }
       : null;
@@ -20463,7 +21168,45 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       vermieterAusbauAngekuendigt: vermieterErgebnisNachAufstieg?.ankuendigung || null,
       pressekonferenzenDieseSaison: 0,
       pressefragenGestelltDieseSaison: [],
-      pressearchiv: (pressearchiv || []).slice(-40),
+      pressearchiv: (pressearchiv || []).slice(-600),
+      spielerArchiv: [...(spielerArchiv || []), ...squadVorAblauf.filter(p => !p.leihspieler && ((p.spiele || 0) > 0 || (p.tore || 0) > 0 || (p.vorlagen || 0) > 0)).map(p => spielerSaisonZeile(p, seasonEndInfo.season ?? season))].slice(-4000),
+      saisonBilanzen: (() => {
+        const r = jahresbericht.bericht.rueckblick;
+        if (!r) return saisonBilanzen || [];
+        return [...(saisonBilanzen || []).filter(x => x.saison !== (seasonEndInfo.season ?? season)), {
+          saison: seasonEndInfo.season ?? season, liga: division.name, platz: r.platz, anzahlTeams: r.anzahlTeams, aufgestiegen: r.aufgestiegen, abgestiegen: r.abgestiegen,
+          tabelle: r.tabelle, torjaeger: r.topTorjaeger, zuschauerSchnitt: r.zuschauerSchnitt, titel: r.titel, reingewinn: r.reingewinn
+        }];
+      })(),
+      vereinsRekorde: mergeRekorde(vereinsRekorde, berechneSpielRekorde(spielHistorie, seasonEndInfo.season ?? season)),
+      chronik: (() => {
+        const sn = seasonEndInfo.season ?? season;
+        const neu = [];
+        const neueRekorde = berechneSpielRekorde(spielHistorie, sn);
+        const REKORD_LABEL = { hoechsterSieg: "Höchster Sieg", hoechsteNiederlage: "Höchste Niederlage", zuschauer: "Zuschauerrekord", serieUngeschlagen: "Längste Serie ohne Niederlage", siegesserie: "Längste Siegesserie" };
+        Object.entries(neueRekorde).forEach(([k, v]) => {
+          const alt = vereinsRekorde?.[k];
+          if (alt && v.wert > alt.wert && k !== "hoechsteNiederlage") neu.push({ saison: sn, datum, typ: "rekord", text: `Neuer Vereinsrekord, ${REKORD_LABEL[k]}: ${v.text}.` });
+        });
+        const zh = altesStadion?.zuschauerHistorie || [];
+        if (zh.length) {
+          const schnitt = Math.round(zh.reduce((t, h) => t + (h.zuschauer || 0), 0) / zh.length);
+          const auslastung = Math.round(zh.reduce((t, h) => t + (h.auslastung || 0), 0) / zh.length * (zh[0].auslastung <= 1 ? 100 : 1));
+          const rekord = zh.reduce((m, h) => (h.zuschauer || 0) > (m.zuschauer || 0) ? h : m, zh[0]);
+          neu.push({ saison: sn, datum, typ: "stadion", text: `Zuschauer: Schnitt ${schnitt.toLocaleString("de-CH")} bei ${zh.length} Heimspielen, Auslastung ${auslastung} %. Saisonrekord ${(rekord.zuschauer || 0).toLocaleString("de-CH")}${rekord.gegner ? ` gegen ${rekord.gegner}` : ""}.` });
+        }
+        (ehemaligeEigengewaechse || []).forEach(e => {
+          const sp = divisionenMitLaenderspielCaps[e.verkauftDivId]?.squads?.[e.verkauftAn]?.find(q => q.id === e.spielerId);
+          if (!sp) return;
+          const delta = sp.rating - (e.ratingBeimVerkauf || sp.rating);
+          if (delta >= 4) neu.push({ saison: sn, datum, typ: "jugend", art: "meilenstein", text: `Ex-Eigengewächs ${sp.name} (${sp.posName || sp.pos}, ${sp.alter}) hat sich bei ${e.verkauftAn} auf Stärke ${sp.rating} verbessert (+${delta} seit dem Verkauf).` });
+        });
+        if (u19Ausgemustert.length) {
+          const namen = u19Ausgemustert.slice(0, 6).map(x => `${x.name} (${x.posName || x.pos}, ${x.rating})`).join(", ");
+          neu.push({ saison: sn, datum, typ: "jugend", text: `Jugend-Jahrgang: ${u19Ausgemustert.length} Spieler aus der U19 ausgemustert: ${namen}${u19Ausgemustert.length > 6 ? " u. a." : ""}.` });
+        }
+        return [...(chronik || []), ...neu].slice(-CHRONIK_MAX);
+      })(),
       vorstandHistorie: seasonEndInfo.vereinsversammlung ? [...(vorstandHistorie || []), { saison: seasonEndInfo.season ?? season, verein: profile.team, erfuellt: seasonEndInfo.vereinsversammlung.erfuellteAnzahl, gesamt: seasonEndInfo.vereinsversammlung.gesamt, wiedergewaehlt: seasonEndInfo.vereinsversammlung.wiedergewaehlt, ziele: seasonEndInfo.vereinsversammlung.ergebnisse.map(e => ({ text: e.text, erfuellt: e.erfuellt })) }].slice(-20) : (vorstandHistorie || []),
       darlehen,
       jugendbefoerderungenDieseSaison: 0,
@@ -20678,6 +21421,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       spielerberaterAngebote: [],
       beraterVerlaengerungsAngebote: [],
       gehaltsforderungen: [],
+      kabinenKonflikte: [],
+      kabinenLog: kabinenLog,
       // Der Managervertrag wird jetzt sichtbar im Saisonabschluss-Screen verlängert (siehe
       // managerVertragLaeuftAusSnapshot oben) — hier wird nur noch der ggf. bereits aktualisierte
       // Vertrag übernommen, keine stille Hintergrund-Verlängerung mehr.
@@ -21535,6 +22280,67 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     });
   };
 
+  const onKabineEntscheidung = (konfliktId, option) => {
+    setCareerState(cs => {
+      const k = (cs.kabinenKonflikte || []).find(x => x.id === konfliktId);
+      if (!k) return cs;
+      const rest = (cs.kabinenKonflikte || []).filter(x => x.id !== konfliktId);
+      const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
+      let squad = div.squads[profile.team];
+      const haupt = squad.find(q => q.id === k.hauptId);
+      if (!haupt) return { ...cs, kabinenKonflikte: rest };
+      const gegen = k.gegenId ? squad.find(q => q.id === k.gegenId) : null;
+      const clamp = v => Math.max(0, Math.min(100, v));
+      const aendere = (id, fn) => { squad = squad.map(q => q.id === id ? fn(q) : q); };
+      const ruhe = addTage(cs.datum, 35);
+      let text = "", geloest = true, verkaufsliste = cs.verkaufsliste || [], kapitaenId = cs.kapitaenId, bleibt = null;
+      if (option === "gespraech") {
+        if (Math.random() < kabinenGespraechChance(haupt, cs.stab)) {
+          aendere(haupt.id, q => ({ ...q, zufriedenheit: clamp((q.zufriedenheit ?? 70) + 8), form: clamp((q.form ?? 60) + 3) }));
+          if (gegen) aendere(gegen.id, q => ({ ...q, zufriedenheit: clamp((q.zufriedenheit ?? 70) + 3) }));
+          text = `Gespräch geholfen: ${k.titel} um ${k.hauptName} ist beigelegt.`;
+        } else {
+          aendere(haupt.id, q => ({ ...q, zufriedenheit: clamp((q.zufriedenheit ?? 70) - 3) }));
+          geloest = false; bleibt = { ...k, gespraechVersucht: true };
+          text = `Gespräch mit ${k.hauptName} brachte nichts: ${k.titel} schwelt weiter.`;
+        }
+      } else if (option === "einsatz") {
+        aendere(haupt.id, q => ({ ...q, einsatzZusage: { rest: 5 }, zufriedenheit: clamp((q.zufriedenheit ?? 70) + 6) }));
+        text = `${k.hauptName} erhält die Zusage, die nächsten 5 Spiele zu spielen (sofern fit).`;
+      } else if (option === "lohn") {
+        const ziel = gegen ? Math.round((gegen.gehalt || 0) * 0.85 / 100) * 100 : Math.round((haupt.gehalt || 0) * 1.3 / 100) * 100;
+        const neu = Math.max(haupt.gehalt || 0, ziel);
+        aendere(haupt.id, q => ({ ...q, gehalt: neu, zufriedenheit: clamp((q.zufriedenheit ?? 70) + 12) }));
+        text = `Lohn von ${k.hauptName} auf ${neu.toLocaleString("de-CH")} € angepasst, die Lohnschere ist entschärft.`;
+      } else if (option === "kapitaen") {
+        kapitaenId = haupt.id;
+        aendere(haupt.id, q => ({ ...q, zufriedenheit: clamp((q.zufriedenheit ?? 70) + 10) }));
+        if (gegen) aendere(gegen.id, q => ({ ...q, zufriedenheit: clamp((q.zufriedenheit ?? 70) - 6) }));
+        text = `${k.hauptName} ist neuer Kapitän${gegen ? `, ${gegen.name} ist gekränkt` : ""}.`;
+      } else if (option === "strafe") {
+        aendere(haupt.id, q => ({ ...q, zufriedenheit: clamp((q.zufriedenheit ?? 70) - 6), form: clamp((q.form ?? 60) - 2) }));
+        squad = squad.map(q => q.id === haupt.id ? q : { ...q, zufriedenheit: clamp((q.zufriedenheit ?? 70) + 1) });
+        text = `Geldstrafe gegen ${k.hauptName}: Die Mannschaft sieht Konsequenz, er selbst ist verärgert.`;
+      } else if (option === "verkauf") {
+        if (!verkaufsliste.includes(haupt.id)) verkaufsliste = [...verkaufsliste, haupt.id];
+        aendere(haupt.id, q => ({ ...q, zufriedenheit: clamp((q.zufriedenheit ?? 70) + 2), form: clamp((q.form ?? 60) - 2) }));
+        text = `${k.hauptName} steht auf der Verkaufsliste.`;
+      } else return cs;
+      if (geloest) {
+        aendere(haupt.id, q => ({ ...q, kabineRuhe: ruhe }));
+        if (gegen) aendere(gegen.id, q => ({ ...q, kabineRuhe: ruhe }));
+      }
+      div.squads[profile.team] = squad;
+      return {
+        ...cs,
+        divisions: { ...cs.divisions, [managerDivId]: div },
+        kabinenKonflikte: bleibt ? [...rest, bleibt] : rest,
+        kabinenLog: [...(cs.kabinenLog || []), { id: `${k.id}-${option}-${Date.now()}`, saison: cs.season, datum: cs.datum, text }].slice(-40),
+        verkaufsliste, kapitaenId
+      };
+    });
+  };
+
   const onSpielerAufMarktSetzen = (spielerId) => {
     setCareerState(cs => ({
       ...cs,
@@ -22143,7 +22949,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       return {
         ...cs,
         pressekonferenz: null,
-        pressearchiv: [...(cs.pressearchiv || []), ...archivNeu].slice(-60),
+        pressearchiv: [...(cs.pressearchiv || []), ...archivNeu].slice(-600),
         trainerZufriedenheit: Math.max(0, Math.min(100, (cs.trainerZufriedenheit ?? 70) + (effekte.trainer || 0))),
         markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? 50) + (effekte.marke || 0))),
         fanclub: { ...cs.fanclub, unterstuetzungsBonus: Math.max(-25, Math.min(FAN_UNTERSTUETZUNG_MAX, (cs.fanclub.unterstuetzungsBonus || 0) + (effekte.fans || 0))) },
@@ -22800,7 +23606,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         stadion: division.stadien[profile.team],
         tabellenzeile: division.table[profile.team],
         trainerZufriedenheit, season,
-        philosophiePaket, saisonAuszeichnungen: saisonAuszeichnungenFuerBericht
+        philosophiePaket, saisonAuszeichnungen: saisonAuszeichnungenFuerBericht,
+        spielHistorie, chronik
       });
       return (
         <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
@@ -23583,6 +24390,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           )}
           {tab === "statistik" && <StatistikView squad={division.squads[profile.team]} managerDivId={managerDivId} spielHistorie={spielHistorie} />}
           {tab === "karriere" && <KarriereView trophaeen={trophaeen} saisonHistorie={saisonHistorie} teamName={profile.team} profileVorname={profile.vorname} profileNachname={profile.nachname} anzahlSaisonsImAmt={anzahlSaisonsImAmt} karriereAufstiege={karriereAufstiege} karriereAbstiege={karriereAbstiege} karriereEntlassungen={karriereEntlassungen} managerReputation={managerReputation} onRuecktrittAusloesen={onRuecktrittAusloesen} />}
+          {tab === "ruhmeshalle" && <RuhmeshalleView squad={division.squads[profile.team]} season={season} spielerArchiv={spielerArchiv} saisonBilanzen={saisonBilanzen} vereinsRekorde={vereinsRekorde} spielHistorie={spielHistorie} chronik={chronik} teamName={profile.team} />}
+          {tab === "kabine" && <KabineView squad={division.squads[profile.team]} konflikte={kabinenKonflikte} log={kabinenLog} kapitaenId={kapitaenId} teamgeist={berechneTeamgeist(division.squads[profile.team], season, stab.psychologe?.rating, kapitaenId)} stab={stab} onEntscheidung={onKabineEntscheidung} />}
+          {tab === "chronik" && <ChronikView chronik={chronik} season={season} />}
           {tab === "regeln" && <SpielregelnView />}
           {tab === "buchhaltung" && <BuchhaltungTabView saisonFinanzen={saisonFinanzen} finanzenHistorie={finanzenHistorie} season={season} darlehen={darlehen} budget={budget} darlehenMax={darlehenMaximum(divisions[managerDivId].stadien[profile.team], darlehen)} onDarlehenAufnehmen={onDarlehenAufnehmen} onDarlehenTilgen={onDarlehenTilgen} />}
           {tab === "sponsoring" && (
@@ -23741,7 +24551,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               spielerberaterVerpflichtungen: spielerberaterVerpflichtungenDieseSaison
             };
             const zielStand = (ziele || []).map(z => ({ ...z, erfuellt: bewerteZiel(z.id, zielKontext) }));
-            return <VorstandView ziele={ziele} zielStand={zielStand} archiv={pressearchiv} historie={vorstandHistorie} saisonLabel={`Saison ${season}/${String(season + 1).slice(-2)}`} />;
+            return <VorstandView ziele={ziele} zielStand={zielStand} archiv={pressearchiv} historie={vorstandHistorie} season={season} saisonLabel={`Saison ${season}/${String(season + 1).slice(-2)}`} />;
           })()}
           {tab === "fanclub" && (
             <FanclubView
@@ -23942,7 +24752,13 @@ function App() {
 
   const setCareerState = useCallback((updater) => {
     setCareerStateRaw(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
+      let next = typeof updater === "function" ? updater(prev) : updater;
+      try {
+        const neueEintraege = chronikAusDiff(prev, next, profile.team);
+        if (neueEintraege.length) next = { ...next, chronik: [...(next.chronik || []), ...neueEintraege].slice(-CHRONIK_MAX) };
+        const abgangZeilen = archivZeilenAusAbgaengen(prev, next, profile.team);
+        if (abgangZeilen.length) next = { ...next, spielerArchiv: [...(next.spielerArchiv || []), ...abgangZeilen].slice(-4000) };
+      } catch (e) { /* Chronik ist nie wichtiger als das Speichern */ }
       persist(profile, next);
       return next;
     });
