@@ -1373,7 +1373,9 @@ function waehleStartelf(squad, formation) {
       // gegen seine Erwartung, Vertragssituation ungeklärt), bringt auf dem Platz nicht seine volle
       // Stärke. Erst unter 40 überhaupt spürbar, damit normale Schwankungen keine Rolle spielen.
       const zufriedenheitsAbzug = (p.zufriedenheit ?? 70) < 40 ? (40 - (p.zufriedenheit ?? 70)) * 0.15 : 0;
-      elf.push({ ...p, gespielterPos: code, effektivesRating: p.rating - zufriedenheitsAbzug });
+      // Nach längerer Verletzung noch nicht bei voller Leistung (nimmt mit jedem Einsatz ab)
+      const rueckkehrAbzug = p.rueckkehr ? (p.rueckkehr.art === "schwer" ? 6 : 3) * (p.rueckkehr.spiele / p.rueckkehr.gesamt) : 0;
+      elf.push({ ...p, gespielterPos: code, effektivesRating: p.rating - zufriedenheitsAbzug - rueckkehrAbzug });
       genutzteIds.add(p.id);
     });
   });
@@ -1439,7 +1441,7 @@ function wendeRotationsprinzipAn({ elf, bank, staerke }, aktiv, datum) {
 // PERSOENLICHKEITEN) — und auf eine ungeklärte Vertragssituation. Wirkt sich über einen Abzug auf
 // effektivesRating direkt auf die Spielstärke aus (siehe waehleStartelf), nicht nur auf eine abstrakte
 // Statistik — ein ignorierter Ergänzungsspieler kostet also am Ende wirklich Punkte.
-function aktualisiereSpielerZufriedenheit(squad, startelfIds, season) {
+function aktualisiereSpielerZufriedenheit(squad, startelfIds, season, offeneForderungIds = []) {
   return squad.map(p => {
     if (p.leihspieler) return p; // Leihspieler bewerten ihre Situation beim Stammverein, nicht hier
     const persoenlichkeit = PERSOENLICHKEITEN[p.persoenlichkeit];
@@ -1448,6 +1450,7 @@ function aktualisiereSpielerZufriedenheit(squad, startelfIds, season) {
     let delta = startelfIds.has(p.id) ? 1.2 : -1.4 / toleranz;
     const jahreVerbleibend = (p.vertragBisSaison ?? season + 9) - season;
     if (jahreVerbleibend <= 0) delta -= 0.6;
+    if (offeneForderungIds.includes(p.id)) delta -= 1.0; // unbeantwortete Gehaltsforderung nagt an ihm
     return { ...p, zufriedenheit: Math.max(0, Math.min(100, aktuelle + delta)) };
   });
 }
@@ -1705,15 +1708,26 @@ function verarbeiteVerletzungen(squad, spielendeIds, arzt, tageVergangen, zusatz
     const heilungsBonusSpieler = typeof heilungsBonus === "function" ? heilungsBonus(p) : heilungsBonus;
     if (p.verletzung) {
       const verbleibend = Math.round(p.verletzung.tageVerbleibend - tageVergangen - heilungsBonusSpieler);
-      if (verbleibend <= 0) return { ...p, verletzung: null };
+      if (verbleibend <= 0) {
+        // Wiederaufbau nach längerer Verletzung: der Spieler ist zwar fit, aber noch nicht bei voller Leistung
+        // und anfälliger für einen Rückfall. Leichte Verletzungen haben keine Nachwirkung.
+        const rueckkehr = p.verletzung.art === "schwer" ? { art: "schwer", spiele: 5, gesamt: 5 } : p.verletzung.art === "mittel" ? { art: "mittel", spiele: 3, gesamt: 3 } : null;
+        return { ...p, verletzung: null, rueckkehr };
+      }
       return { ...p, verletzung: { ...p.verletzung, tageVerbleibend: verbleibend } };
     }
     const hatGespielt = spielendeIds.includes(p.id);
-    const basisChance = (hatGespielt ? 0.018 : 0.004) * praeventionsFaktor * zusatzFaktorSpieler;
+    const rueckfallFaktor = p.rueckkehr ? (p.rueckkehr.art === "schwer" ? 2.5 : 1.8) : 1;
+    const basisChance = (hatGespielt ? 0.018 : 0.004) * praeventionsFaktor * zusatzFaktorSpieler * rueckfallFaktor;
     if (Math.random() < basisChance) {
       const verletzung = wuerfleVerletzung(arztRating);
       neueVerletzten.push({ name: p.name, ...verletzung });
-      return { ...p, verletzung, verletzungenSaison: (p.verletzungenSaison || 0) + 1 };
+      return { ...p, verletzung, rueckkehr: null, verletzungenSaison: (p.verletzungenSaison || 0) + 1, rueckfaelleSaison: (p.rueckkehr ? 1 : 0) + (p.rueckfaelleSaison || 0) };
+    }
+    // Jeder Einsatz baut die Rückkehr-Phase ab
+    if (p.rueckkehr && hatGespielt) {
+      const rest = p.rueckkehr.spiele - 1;
+      return { ...p, rueckkehr: rest > 0 ? { ...p.rueckkehr, spiele: rest } : null };
     }
     return p;
   });
@@ -2077,6 +2091,31 @@ function generiereBeraterVerlaengerungsAngebot(squad, managerDivId, season, auss
   };
 }
 
+
+// Gehaltsforderung: Wer über Wochen stark spielt (Tore, Vorlagen, Elf des Tages, Spieler des Spieltages),
+// verlangt von sich aus mehr Geld, sobald sein Vertrag klar unter dem aktuellen Marktlohn liegt.
+function generiereGehaltsforderung(squad, managerDivId, ausschlussIds) {
+  const kandidaten = squad.filter(p => {
+    if (p.leihspieler || p.u19 || ausschlussIds.includes(p.id) || p.rating < 60) return false;
+    const leistung = (p.tore || 0) + (p.vorlagen || 0) * 0.7 + (p.elfDesTagesAnzahl || 0) * 1.2 + (p.motmAnzahl || 0) * 1.5;
+    if (leistung < 6) return false;
+    return (p.gehalt || 0) < berechneSpielerlohn(p, managerDivId) * 0.85;
+  });
+  if (!kandidaten.length) return null;
+  const spieler = kandidaten[Math.floor(Math.random() * kandidaten.length)];
+  const marktLohn = berechneSpielerlohn(spieler, managerDivId);
+  const gehalt = Math.round((marktLohn * (1 + Math.random() * 0.1)) / 100) * 100;
+  const gruende = [];
+  if ((spieler.tore || 0) >= 6) gruende.push(`${spieler.tore} Tore`);
+  if ((spieler.vorlagen || 0) >= 6) gruende.push(`${spieler.vorlagen} Vorlagen`);
+  if ((spieler.elfDesTagesAnzahl || 0) >= 3) gruende.push(`${spieler.elfDesTagesAnzahl}x Elf des Tages`);
+  if ((spieler.motmAnzahl || 0) >= 2) gruende.push(`${spieler.motmAnzahl}x Spieler des Spieltages`);
+  return {
+    id: `${spieler.id}-forderung-${Date.now()}`,
+    spielerId: spieler.id, name: spieler.name, posName: spieler.posName, alter: spieler.alter, rating: spieler.rating,
+    altesGehalt: spieler.gehalt || 0, gehalt, grund: gruende.length ? gruende.join(", ") : "starke Leistungen", restSpieltage: 4
+  };
+}
 
 // KI-Vereine werden auf gute eigene Spieler aufmerksam und machen von sich aus Angebote — je stärker
 // der Spieler, desto häufiger. Kommt das Angebot von einer höheren Liga, will der Spieler öfter selbst
@@ -3889,12 +3928,28 @@ function generiereVorstandsZiele(managerDivId, season, salt = 0, frischeSituatio
   return gewaehlt;
 }
 
+// Bankdarlehen (Stadion-Hypothek): bis zu 80 % des Stadion-Kaufpreises, Zins und Tilgung werden bei jedem
+// Liga-Spieltag abgebucht (Zins = Aufwand, Tilgung und Aufnahme gehören nicht ins Saisonergebnis).
+const DARLEHEN_ZINS_PRO_SPIELTAG = 0.0012; // ca. 4 % pro Jahr
+const DARLEHEN_TILGUNG_SPIELTAGE = 100;
+function darlehenMaximum(stadion, darlehen) {
+  const rahmen = Math.round((stadionKaufpreis(stadion) * 0.8) / 10000) * 10000;
+  return Math.max(0, rahmen - (darlehen?.restschuld || 0));
+}
+function berechneDarlehenRate(darlehen) {
+  if (!darlehen || darlehen.restschuld <= 0) return { zins: 0, tilgung: 0 };
+  return { zins: Math.round(darlehen.restschuld * DARLEHEN_ZINS_PRO_SPIELTAG), tilgung: Math.min(darlehen.restschuld, darlehen.tilgungRate) };
+}
+
 // Reingewinn der Saison über ALLE Ertrags- und Aufwandsposten (wie in der Buchhaltung) — Grundlage für das
 // Vorstandsziel "Bilanz positiv". Früher zählten nur Tickets, Transfers und Sponsoring gegen vier Aufwandsposten.
-function berechneSaisonReingewinn(f) {
+function berechneSaisonSummen(f) {
   const ertrag = (f.ertragTicketing || 0) + (f.ertragFanartikel || 0) + (f.ertragImbiss || 0) + (f.ertragTransfers || 0) + (f.ertragSponsoring || 0) + (f.ertragTV || 0) + (f.ertragEuropapokal || 0) + (f.ertragLaenderspiel || 0) + (f.ertragEvents || 0) + (f.ertragFanclub || 0);
   const aufwand = (f.aufwandGehalt || 0) + (f.aufwandMitarbeiterstab || 0) + (f.aufwandManagerlohn || 0) + (f.aufwandSpielerloehne || 0) + (f.aufwandReisen || 0) + (f.aufwandTransfers || 0) + (f.aufwandBerater || 0) + (f.aufwandFanartikel || 0) + (f.aufwandImbiss || 0) + (f.aufwandStadion || 0) + (f.aufwandStadionmiete || 0) + (f.aufwandMaterial || 0) + (f.aufwandPersonal || 0) + (f.aufwandTrainingslager || 0) + (f.aufwandJugend || 0) + (f.aufwandSicherheit || 0) + (f.aufwandBetrieb || 0) + (f.aufwandSchiedsrichter || 0) + (f.aufwandZinsen || 0) + (f.aufwandSonstiges || 0);
-  return ertrag - aufwand;
+  return { ertrag, aufwand, ergebnis: ertrag - aufwand };
+}
+function berechneSaisonReingewinn(f) {
+  return berechneSaisonSummen(f).ergebnis;
 }
 
 function bewerteZiel(zielId, kontext) {
@@ -7967,7 +8022,7 @@ function pokalRundenName(teilnehmerVorRunde) {
 
 function leereSaisonFinanzen() {
   return {
-    ertragTicketing: 0, ertragFanartikel: 0, ertragImbiss: 0, ertragTransfers: 0, ertragSponsoring: 0, ertragTV: 0, ertragEuropapokal: 0, ertragLaenderspiel: 0, ertragEvents: 0, ertragFanclub: 0,
+    ertragTicketing: 0, ertragFanartikel: 0, ertragImbiss: 0, ertragTransfers: 0, ertragSponsoring: 0, ertragTV: 0, ertragEuropapokal: 0, ertragLaenderspiel: 0, ertragEvents: 0, ertragFanclub: 0, investitionen: 0, darlehenAufnahme: 0, darlehenTilgung: 0,
     aufwandGehalt: 0, aufwandMitarbeiterstab: 0, aufwandManagerlohn: 0, aufwandSpielerloehne: 0, aufwandReisen: 0, aufwandTransfers: 0, aufwandBerater: 0, aufwandFanartikel: 0, aufwandImbiss: 0, aufwandStadion: 0, aufwandStadionmiete: 0, aufwandMaterial: 0, aufwandPersonal: 0, aufwandTrainingslager: 0, aufwandJugend: 0, aufwandSicherheit: 0, aufwandBetrieb: 0, aufwandSchiedsrichter: 0, aufwandZinsen: 0, aufwandSonstiges: 0
   };
 }
@@ -8214,7 +8269,7 @@ function TeamgeistRadar({ teamgeist }) {
 }
 
 // Navigation in 9 Hauptgruppen mit Unter-Tabs statt ~25 einzelnen Tabs — deutlich übersichtlicher,
-// besonders auf dem Handy. "Spielregeln" bleibt bewusst ein eigener, alleinstehender Eintrag.
+// besonders auf dem Handy. "Spielregeln" liegt als letzter Unter-Tab unter Verein/Fans.
 const TAB_GRUPPEN = [
   { id: "kadertaktik", label: "Kader & Taktik", icon: Users, tabs: [
     { id: "kader", label: "Kader", icon: Users },
@@ -8259,7 +8314,8 @@ const TAB_GRUPPEN = [
     { id: "vereinsinfos", label: "Vereinsinfos", icon: Newspaper },
     { id: "vorstand", label: "Vorstand & Presse", icon: Megaphone },
     { id: "fanclub", label: "Fanclub", icon: Heart },
-    { id: "jahresbericht", label: "Jahresbericht", icon: Info }
+    { id: "jahresbericht", label: "Jahresbericht", icon: Info },
+    { id: "regeln", label: "Spielregeln", icon: BookOpen }
   ]}
 ];
 const TAB_ZU_GRUPPE = {};
@@ -9499,7 +9555,7 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
 // bald aus, wie bisher) sowie neu die Möglichkeit, Spieler mit noch längerer Laufzeit frühzeitig zu
 // verlängern — realistisch günstiger, weil ein fest gebundener Spieler kaum Verhandlungsmacht hat
 // (siehe berechneVertragsAkzeptanz).
-function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, vertragGesperrt, beraterVerlaengerungsAngebote, onBeraterVerlaengerungAnnehmen, onBeraterVerlaengerungAblehnen }) {
+function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, vertragGesperrt, beraterVerlaengerungsAngebote, onBeraterVerlaengerungAnnehmen, onBeraterVerlaengerungAblehnen, gehaltsforderungen = [], onForderungAnnehmen, onForderungAblehnen }) {
   // vertragGesperrt speichert ein Datum ("gesperrt bis") statt eines einfachen true/false — eine
   // zeitlich begrenzte Abkühlphase (ca. 3 Wochen) statt einer kompletten Saisonsperre.
   const istAktuellGesperrt = spielerId => vertragGesperrt?.[spielerId] && vertragGesperrt[spielerId] > datum;
@@ -9516,6 +9572,26 @@ function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVer
 
   return (
     <div>
+      {gehaltsforderungen.length > 0 && (
+        <div className="mb-5">
+          <div className="text-[11px] uppercase tracking-wider text-red-400/80 mb-1.5">Gehaltsforderung</div>
+          <p className="text-[11px] text-emerald-600 mb-2">Diese Spieler spielen stark und verdienen unter Marktwert. Ohne Antwort verfällt die Forderung nach 4 Spieltagen, die Stimmung sinkt in der Zwischenzeit.</p>
+          <div className="space-y-2">
+            {gehaltsforderungen.filter(f => squad.some(p => p.id === f.spielerId)).map(f => (
+              <div key={f.id} className="border border-red-400/40 rounded p-3 text-xs space-y-2" style={{ backgroundColor: "rgba(248,113,113,0.06)" }}>
+                <div className="text-red-300 font-semibold">{f.name} <span className="text-emerald-600 font-normal">· {f.posName} · {f.alter}J · Stärke {f.rating}</span></div>
+                <div className="text-emerald-400">Aktuell {f.altesGehalt.toLocaleString("de-CH")} € → fordert {f.gehalt.toLocaleString("de-CH")} €/Jahr ({f.grund})</div>
+                <div className="text-emerald-600 text-[10px]">Noch {f.restSpieltage} Spieltage Zeit</div>
+                <div className="flex gap-2">
+                  <button onClick={() => onForderungAnnehmen(f)} className="flex-1 bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold rounded py-1.5">Erhöhen (+Stimmung)</button>
+                  <button onClick={() => onForderungAblehnen(f)} className="flex-1 border border-emerald-700 text-emerald-400 rounded py-1.5">Ablehnen (−Stimmung)</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {beraterVerlaengerungsAngebote && beraterVerlaengerungsAngebote.length > 0 && (
         <div className="mb-5">
           <div className="text-[11px] uppercase tracking-wider text-amber-400/80 mb-1.5">Berater schlägt Verlängerung vor</div>
@@ -9582,7 +9658,7 @@ function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVer
   );
 }
 
-function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId, managerDivId, season, datum, stab, trophaeen, teamName, onJugendfoerderungUmschalten, onLeihoptionKaufen, meineAusgeliehenenSpieler, alleDivisionen }) {
+function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId, managerDivId, season, datum, stab, trophaeen, teamName, onJugendfoerderungUmschalten, onLeihoptionKaufen, meineAusgeliehenenSpieler, alleDivisionen, schuetzenManuell = false, onSchuetzeSetzen, onSchuetzenAutomatisch }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   // Kollisionsfrei PRO TEAM — kein Porträt kommt innerhalb dieses Kaders zweimal vor.
   const squadPortraits = useMemo(
@@ -9638,6 +9714,34 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
           </div>
         </div>
       )}
+
+      {onSchuetzeSetzen && (() => {
+        const feldspieler = squad.filter(p => p.pos !== "TW" && !p.leihspieler && !p.u19).sort((a, b) => b.rating - a.rating).slice(0, 14);
+        const wahl = (art, aktuell) => (
+          <label className="flex items-center justify-between gap-2 text-[11px] text-emerald-400">
+            <span>{art === "elfmeter" ? "Elfmeter" : "Freistoss"}</span>
+            <select
+              value={aktuell || ""}
+              onChange={e => onSchuetzeSetzen(art, e.target.value)}
+              className="text-[11px] border border-emerald-700/50 rounded px-1.5 py-0.5 max-w-[60%]"
+              style={{ backgroundColor: "var(--fm-surface-raised)", colorScheme: "dark" }}
+            >
+              {feldspieler.map(p => <option key={p.id} value={p.id}>{p.name} ({p.rating})</option>)}
+            </select>
+          </label>
+        );
+        return (
+          <div className="border border-emerald-800 rounded px-3 py-2 mb-3 space-y-1.5" style={{ backgroundColor: "var(--fm-surface)" }}>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wider text-emerald-500">Standard-Schützen {schuetzenManuell ? "(von dir gewählt)" : "(automatisch)"}</span>
+              {schuetzenManuell && <button onClick={onSchuetzenAutomatisch} className="text-[10px] text-amber-400 underline">Automatisch</button>}
+            </div>
+            {wahl("elfmeter", elfmeterSchuetzeId)}
+            {wahl("freistoss", freistossSchuetzeId)}
+            <div className="text-[10px] text-emerald-700">Der gewählte Schütze führt Elfmeter und Freistösse aus. Wie oft er trifft, hängt vom Standardtrainer ab. Fehlt er (verletzt, gesperrt), übernimmt ein anderer.</div>
+          </div>
+        );
+      })()}
 
       {kritischeGruppe && (
         <div className="border border-amber-500/40 rounded px-3 py-2 mb-3 text-xs" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
@@ -9749,6 +9853,11 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
                 {p.verletzung && (
                   <span className="ml-1.5 text-[9px] uppercase tracking-wide text-red-400 border border-red-500/40 rounded px-1 py-0.5" title={`Verletzung: ${p.verletzung.art}`}>
                     🩹 noch {p.verletzung.tageVerbleibend} {p.verletzung.tageVerbleibend === 1 ? "Tag" : "Tage"}
+                  </span>
+                )}
+                {!p.verletzung && p.rueckkehr && (
+                  <span className="ml-1.5 text-[9px] uppercase tracking-wide text-sky-300 border border-sky-400/40 rounded px-1 py-0.5" title="Wiederaufbau nach Verletzung: noch nicht bei voller Leistung, höheres Rückfallrisiko">
+                    🔄 Aufbau {p.rueckkehr.spiele} {p.rueckkehr.spiele === 1 ? "Spiel" : "Spiele"}
                   </span>
                 )}
                 {p.laenderspielSperre && (
@@ -10330,14 +10439,28 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
     // Sinnvoller Startwert je nach Alter: bei einem älteren Spieler macht ein langer Vertrag ohnehin
     // selten Sinn, ein kürzerer Vorschlag passt daher besser als Ausgangspunkt.
     const laufzeitVorschlag = Math.min(maxVertragsLaufzeit(spieler.alter), spieler.alter >= 32 ? 1 : spieler.alter >= 28 ? 2 : 3);
-    setVerhandlung({ spieler, teamName, richtung, wert, quote: gelistet ? 100 : 130, laufzeit: laufzeitVorschlag, nachricht: null, sourceDivId: sourceDivId || managerDivId, gelistet });
+    // Konkurrenz: Um gefragte Spieler (ab Stärke 72) bewirbt sich manchmal ein weiterer Verein mit eigenem
+    // Gebot. Wer darunter bleibt, verliert den Spieler. Das ungefähre Gebot erfährst du als Gerücht.
+    let konkurrenz = null;
+    if (richtung === "kaufen" && spieler.rating >= 72 && Math.random() < Math.min(0.4, (spieler.rating - 70) / 50)) {
+      const divQuelle = alleDivisionen?.[sourceDivId || managerDivId];
+      const rivalen = Object.keys(divQuelle?.squads || {}).filter(t => t !== teamName && t !== managerTeam);
+      if (rivalen.length) konkurrenz = { team: rivalen[Math.floor(Math.random() * rivalen.length)], ratio: 1.05 + Math.random() * 0.25 };
+    }
+    setVerhandlung({ spieler, teamName, richtung, wert, quote: gelistet ? 100 : 130, laufzeit: laufzeitVorschlag, nachricht: null, sourceDivId: sourceDivId || managerDivId, gelistet, konkurrenz });
   };
 
   const angebotAbgeben = () => {
-    const { spieler, wert, quote, richtung, teamName, sourceDivId, gelistet, laufzeit } = verhandlung;
+    const { spieler, wert, quote, richtung, teamName, sourceDivId, gelistet, laufzeit, konkurrenz } = verhandlung;
     if (transferGesperrt?.[spieler.id]) return;
     const summe = Math.round((wert * quote) / 100 / 100) * 100;
     const ratio = quote / 100;
+    if (richtung === "kaufen" && konkurrenz && ratio <= konkurrenz.ratio) {
+      // Ein Rivale bietet mehr: der Spieler ist weg, für dieses Transferfenster nicht mehr verfügbar
+      onTransferVerhandlungErgebnis(spieler.id, false, true);
+      setVerhandlung(v => ({ ...v, nachricht: { art: "ablehnung", grund: "konkurrenz", team: konkurrenz.team } }));
+      return;
+    }
     // Kauf: Verkäufer nimmt eher an, je höher das Angebot. Verkauf: Käufer nimmt eher an, je niedriger die Forderung.
     // Nicht gelistete Spieler will der Verein eigentlich gar nicht verkaufen — deutlich schwerer zu überzeugen.
     const nichtGelistetMalus = (richtung === "kaufen" && gelistet === false) ? 0.35 : 0;
@@ -10787,18 +10910,28 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
               {verhandlung.richtung === "verkaufen" && " Kein automatischer Ersatz — bei Bedarf selbst nachrüsten."}
             </div>
           )}
-          {verhandlung.nachricht?.art === "ablehnung" && transferGesperrt?.[verhandlung.spieler.id] && (
+          {verhandlung.richtung === "kaufen" && verhandlung.konkurrenz && verhandlung.nachricht?.art !== "erfolg" && !verhandlung.nachricht && (
+            <div className="text-[11px] text-amber-300 mb-2 border border-amber-400/30 rounded px-2.5 py-1.5">
+              Gerücht: {verhandlung.konkurrenz.team} ist ebenfalls interessiert und soll ca. {Math.round(verhandlung.konkurrenz.ratio * 100 - 5)}–{Math.round(verhandlung.konkurrenz.ratio * 100 + 5)} % des Marktwerts bieten.
+            </div>
+          )}
+          {verhandlung.nachricht?.art === "ablehnung" && verhandlung.nachricht.grund === "konkurrenz" && (
+            <div className="text-xs text-red-400 mb-2 flex items-center gap-1.5">
+              <Lock size={12} /> {verhandlung.nachricht.team} hat mit einem höheren Gebot den Zuschlag erhalten. Der Spieler ist in diesem Fenster nicht mehr zu haben.
+            </div>
+          )}
+          {verhandlung.nachricht?.art === "ablehnung" && verhandlung.nachricht.grund !== "konkurrenz" && transferGesperrt?.[verhandlung.spieler.id] && (
             <div className="text-xs text-red-400 mb-2 flex items-center gap-1.5">
               <Lock size={12} /> {verhandlung.richtung === "kaufen" ? "Angebot abgelehnt." : "Kein Käufer zu dieser Forderung."} {verhandlung.richtung === "kaufen" ? "Der Verein" : "Der Käufer"} will für den Rest dieses Transferfensters nicht mehr über diesen Spieler verhandeln.
             </div>
           )}
-          {verhandlung.nachricht?.art === "ablehnung" && !transferGesperrt?.[verhandlung.spieler.id] && (
+          {verhandlung.nachricht?.art === "ablehnung" && verhandlung.nachricht.grund !== "konkurrenz" && !transferGesperrt?.[verhandlung.spieler.id] && (
             <div className="text-xs text-red-400 mb-2">
               ✗ {verhandlung.richtung === "kaufen" ? "Angebot abgelehnt." : "Kein Käufer zu dieser Forderung."} Ein weiterer Versuch ist möglich — versuch's mit einer anderen Quote.
             </div>
           )}
 
-          {verhandlung.nachricht?.art !== "erfolg" && !transferGesperrt?.[verhandlung.spieler.id] && (
+          {verhandlung.nachricht?.art !== "erfolg" && verhandlung.nachricht?.grund !== "konkurrenz" && !transferGesperrt?.[verhandlung.spieler.id] && (
             <button
               onClick={angebotAbgeben}
               disabled={verhandlung.richtung === "kaufen" && Math.round((verhandlung.wert * verhandlung.quote) / 100) > budget}
@@ -12074,15 +12207,25 @@ function PokalView({ pokal, managerTeam }) {
 // Wrapper mit Saison-Auswahl fürs Buchhaltungs-Tab (siehe fanshopHistorie/imbissHistorie fürs
 // gleiche Prinzip beim Fanshop/Verpflegung) — zeigt standardmässig die laufende Saison, erlaubt aber
 // den Zugriff auf archivierte vergangene Saisons, sobald welche vorhanden sind.
-function BuchhaltungTabView({ saisonFinanzen, finanzenHistorie = [], season }) {
+function BuchhaltungTabView({ saisonFinanzen, finanzenHistorie = [], season, darlehen = null, budget = 0, darlehenMax = 0, onDarlehenAufnehmen, onDarlehenTilgen }) {
   const [gewaehlteSaison, setGewaehlteSaison] = useState(season);
+  const [ansicht, setAnsicht] = useState("saison");
   const istAktuelleSaison = gewaehlteSaison === season;
   const angezeigteFinanzen = istAktuelleSaison ? saisonFinanzen : (finanzenHistorie.find(h => h.saison === gewaehlteSaison)?.finanzen || null);
   const vorhandeneSaisons = [...finanzenHistorie.map(h => h.saison), season].sort((a, b) => b - a);
+  const zeilen = [...finanzenHistorie.map(h => ({ saison: h.saison, f: h.finanzen })), { saison: season, f: saisonFinanzen || leereSaisonFinanzen() }].sort((a, b) => a.saison - b.saison);
+  const eur = n => `${n >= 0 ? "" : "−"}${Math.abs(Math.round(n)).toLocaleString("de-CH")} €`;
+  const maxAbs = Math.max(1, ...zeilen.map(z => Math.abs(berechneSaisonSummen(z.f).ergebnis)));
+  const rate = berechneDarlehenRate(darlehen);
   return (
-    <div>
-      {vorhandeneSaisons.length > 1 && (
-        <div className="flex items-center justify-end mb-2">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex gap-1">
+          {[["saison", "Saison"], ["verlauf", "Mehrjahres-Bilanz"], ["darlehen", "Darlehen"]].map(([id, label]) => (
+            <button key={id} onClick={() => setAnsicht(id)} className={`text-[11px] px-2 py-1 rounded border ${ansicht === id ? "border-amber-400 text-amber-300 bg-amber-400/10" : "border-emerald-700/50 text-emerald-400"}`}>{label}</button>
+          ))}
+        </div>
+        {ansicht === "saison" && vorhandeneSaisons.length > 1 && (
           <select
             value={gewaehlteSaison}
             onChange={e => setGewaehlteSaison(Number(e.target.value))}
@@ -12093,9 +12236,61 @@ function BuchhaltungTabView({ saisonFinanzen, finanzenHistorie = [], season }) {
               <option key={s} value={s}>{s === season ? "Aktuelle Saison" : `Saison ${s}/${(s + 1) % 100}`}</option>
             ))}
           </select>
+        )}
+      </div>
+      {ansicht === "saison" && <FinanzAbrechnungView finanzen={angezeigteFinanzen} live={istAktuelleSaison} />}
+      {ansicht === "verlauf" && (
+        <div className="border border-emerald-700 rounded p-3 space-y-2" style={{ backgroundColor: "var(--fm-surface)" }}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Mehrjahres-Bilanz</div>
+          <div className="grid grid-cols-[70px_1fr_1fr_1fr_1fr] gap-x-2 text-[10px] text-emerald-600 border-b border-emerald-900 pb-1">
+            <span>Saison</span><span className="text-right">Ertrag</span><span className="text-right">Aufwand</span><span className="text-right">Ergebnis</span><span className="text-right">Investiert</span>
+          </div>
+          {zeilen.map(z => {
+            const sm = berechneSaisonSummen(z.f);
+            return (
+              <div key={z.saison}>
+                <div className="grid grid-cols-[70px_1fr_1fr_1fr_1fr] gap-x-2 text-[11px] text-emerald-300">
+                  <span>{z.saison}/{String((z.saison + 1) % 100).padStart(2, "0")}{z.saison === season ? "*" : ""}</span>
+                  <span className="text-right">{eur(sm.ertrag)}</span>
+                  <span className="text-right">{eur(sm.aufwand)}</span>
+                  <span className={`text-right font-semibold ${sm.ergebnis >= 0 ? "text-amber-400" : "text-red-400"}`}>{eur(sm.ergebnis)}</span>
+                  <span className="text-right text-emerald-500">{eur(z.f.investitionen || 0)}</span>
+                </div>
+                <div className="h-1 rounded mt-0.5" style={{ width: `${Math.max(2, Math.round(Math.abs(sm.ergebnis) / maxAbs * 100))}%`, backgroundColor: sm.ergebnis >= 0 ? "#fbbf24" : "#f87171" }} />
+              </div>
+            );
+          })}
+          <div className="flex justify-between border-t border-emerald-900 pt-1 text-[11px] font-semibold text-emerald-200">
+            <span>Summe aller Saisons</span>
+            <span>{eur(zeilen.reduce((s, z) => s + berechneSaisonSummen(z.f).ergebnis, 0))}</span>
+          </div>
+          <div className="text-[10px] text-emerald-700">* laufende Saison. Investiert = Stadionkauf, Umbauten und Infrastruktur; zählt nicht ins Ergebnis.</div>
         </div>
       )}
-      <FinanzAbrechnungView finanzen={angezeigteFinanzen} live={istAktuelleSaison} />
+      {ansicht === "darlehen" && (
+        <div className="border border-emerald-700 rounded p-3 space-y-2" style={{ backgroundColor: "var(--fm-surface)" }}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80">Bankdarlehen (Stadion-Hypothek)</div>
+          <div className="text-[11px] text-emerald-300 flex justify-between"><span>Kontostand</span><span>{eur(budget)}</span></div>
+          <div className="text-[11px] text-emerald-300 flex justify-between"><span>Restschuld</span><span>{eur(darlehen?.restschuld || 0)}</span></div>
+          <div className="text-[11px] text-emerald-300 flex justify-between"><span>Pro Liga-Spieltag: Zins / Tilgung</span><span>{eur(rate.zins)} / {eur(rate.tilgung)}</span></div>
+          <div className="text-[11px] text-emerald-300 flex justify-between"><span>Noch verfügbarer Rahmen</span><span>{eur(darlehenMax)}</span></div>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {[0.25, 0.5, 1].map(anteil => {
+              const b = Math.floor(darlehenMax * anteil / 10000) * 10000;
+              return <button key={anteil} disabled={b < 10000} onClick={() => onDarlehenAufnehmen && onDarlehenAufnehmen(b)} className="text-[11px] px-2 py-1 rounded border border-emerald-600 text-emerald-300 disabled:opacity-30">{b >= 10000 ? `${eur(b)} aufnehmen` : "—"}</button>;
+            })}
+          </div>
+          {darlehen && (
+            <div className="flex flex-wrap gap-1.5">
+              {[0.25, 0.5, 1].map(anteil => {
+                const b = Math.min(Math.round(darlehen.restschuld * anteil), Math.max(0, budget));
+                return <button key={anteil} disabled={b <= 0} onClick={() => onDarlehenTilgen && onDarlehenTilgen(b)} className="text-[11px] px-2 py-1 rounded border border-amber-500/60 text-amber-300 disabled:opacity-30">{b > 0 ? `${eur(b)} tilgen` : "—"}</button>;
+              })}
+            </div>
+          )}
+          <div className="text-[10px] text-emerald-700">Bis 80 % des Stadion-Kaufpreises, ca. 4 % Zins pro Jahr, Tilgung über rund 100 Liga-Spieltage. Zinsen sind Aufwand, Aufnahme und Tilgung nicht. Bei einem Vereinswechsel verfällt das Darlehen mit dem Stadion.</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -12131,7 +12326,7 @@ function FinanzAbrechnungView({ finanzen, live }) {
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Beraterprovisionen</span><span>{(f.aufwandBerater || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Fanartikel-Einkauf</span><span>{(f.aufwandFanartikel || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Verkaufsstände &amp; Vereinsheim (Einkauf)</span><span>{(f.aufwandImbiss || 0).toLocaleString("de-CH")} €</span></div>
-      <div className="text-[11px] text-emerald-300 flex justify-between"><span>Stadion (Umbauten, Kauf, Infrastruktur)</span><span>{(f.aufwandStadion || 0).toLocaleString("de-CH")} €</span></div>
+      <div className="text-[11px] text-emerald-300 flex justify-between"><span>Stadion (Rasen, Wartung)</span><span>{(f.aufwandStadion || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Trainingsmaterial</span><span>{(f.aufwandMaterial || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Personal (Verkauf/Verwaltung)</span><span>{(f.aufwandPersonal || 0).toLocaleString("de-CH")} €</span></div>
       <div className="text-[11px] text-emerald-300 flex justify-between"><span>Trainingslager</span><span>{(f.aufwandTrainingslager || 0).toLocaleString("de-CH")} €</span></div>
@@ -12147,6 +12342,15 @@ function FinanzAbrechnungView({ finanzen, live }) {
       <div className={`text-sm font-bold flex justify-between border-t pt-1.5 mt-1 ${reingewinn >= 0 ? "text-amber-400 border-amber-400/40" : "text-red-400 border-red-500/40"}`}>
         <span>Reingewinn {live ? "bisher" : ""}</span><span>{reingewinn >= 0 ? "+" : ""}{reingewinn.toLocaleString("de-CH")} €</span>
       </div>
+      {((f.investitionen || 0) > 0 || (f.darlehenAufnahme || 0) > 0 || (f.darlehenTilgung || 0) > 0) && (
+        <div className="border-t border-emerald-900 pt-1.5 mt-1 space-y-1">
+          <div className="text-xs text-sky-300 font-semibold">Investitionen &amp; Finanzierung (nicht im Ergebnis)</div>
+          {(f.investitionen || 0) > 0 && <div className="text-[11px] text-emerald-300 flex justify-between"><span>Stadion-Investitionen (Kauf, Umbau, Infrastruktur)</span><span>−{f.investitionen.toLocaleString("de-CH")} €</span></div>}
+          {(f.darlehenAufnahme || 0) > 0 && <div className="text-[11px] text-emerald-300 flex justify-between"><span>Darlehen aufgenommen</span><span>+{f.darlehenAufnahme.toLocaleString("de-CH")} €</span></div>}
+          {(f.darlehenTilgung || 0) > 0 && <div className="text-[11px] text-emerald-300 flex justify-between"><span>Darlehen getilgt</span><span>−{f.darlehenTilgung.toLocaleString("de-CH")} €</span></div>}
+          <div className="text-xs text-sky-200 font-semibold flex justify-between"><span>Veränderung Kontostand</span><span>{(() => { const v = reingewinn - (f.investitionen || 0) + (f.darlehenAufnahme || 0) - (f.darlehenTilgung || 0); return (v >= 0 ? "+" : "−") + Math.abs(v).toLocaleString("de-CH"); })()} €</span></div>
+        </div>
+      )}
       <div className="text-[10px] text-emerald-700">{live ? "Läuft automatisch weiter bis Saisonende, dann Übertrag auf den Kontostand der neuen Saison." : "Wird automatisch auf den Kontostand der neuen Saison übertragen."}</div>
     </div>
   );
@@ -12450,10 +12654,39 @@ function StatistikListe({ titel, icon: Icon, spieler, wert, einheit = "", farbe 
   );
 }
 
-function StatistikView({ squad, managerDivId }) {
+function StatistikView({ squad, managerDivId, spielHistorie = [] }) {
   const geldFormat = w => w.toLocaleString("de-CH") + " €";
+  const ligaSpiele = (spielHistorie || []).filter(h => (h.wettbewerb || "Liga") === "Liga" && h.tHeim != null);
+  const erg = ligaSpiele.map(h => {
+    const eigen = h.istHeim ? h.tHeim : h.tGast, gegen = h.istHeim ? h.tGast : h.tHeim;
+    return { eigen, gegen, heim: h.istHeim, zuschauer: h.zuschauer, res: eigen > gegen ? "S" : eigen === gegen ? "U" : "N" };
+  });
+  const zaehle = (liste, r) => liste.filter(e => e.res === r).length;
+  const heimListe = erg.filter(e => e.heim), gastListe = erg.filter(e => !e.heim);
+  let serieU = 0, besteSerieU = 0, serieS = 0, besteSerieS = 0;
+  erg.forEach(e => { serieU = e.res === "N" ? 0 : serieU + 1; besteSerieU = Math.max(besteSerieU, serieU); serieS = e.res === "S" ? serieS + 1 : 0; besteSerieS = Math.max(besteSerieS, serieS); });
+  const mitZuschauer = erg.filter(e => e.heim && e.zuschauer);
+  const teamZeilen = erg.length === 0 ? [] : [
+    ["Spiele (Liga)", erg.length],
+    ["Siege – Unentschieden – Niederlagen", `${zaehle(erg, "S")} – ${zaehle(erg, "U")} – ${zaehle(erg, "N")}`],
+    ["Heim (S-U-N)", `${zaehle(heimListe, "S")}-${zaehle(heimListe, "U")}-${zaehle(heimListe, "N")}`],
+    ["Auswärts (S-U-N)", `${zaehle(gastListe, "S")}-${zaehle(gastListe, "U")}-${zaehle(gastListe, "N")}`],
+    ["Tore", `${erg.reduce((a, e) => a + e.eigen, 0)} : ${erg.reduce((a, e) => a + e.gegen, 0)}`],
+    ["Spiele ohne Gegentor", erg.filter(e => e.gegen === 0).length],
+    ["Längste Serie ohne Niederlage", besteSerieU],
+    ["Längste Siegesserie", besteSerieS],
+    ["Zuschauerschnitt (Heim)", mitZuschauer.length ? Math.round(mitZuschauer.reduce((a, e) => a + e.zuschauer, 0) / mitZuschauer.length).toLocaleString("de-CH") : "—"]
+  ];
   return (
     <div>
+      {teamZeilen.length > 0 && (
+        <div className="border border-emerald-800 rounded p-3 mb-3 space-y-1" style={{ backgroundColor: "var(--fm-surface-raised)" }}>
+          <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-1">Team-Bilanz der Saison</div>
+          {teamZeilen.map(([k, v]) => (
+            <div key={k} className="text-[11px] text-emerald-300 flex justify-between"><span>{k}</span><span className="font-semibold">{v}</span></div>
+          ))}
+        </div>
+      )}
       <p className="text-[11px] text-emerald-600 mb-3">Vereinsinterne Bestenlisten für die laufende Saison, über alle Wettbewerbe (Liga, Pokal, Europapokal, Testspiele) zusammengerechnet.</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <StatistikListe titel="Torschützenliste" icon={Award} spieler={squad} wert="tore" einheit=" Tore" />
@@ -12515,6 +12748,7 @@ const SPIELREGELN_KATEGORIEN = [
     punkte: [
       "Angebote sind nur bei offenem Transferfenster möglich. Durchsucht werden auch die Nachbarligen. Vertragsdauer bei Neuzugängen: 1–5 Jahre.",
       "Zu viele Ablehnungen: Der Verein verhandelt im Fenster nicht mehr.",
+      "Konkurrenz: Um Spieler ab Stärke 72 bewirbt sich manchmal ein Rivale. Du erfährst als Gerücht sein ungefähres Gebot. Bietest du weniger, bekommt er den Zuschlag und der Spieler ist im Fenster weg.",
       "Berater bieten gelegentlich Spieler abseits des Marktes an (110–160 % Marktwert). Hoher Markenwert und Reputation bringen mehr Abwerbeangebote für deine Topspieler.",
       "Star-Transfer (Trikot-Boom im Fanshop, ca. 6 Wochen): Neuzugang liegt 15 Punkte über dem Kaderschnitt oder hat selbst mindestens 92.",
       "Verkäufe wirken je nach Rolle: Kapitän oder Führungsspieler weg bringt Unruhe, ein unzufriedener Hitzkopf weg wirkt befreiend.",
@@ -12530,6 +12764,7 @@ const SPIELREGELN_KATEGORIEN = [
       "Unter Personal & Transfers → Spielerverträge: Verträge unter 2 Jahren Restlaufzeit, dazu frühzeitige Verlängerung aller anderen.",
       "Frühzeitig (noch mind. 2 Jahre) ist günstiger als dringend. Der Berater schlägt manchmal selbst eine Verlängerung vor, dann klappt sie garantiert.",
       "Zu viele Ablehnungen: Der Spieler ist einige Wochen frustriert (leichter Formabzug).",
+      "Gehaltsforderung: Wer stark spielt (Tore, Vorlagen, Elf des Tages) und klar unter Marktlohn verdient, fordert mehr. Du hast 4 Liga-Spieltage Zeit. Erhöhen hebt die Stimmung (+10), Ablehnen oder Ignorieren senkt sie.",
       "Ohne Verlängerung geht er ablösefrei. Die Ablöse sinkt mit der Restlaufzeit: letztes Jahr ca. −45 %, ein Jahr Rest ca. −20 %.",
       "Kaderpyramide-Warnung: ab 3 wichtigen Spielern über 30 im Kader-Tab. Rotationsprinzip (Taktik-Tab): Junge (≤23) bekommen bei Gleichstand mehr Einsatzzeit, auch bei Einwechslungen.",
       "Titelverteidiger-Malus: Wer nach dem Titel kaum nachrüstet (unter 2 Neuzugänge), startet gedämpft in die neue Saison.",
@@ -12544,7 +12779,9 @@ const SPIELREGELN_KATEGORIEN = [
       "Der Kapitän wird automatisch bestimmt. Ein Führungstyp stabilisiert, ein Hitzkopf kann schaden.",
       "Eingespieltheit: Bleiben mind. 8 von 11 Startelf-Spielern gleich, wächst ein Bonus bis +2. Grosse Umstellungen halbieren die Serie.",
       "Jeder Spieler hat eine eigene Zufriedenheit (0–100): Startelf hebt sie, Bank senkt sie, je nach Persönlichkeit schnell oder langsam. Auch ein auslaufender Vertrag drückt sie.",
-      "Unter 40 Punkten sinkt seine tatsächliche Spielstärke."
+      "Unter 40 Punkten sinkt seine tatsächliche Spielstärke.",
+      "Verletzungen: Nach einer mittleren oder schweren Verletzung folgt eine Aufbauphase (3 bzw. 5 Einsätze) mit Leistungsabzug (bis −3 bzw. −6) und höherem Rückfallrisiko. Leichte Verletzungen haben keine Nachwirkung. Arzt und medizinische Abteilung senken das Risiko.",
+      "Standard-Schützen: Elfmeter- und Freistoss-Schützen wählst du im Kader-Tab selbst. Ohne Wahl bestimmt sie der Trainer automatisch."
     ]
   },
   {
@@ -12599,7 +12836,8 @@ const SPIELREGELN_KATEGORIEN = [
     icon: Wallet, farbe: "#fcd34d", titel: "Finanzen, Preise & Verpflegung",
     kurz: "Buchhaltung, Dispo, Preise, Fanshop",
     punkte: [
-      "Die Buchhaltung schlüsselt alle Erträge und Aufwände auf. TV-Gelder gibt es ab der 3. Liga. Der Reingewinn wird zum Startkapital der neuen Saison.",
+      "Die Buchhaltung schlüsselt alle Erträge und Aufwände auf und zeigt die Mehrjahres-Bilanz. TV-Gelder gibt es ab der 3. Liga. Der Reingewinn wird zum Startkapital der neuen Saison. Stadionkauf, Umbauten und Infrastruktur zählen als Investitionen, nicht ins Ergebnis.",
+      "Bankdarlehen (Buchhaltung → Darlehen): bis 80 % des Stadion-Kaufpreises, ca. 4 % Zins pro Jahr, Tilgung über rund 100 Liga-Spieltage, Sondertilgung jederzeit. Bei einem Vereinswechsel verfällt es.",
       "Dispo: begrenztes Minus gegen wöchentliche Zinsen. Bei Überschreitung verkauft der Vorstand Spieler, beim zweiten Mal wirst du entlassen.",
       "Preise wirken auf die Nachfrage: Über dem Richtwert kommen und kaufen weniger, darunter mehr. Logen reagieren schwächer, hoher Markenwert macht tolerant. Meist ist ein moderater Aufschlag am besten.",
       "Fanshop, Verpflegung und Vereinsheim: Pro Artikel legst du einen Ziel-Bestand fest, nach jedem Spiel wird automatisch nachbestellt. Das Maximum liegt beim 3-Fachen der höchstmöglichen Nachfrage und wächst mit dem Stadion. Verkaufspreise sind frei einstellbar."
@@ -13738,6 +13976,15 @@ function TrophaeenView({ vereinsTrophaeen, teamName, saisonHistorie }) {
   return (
     <div>
       <div className="text-xs uppercase tracking-wider text-emerald-400/80 mb-3">Trophäenschrank — {teamName}</div>
+      {sortiert.length > 0 && (() => {
+        const anz = (...typen) => sortiert.filter(t => typen.includes(t.typ)).length;
+        const teile = [["Meistertitel", anz("meisterschaft", "meisterschaft_l2", "meisterschaft_l3", "meisterschaft_rl", "meisterschaft_ol")], ["Pokalsiege", anz("pokalsieg")], ["Europapokal", anz("europapokal")], ["Torschützenkönige", anz("torschuetzenkoenig")], ["WM/EM", anz("wm_sieg", "em_sieg")]].filter(([, n]) => n > 0);
+        return teile.length ? (
+          <div className="flex flex-wrap gap-2 mb-3">
+            {teile.map(([k, n]) => <div key={k} className="border border-amber-400/30 rounded px-2 py-1 text-[11px] text-amber-300"><span className="font-bold">{n}×</span> {k}</div>)}
+          </div>
+        ) : null;
+      })()}
       {sortiert.length === 0 ? (
         <div className="text-center py-6 mb-2">
           <Trophy className="mx-auto text-emerald-800 mb-3" size={32} />
@@ -15313,7 +15560,7 @@ function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, o
 
 // Vorstand & Presse: laufender Stand der Vorstandsziele (wie am Saisonende in der Vereinsversammlung
 // ausgewertet), die Wiederwahl-Aussicht und das Archiv der bisherigen Pressekonferenzen.
-function VorstandView({ ziele, zielStand, archiv = [], saisonLabel }) {
+function VorstandView({ ziele, zielStand, archiv = [], saisonLabel, historie = [] }) {
   const karte = { backgroundColor: "var(--fm-surface)" };
   const anzahl = zielStand.length;
   const erfuellt = zielStand.filter(z => z.erfuellt).length;
@@ -15351,6 +15598,22 @@ function VorstandView({ ziele, zielStand, archiv = [], saisonLabel }) {
             </div>
             <div className="text-[10px] text-emerald-600 mt-1">Zwischenstand: Platz, Gewinn und andere Werte ändern sich bis zum Saisonende noch. Am Saisonende entscheidet die Vereinsversammlung endgültig über deine Wiederwahl und zahlt die Provisionen für erfüllte Ziele.</div>
           </>
+        )}
+      </div>
+
+      <div className="border border-emerald-800 rounded p-4 mb-4" style={karte}>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-2">Vorstands-Verlauf</div>
+        {historie.length === 0 ? (
+          <div className="text-[11px] text-emerald-700">Noch keine Vereinsversammlung. Nach jeder Saison erscheint hier, welche Ziele du erfüllt hast.</div>
+        ) : (
+          <div className="space-y-2">
+            {[...historie].reverse().map((h, i) => (
+              <div key={i} className="border-l-2 pl-3" style={{ borderColor: h.wiedergewaehlt ? "#34d399" : "#f87171" }}>
+                <div className="text-[11px] flex justify-between"><span className="text-emerald-300">Saison {h.saison}/{String(h.saison + 1).slice(-2)} · {h.verein}</span><span className={h.wiedergewaehlt ? "text-emerald-300" : "text-red-300"}>{h.erfuellt}/{h.gesamt} · {h.wiedergewaehlt ? "wiedergewählt" : "entlassen"}</span></div>
+                <div className="text-[10px] text-emerald-600">{h.ziele.map(z => `${z.erfuellt ? "✓" : "✗"} ${z.text}`).join("  ·  ")}</div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
@@ -15967,9 +16230,10 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 157; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "21.11.2026, 02:00";
+const APP_BUILD = 158; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "21.11.2026, 10:30";
 const APP_NEUIGKEITEN = [
+  { build: 158, titel: "Grosses Update: Finanzen, Kader, Transfers", text: "Buchhaltung: Stadionkauf, Umbauten und Infrastruktur sind jetzt Investitionen und belasten das Ergebnis nicht mehr. Neu: Mehrjahres-Bilanz und Bankdarlehen (bis 80 % des Stadionpreises). Kader: Nach längeren Verletzungen gibt es eine Aufbauphase mit Leistungsabzug und höherem Rückfallrisiko, starke Spieler stellen von sich aus Gehaltsforderungen, und du wählst Elfmeter- und Freistoss-Schützen selbst. Transfers: Um gefragte Spieler bewirbt sich manchmal ein Rivale (mit Gerücht über sein Gebot). Dazu eine Team-Bilanz in der Statistik, ein Titelzähler im Trophäenschrank, ein Vorstands-Verlauf und die Spielregeln als Unter-Tab unter Verein/Fans." },
   { build: 157, titel: "Spielregeln kompakt", text: "Die Spielregeln sind von 38 auf 16 Bereiche zusammengelegt und auf etwa ein Drittel des Umfangs gekürzt. Die Bereiche sind einklappbar: Titel antippen zeigt den Inhalt." },
   { build: 156, titel: "Buchhaltung vollständig", text: "Buchhaltungs-Check: Alle Geldflüsse landen in der Saison-Abrechnung. Es fehlten der Kauf von Stadion-Infrastruktur (Flutlicht, Rasenheizung usw.) und der Stadionkauf. Beides erscheint jetzt unter Stadion." },
   { build: 155, titel: "Abfindung für Mitarbeiter", text: "Mitarbeiter lassen sich nicht mehr kostenlos aus laufenden Verträgen entlassen. Läuft der Vertrag über das Saisonende hinaus, kostet es die Hälfte des Gehalts der verbleibenden vollen Vertragsjahre (mindestens ein Vierteljahresgehalt), mit Bestätigung vor dem Entlassen. Läuft er zum Saisonende aus, bleibt es kostenlos." },
@@ -16464,7 +16728,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "trainer", belastung = "trainer", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, dfbAbgang = null, dfbSperreBis = 0, nationenOffsets = {}, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], pressearchiv = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null } = careerState;
+  const { divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, darlehen = null, vorstandHistorie = [], gehaltsforderungen = [], schuetzenManuell = false, stab = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "trainer", belastung = "trainer", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, dfbAbgang = null, dfbSperreBis = 0, nationenOffsets = {}, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], pressearchiv = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null } = careerState;
   AKTUELLE_NATIONEN_OFFSETS = nationenOffsets || {};
   PREIS_SAISON = season;
   const datum = careerState.datum || saisonStartDatum(season);
@@ -16498,7 +16762,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       case "verpflegung": return (IMBISS_ARTIKEL_TYPEN.some(a => (imbiss[a.id]?.bestand ?? 0) <= 0 || (vereinsheim[a.id]?.bestand ?? 0) <= 0)) ? "red" : null;
       case "trainingsmaterial": return materialBrauchtAktion ? "red" : null;
       case "kader": return kaderBrauchtAktion ? "red" : null;
-      case "vertraege": return vertraegeBrauchenAktion ? "red" : (beraterVerlaengerungsAngebote?.length > 0 ? "amber" : null);
+      case "vertraege": return vertraegeBrauchenAktion ? "red" : ((beraterVerlaengerungsAngebote?.length > 0 || gehaltsforderungen?.length > 0) ? "amber" : null);
       case "taktik": return taktikBrauchtAktion ? "red" : null;
       case "vereinsinfos": return vereinsinfosUngelesen ? "red" : null;
       case "nationalmannschaft": {
@@ -16722,7 +16986,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   // für den Rest DIESES Transferfensters keine weiteren Verhandlungen mehr zu führen — realistisch statt
   // einer starren Versuchsanzahl. Die Wahrscheinlichkeit steigt mit jeder weiteren Ablehnung, ist aber
   // nie hundertprozentig sicher und auch nie ab der ersten Ablehnung garantiert.
-  const onTransferVerhandlungErgebnis = (spielerId, erfolgreich) => {
+  const onTransferVerhandlungErgebnis = (spielerId, erfolgreich, sofortGesperrt = false) => {
     setCareerState(cs => {
       const aktuellerSchluessel = `${cs.season}-${transferfensterStatus(cs.datum).name || "geschlossen"}`;
       const alteAblehnungen = cs.transferAblehnungen && (cs.transferAblehnungenSchluessel === aktuellerSchluessel) ? cs.transferAblehnungen : {};
@@ -16735,7 +16999,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       }
       const neueAnzahl = (alteAblehnungen[spielerId] || 0) + 1;
       const chanceGesperrt = Math.min(0.85, 0.15 + (neueAnzahl - 1) * 0.25);
-      const neuGesperrt = Math.random() < chanceGesperrt;
+      const neuGesperrt = sofortGesperrt || Math.random() < chanceGesperrt;
       return {
         ...cs,
         transferAblehnungen: { ...alteAblehnungen, [spielerId]: neueAnzahl },
@@ -18333,6 +18597,20 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       }
     }
 
+    // Gehaltsforderungen starker Spieler (siehe generiereGehaltsforderung): laufen nach 4 Liga-Spieltagen
+    // ohne Antwort ab und kosten den Spieler dann spürbar Zufriedenheit.
+    let neueGehaltsforderungen = gehaltsforderungen || [];
+    let abgelaufeneForderungIds = [];
+    if (spieltHeute) {
+      neueGehaltsforderungen = neueGehaltsforderungen.map(f => ({ ...f, restSpieltage: f.restSpieltage - 1 }));
+      abgelaufeneForderungIds = neueGehaltsforderungen.filter(f => f.restSpieltage <= 0).map(f => f.spielerId);
+      neueGehaltsforderungen = neueGehaltsforderungen.filter(f => f.restSpieltage > 0);
+      if (neueGehaltsforderungen.length < 2 && Math.random() < 0.12) {
+        const neueForderung = generiereGehaltsforderung(neueDivisions[managerDivId].squads[profile.team], managerDivId, neueGehaltsforderungen.map(f => f.spielerId));
+        if (neueForderung) neueGehaltsforderungen = [...neueGehaltsforderungen, neueForderung];
+      }
+    }
+
     // Spieler, die der Manager selbst auf den Transfermarkt gesetzt hat (eigener Wunsch oder
     // Trainer-Empfehlung): deutlich höhere Chance auf Angebote, damit sich das aktive Verkaufen lohnt,
     // aber über mehrere Spieltage verteilt und mit schwankenden Geboten statt Sofortverkauf.
@@ -18892,7 +19170,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Zufallsereignisse: unerwartete Vorkommnisse aus dem Vereinsalltag, die verschiedenste Bereiche
     // betreffen und mit bestehenden Systemen zusammenspielen (Rasenheizung, Teampsychologe,
     // Sicherheitssystem, Digitale Infrastruktur, Markenwert).
-    let squadNachEreignis = aktualisiereSpielerZufriedenheit(neueDivisions[managerDivId].squads[profile.team], new Set(aktuelleStartelf.elf.map(p => p.id)), season);
+    let squadNachEreignis = aktualisiereSpielerZufriedenheit(neueDivisions[managerDivId].squads[profile.team], new Set(aktuelleStartelf.elf.map(p => p.id)), season, neueGehaltsforderungen.map(f => f.spielerId));
+    if (abgelaufeneForderungIds.length) squadNachEreignis = squadNachEreignis.map(p => abgelaufeneForderungIds.includes(p.id) ? { ...p, zufriedenheit: Math.max(0, (p.zufriedenheit ?? 70) - 8) } : p);
     let stadionNachEreignis = neueDivisions[managerDivId].stadien[profile.team];
     let stabNachEreignis = stabNachLohn;
     let materialNachEreignis = neuesTrainingsmaterial;
@@ -19010,7 +19289,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Budgetkrise: Dispo mit Zinsen, danach greift der Vorstand ein (Zwangsverkauf, dann Entlassung) —
     // siehe verarbeiteBudgetKrise. Nutzt cs.bankrottWarnstufe/cs.budget aus dem vorherigen Zustand,
     // deshalb hier als eigener Funktionskörper statt einer reinen Objekt-Literal-Rückgabe.
-    const budgetRohLiga = budget + (einnahmen ? einnahmen.gesamt : 0) + laenderspielEinnahmen - trainergehaltGezahlt - managerlohnGezahlt - trainerPraemieGesamt - spielerloehneGezahlt - stabGehaltGezahlt - personalkostenGezahlt - personalabteilungenkostenGezahlt - sicherheitskostenGezahlt - betriebskostenGezahlt - schiedsrichterkostenGezahlt - stadionMieteGezahlt - nachbestellKostenFanshop - nachbestellKostenImbiss + berechnePassiveWocheneinnahmen(division.stadien[profile.team]) + budgetDeltaEreignis;
+    const darlehenRate = berechneDarlehenRate(careerState.darlehen);
+    const budgetRohLiga = budget - darlehenRate.zins - darlehenRate.tilgung + (einnahmen ? einnahmen.gesamt : 0) + laenderspielEinnahmen - trainergehaltGezahlt - managerlohnGezahlt - trainerPraemieGesamt - spielerloehneGezahlt - stabGehaltGezahlt - personalkostenGezahlt - personalabteilungenkostenGezahlt - sicherheitskostenGezahlt - betriebskostenGezahlt - schiedsrichterkostenGezahlt - stadionMieteGezahlt - nachbestellKostenFanshop - nachbestellKostenImbiss + berechnePassiveWocheneinnahmen(division.stadien[profile.team]) + budgetDeltaEreignis;
     const krise = verarbeiteBudgetKrise({
       budgetRoh: budgetRohLiga, managerDivId, squad: neueDivisions[managerDivId].squads[profile.team],
       warnstufeBisher: careerState.bankrottWarnstufe, profile, season, anzahlSaisonsImAmt, trophaeenAnzahl: trophaeen.length
@@ -19018,8 +19298,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     if (krise.squadNachZwangsverkauf) {
       neueDivisions[managerDivId] = { ...neueDivisions[managerDivId], squads: { ...neueDivisions[managerDivId].squads, [profile.team]: krise.squadNachZwangsverkauf } };
     }
-    const neueSaisonFinanzenMitZinsen = (krise.dispoZinsenGezahlt || krise.ertragZwangsverkauf)
-      ? { ...neueSaisonFinanzenFinal, aufwandZinsen: (neueSaisonFinanzenFinal.aufwandZinsen || 0) + (krise.dispoZinsenGezahlt || 0), ertragTransfers: (neueSaisonFinanzenFinal.ertragTransfers || 0) + (krise.ertragZwangsverkauf || 0) }
+    const neueSaisonFinanzenMitZinsen = (krise.dispoZinsenGezahlt || krise.ertragZwangsverkauf || darlehenRate.zins || darlehenRate.tilgung)
+      ? { ...neueSaisonFinanzenFinal, darlehenTilgung: (neueSaisonFinanzenFinal.darlehenTilgung || 0) + darlehenRate.tilgung, aufwandZinsen: (neueSaisonFinanzenFinal.aufwandZinsen || 0) + (krise.dispoZinsenGezahlt || 0) + darlehenRate.zins, ertragTransfers: (neueSaisonFinanzenFinal.ertragTransfers || 0) + (krise.ertragZwangsverkauf || 0) }
       : neueSaisonFinanzenFinal;
 
     setCareerState(cs => ({
@@ -19071,6 +19351,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       letztesTrainergehalt: trainergehaltGezahlt > 0 ? trainergehaltGezahlt : null,
       letztesManagerlohn: managerlohnGezahlt > 0 ? managerlohnGezahlt : null,
       budget: krise.budget - sichtungsKosten,
+      darlehen: careerState.darlehen && careerState.darlehen.restschuld - darlehenRate.tilgung > 0 ? { ...careerState.darlehen, restschuld: careerState.darlehen.restschuld - darlehenRate.tilgung } : null,
       bankrottWarnstufe: krise.bankrottWarnstufe ?? cs.bankrottWarnstufe,
       budgetKrise: krise.budgetKrise || null,
       vermieterAusbauAngekuendigt: vermieterErgebnisErfolg?.ankuendigung || null,
@@ -19143,6 +19424,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       eingehendeAngebote: neueEingehendeAngebote,
       spielerberaterAngebote: neueSpielerberaterAngebote,
       beraterVerlaengerungsAngebote: neueBeraterVerlaengerungsAngebote,
+      gehaltsforderungen: neueGehaltsforderungen,
       verkaufsliste: neueVerkaufsliste,
       fanclub: fanclubDeltaEreignis ? { ...neuerFanclub, groesse: Math.max(50, neuerFanclub.groesse + fanclubDeltaEreignis) } : neuerFanclub,
       saisonFinanzen: sichtungsKosten > 0 ? { ...neueSaisonFinanzenMitZinsen, aufwandJugend: (neueSaisonFinanzenMitZinsen.aufwandJugend || 0) + sichtungsKosten } : neueSaisonFinanzenMitZinsen,
@@ -20010,6 +20292,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       pressekonferenzenDieseSaison: 0,
       pressefragenGestelltDieseSaison: [],
       pressearchiv: (pressearchiv || []).slice(-40),
+      vorstandHistorie: seasonEndInfo.vereinsversammlung ? [...(vorstandHistorie || []), { saison: seasonEndInfo.season ?? season, verein: profile.team, erfuellt: seasonEndInfo.vereinsversammlung.erfuellteAnzahl, gesamt: seasonEndInfo.vereinsversammlung.gesamt, wiedergewaehlt: seasonEndInfo.vereinsversammlung.wiedergewaehlt, ziele: seasonEndInfo.vereinsversammlung.ergebnisse.map(e => ({ text: e.text, erfuellt: e.erfuellt })) }].slice(-20) : (vorstandHistorie || []),
+      darlehen,
       jugendbefoerderungenDieseSaison: 0,
       letzterJahresbericht: jahresbericht,
       karriereAufstiege: karriereAufstiege + (managerAufgestiegen ? 1 : 0),
@@ -20108,7 +20392,16 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       stab: stabNeu,
       letzterStabAblauf: stabAbgelaufen.length ? stabAbgelaufen : null,
       kapitaenId: bestimmeKapitaen(squadNachAblauf),
-      ...bestimmeStandardSchuetzen(squadNachAblauf),
+      ...(() => {
+        // Manuell gewählte Schützen bleiben über den Saisonwechsel erhalten, solange sie noch im Kader stehen
+        const auto = bestimmeStandardSchuetzen(squadNachAblauf);
+        const behalte = id => schuetzenManuell && id && squadNachAblauf.some(p => p.id === id);
+        return {
+          elfmeterSchuetzeId: behalte(elfmeterSchuetzeId) ? elfmeterSchuetzeId : auto.elfmeterSchuetzeId,
+          freistossSchuetzeId: behalte(freistossSchuetzeId) ? freistossSchuetzeId : auto.freistossSchuetzeId,
+          schuetzenManuell: !!schuetzenManuell
+        };
+      })(),
       ziele: null,
       trainerZiele: null,
       anzahlSaisonsImAmt: anzahlSaisonsImAmt + 1,
@@ -20212,6 +20505,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       eingehendeAngebote: [],
       spielerberaterAngebote: [],
       beraterVerlaengerungsAngebote: [],
+      gehaltsforderungen: [],
       // Der Managervertrag wird jetzt sichtbar im Saisonabschluss-Screen verlängert (siehe
       // managerVertragLaeuftAusSnapshot oben) — hier wird nur noch der ggf. bereits aktualisierte
       // Vertrag übernommen, keine stille Hintergrund-Verlängerung mehr.
@@ -20527,7 +20821,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         ...cs,
         budget: cs.budget - kosten,
         divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], stadien: { ...cs.divisions[managerDivId].stadien, [profile.team]: neuerStadion } } },
-        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandStadion: (cs.saisonFinanzen?.aufwandStadion || 0) + kosten }
+        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), investitionen: (cs.saisonFinanzen?.investitionen || 0) + kosten }
       };
     });
   };
@@ -20763,7 +21057,38 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         ...cs,
         budget: cs.budget - preis,
         divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], stadien: { ...cs.divisions[managerDivId].stadien, [profile.team]: neuerStadion } } },
-        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandStadion: (cs.saisonFinanzen?.aufwandStadion || 0) + preis }
+        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), investitionen: (cs.saisonFinanzen?.investitionen || 0) + preis }
+      };
+    });
+  };
+
+  const onDarlehenAufnehmen = (betrag) => {
+    setCareerState(cs => {
+      const stadion = cs.divisions[managerDivId].stadien[profile.team];
+      const b = Math.min(Math.round(betrag), darlehenMaximum(stadion, cs.darlehen));
+      if (b < 10000) return cs;
+      const alt = cs.darlehen || { restschuld: 0, tilgungRate: 0 };
+      return {
+        ...cs,
+        budget: cs.budget + b,
+        darlehen: { restschuld: alt.restschuld + b, tilgungRate: alt.tilgungRate + Math.max(1, Math.round(b / DARLEHEN_TILGUNG_SPIELTAGE)) },
+        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), darlehenAufnahme: (cs.saisonFinanzen?.darlehenAufnahme || 0) + b }
+      };
+    });
+  };
+
+  const onDarlehenTilgen = (betrag) => {
+    setCareerState(cs => {
+      if (!cs.darlehen) return cs;
+      const b = Math.min(Math.round(betrag), cs.darlehen.restschuld, Math.max(0, cs.budget));
+      if (b <= 0) return cs;
+      const rest = cs.darlehen.restschuld - b;
+      const anteil = rest / cs.darlehen.restschuld;
+      return {
+        ...cs,
+        budget: cs.budget - b,
+        darlehen: rest > 0 ? { restschuld: rest, tilgungRate: Math.max(1, Math.round(cs.darlehen.tilgungRate * anteil)) } : null,
+        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), darlehenTilgung: (cs.saisonFinanzen?.darlehenTilgung || 0) + b }
       };
     });
   };
@@ -20805,7 +21130,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
             stadien: { ...div.stadien, [profile.team]: { ...stadion, umbauten: [...(stadion.umbauten || []), neuerUmbau] } }
           }
         },
-        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandStadion: (cs.saisonFinanzen?.aufwandStadion || 0) + kosten }
+        saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), investitionen: (cs.saisonFinanzen?.investitionen || 0) + kosten }
       };
     });
   };
@@ -21011,6 +21336,31 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   };
   const onBeraterVerlaengerungAblehnen = (angebot) => {
     setCareerState(cs => ({ ...cs, beraterVerlaengerungsAngebote: cs.beraterVerlaengerungsAngebote.filter(a => a.id !== angebot.id) }));
+  };
+
+  const onStandardSchuetzeSetzen = (art, spielerId) => {
+    setCareerState(cs => ({ ...cs, [art === "elfmeter" ? "elfmeterSchuetzeId" : "freistossSchuetzeId"]: spielerId, schuetzenManuell: true }));
+  };
+  const onStandardSchuetzenAutomatisch = () => {
+    setCareerState(cs => ({ ...cs, ...bestimmeStandardSchuetzen(cs.divisions[managerDivId].squads[profile.team]), schuetzenManuell: false }));
+  };
+
+  const onGehaltsforderungAnnehmen = (forderung) => {
+    setCareerState(cs => {
+      const squad = cs.divisions[managerDivId].squads[profile.team];
+      if (!squad.some(p => p.id === forderung.spielerId)) return { ...cs, gehaltsforderungen: (cs.gehaltsforderungen || []).filter(f => f.id !== forderung.id) };
+      const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
+      div.squads[profile.team] = squad.map(p => p.id === forderung.spielerId ? { ...p, gehalt: Math.max(p.gehalt || 0, forderung.gehalt), zufriedenheit: Math.min(100, (p.zufriedenheit ?? 70) + 10) } : p);
+      return { ...cs, divisions: { ...cs.divisions, [managerDivId]: div }, gehaltsforderungen: (cs.gehaltsforderungen || []).filter(f => f.id !== forderung.id) };
+    });
+  };
+  const onGehaltsforderungAblehnen = (forderung) => {
+    setCareerState(cs => {
+      const squad = cs.divisions[managerDivId].squads[profile.team];
+      const div = { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads } };
+      div.squads[profile.team] = squad.map(p => p.id === forderung.spielerId ? { ...p, zufriedenheit: Math.max(0, (p.zufriedenheit ?? 70) - 10) } : p);
+      return { ...cs, divisions: { ...cs.divisions, [managerDivId]: div }, gehaltsforderungen: (cs.gehaltsforderungen || []).filter(f => f.id !== forderung.id) };
+    });
   };
 
   const onSpielerAufMarktSetzen = (spielerId) => {
@@ -21428,6 +21778,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     setCareerState(cs => ({
       ...cs,
       jobAngebot: null,
+      darlehen: null,
       managerVertrag: {
         verein: neuesTeam,
         vertragBisSaison: cs.season + 2 - 1,
@@ -21448,6 +21799,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       kapitaenId: bestimmeKapitaen(neuesSquad),
       elfmeterSchuetzeId: neueSchuetzen.elfmeterSchuetzeId,
       freistossSchuetzeId: neueSchuetzen.freistossSchuetzeId,
+      schuetzenManuell: false,
       saisonFinanzen: leereSaisonFinanzen(),
       sponsorenAbschluesseDieseSaison: 0,
       fanshop: initialerFanshop(),
@@ -21501,6 +21853,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       ...cs,
       ruecktritt: null,
       jobAngebot: null,
+      darlehen: null,
       managerVertrag: {
         verein: neuesTeam,
         vertragBisSaison: cs.season + 2 - 1,
@@ -21522,6 +21875,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       kapitaenId: bestimmeKapitaen(neuesSquad),
       elfmeterSchuetzeId: neueSchuetzen.elfmeterSchuetzeId,
       freistossSchuetzeId: neueSchuetzen.freistossSchuetzeId,
+      schuetzenManuell: false,
       saisonFinanzen: leereSaisonFinanzen(),
       sponsorenAbschluesseDieseSaison: 0,
       fanshop: initialerFanshop(),
@@ -21553,6 +21907,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       ...cs,
       zwangsentlassung: null,
       jobAngebot: null,
+      darlehen: null,
       managerVertrag: {
         verein: neuesTeam,
         vertragBisSaison: cs.season + 2 - 1,
@@ -21574,6 +21929,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       kapitaenId: bestimmeKapitaen(neuesSquad),
       elfmeterSchuetzeId: neueSchuetzen.elfmeterSchuetzeId,
       freistossSchuetzeId: neueSchuetzen.freistossSchuetzeId,
+      schuetzenManuell: false,
       saisonFinanzen: leereSaisonFinanzen(),
       sponsorenAbschluesseDieseSaison: 0,
       fanshop: initialerFanshop(),
@@ -22584,12 +22940,6 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                 </div>
               );
             })}
-            <button
-              onClick={() => onTabWechseln("regeln")}
-              className={`flex items-center gap-2.5 px-3 py-3 text-sm sm:text-[15px] rounded-lg text-left transition-colors mt-1 border-t border-emerald-800 pt-3 ${tab === "regeln" ? "bg-amber-400/15 text-amber-300 font-semibold" : "text-emerald-500 hover:bg-emerald-900/60 hover:text-emerald-300"}`}
-            >
-              <BookOpen size={18} className="shrink-0" /> <span className="flex-1">Spielregeln</span>
-            </button>
           </nav>
 
           {/* Auf schmalen Bildschirmen (Handy) läuft die Navigation waagrecht oben statt in der linken
@@ -22615,15 +22965,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
                     </button>
                   );
                 })}
-                <button
-                  onClick={() => onTabWechseln("regeln")}
-                  className={`shrink-0 flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded border text-[10px] ${tab === "regeln" ? "border-amber-400 text-amber-300" : "border-emerald-800 text-emerald-500"}`}
-                >
-                  <BookOpen size={16} />
-                  <span className="whitespace-nowrap">Spielregeln</span>
-                </button>
               </div>
-              {tab !== "regeln" && TAB_GRUPPEN.find(g => g.id === TAB_ZU_GRUPPE[tab])?.tabs.length > 1 && (
+              {TAB_GRUPPEN.find(g => g.id === TAB_ZU_GRUPPE[tab])?.tabs.length > 1 && (
                 <div className="flex gap-1 border-b border-emerald-800 flex-wrap">
                   {TAB_GRUPPEN.find(g => g.id === TAB_ZU_GRUPPE[tab]).tabs
                     .filter(t => !t.bedingung || (t.bedingung === "bundestrainerAmt" && bundestrainerAmt))
@@ -22901,8 +23244,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           {tab === "vereinsinfos" && <VereinsinfosView careerState={careerState} />}
           {tab === "nationalmannschaft" && bundestrainerAmt && <NationalmannschaftView divisions={divisions} bundestrainerAmt={bundestrainerAmt} onNationalkaderSetzen={onNationalkaderSetzen} onNationalformationSetzen={onNationalformationSetzen} onRuecktritt={onBundestrainerRuecktritt} onKapitaenSetzen={onNationalkapitaenSetzen} turnierLaeuft={!!turnierspiel} managerDivId={managerDivId} season={season} trophaeen={trophaeen} />}
           {tab === "spielplan" && <SpielplanView division={division} managerTeam={profile.team} testspiele={testspiele} season={season} pokal={pokal} europapokal={europapokal} aktuellesDatum={datum} trainingslager={trainingslager} spielHistorie={spielHistorie} />}
-          {tab === "kader" && <KaderView squad={division.squads[profile.team]} kapitaenId={kapitaenId} elfmeterSchuetzeId={elfmeterSchuetzeId} freistossSchuetzeId={freistossSchuetzeId} managerDivId={managerDivId} season={season} datum={datum} stab={stab} trophaeen={trophaeen} teamName={profile.team} onJugendfoerderungUmschalten={onJugendfoerderungUmschalten} onLeihoptionKaufen={onLeihoptionKaufen} meineAusgeliehenenSpieler={meineAusgeliehenenSpieler} alleDivisionen={divisions} />}
-          {tab === "vertraege" && <SpielervertraegeView squad={division.squads[profile.team]} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} beraterVerlaengerungsAngebote={beraterVerlaengerungsAngebote} onBeraterVerlaengerungAnnehmen={onBeraterVerlaengerungAnnehmen} onBeraterVerlaengerungAblehnen={onBeraterVerlaengerungAblehnen} />}
+          {tab === "kader" && <KaderView squad={division.squads[profile.team]} kapitaenId={kapitaenId} elfmeterSchuetzeId={elfmeterSchuetzeId} freistossSchuetzeId={freistossSchuetzeId} managerDivId={managerDivId} season={season} datum={datum} stab={stab} trophaeen={trophaeen} teamName={profile.team} onJugendfoerderungUmschalten={onJugendfoerderungUmschalten} onLeihoptionKaufen={onLeihoptionKaufen} meineAusgeliehenenSpieler={meineAusgeliehenenSpieler} alleDivisionen={divisions} schuetzenManuell={schuetzenManuell} onSchuetzeSetzen={onStandardSchuetzeSetzen} onSchuetzenAutomatisch={onStandardSchuetzenAutomatisch} />}
+          {tab === "vertraege" && <SpielervertraegeView squad={division.squads[profile.team]} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} beraterVerlaengerungsAngebote={beraterVerlaengerungsAngebote} onBeraterVerlaengerungAnnehmen={onBeraterVerlaengerungAnnehmen} onBeraterVerlaengerungAblehnen={onBeraterVerlaengerungAblehnen} gehaltsforderungen={gehaltsforderungen} onForderungAnnehmen={onGehaltsforderungAnnehmen} onForderungAblehnen={onGehaltsforderungAblehnen} />}
           {tab === "taktik" && (
             <TaktikView
               rotationsprinzipAktiv={rotationsprinzipAktiv}
@@ -23066,10 +23409,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               </div>
             )
           )}
-          {tab === "statistik" && <StatistikView squad={division.squads[profile.team]} managerDivId={managerDivId} />}
+          {tab === "statistik" && <StatistikView squad={division.squads[profile.team]} managerDivId={managerDivId} spielHistorie={spielHistorie} />}
           {tab === "karriere" && <KarriereView trophaeen={trophaeen} saisonHistorie={saisonHistorie} teamName={profile.team} profileVorname={profile.vorname} profileNachname={profile.nachname} anzahlSaisonsImAmt={anzahlSaisonsImAmt} karriereAufstiege={karriereAufstiege} karriereAbstiege={karriereAbstiege} karriereEntlassungen={karriereEntlassungen} managerReputation={managerReputation} onRuecktrittAusloesen={onRuecktrittAusloesen} />}
           {tab === "regeln" && <SpielregelnView />}
-          {tab === "buchhaltung" && <BuchhaltungTabView saisonFinanzen={saisonFinanzen} finanzenHistorie={finanzenHistorie} season={season} />}
+          {tab === "buchhaltung" && <BuchhaltungTabView saisonFinanzen={saisonFinanzen} finanzenHistorie={finanzenHistorie} season={season} darlehen={darlehen} budget={budget} darlehenMax={darlehenMaximum(divisions[managerDivId].stadien[profile.team], darlehen)} onDarlehenAufnehmen={onDarlehenAufnehmen} onDarlehenTilgen={onDarlehenTilgen} />}
           {tab === "sponsoring" && (
             <SponsoringView
               trikotsponsor={trikotsponsor}
@@ -23226,7 +23569,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               spielerberaterVerpflichtungen: spielerberaterVerpflichtungenDieseSaison
             };
             const zielStand = (ziele || []).map(z => ({ ...z, erfuellt: bewerteZiel(z.id, zielKontext) }));
-            return <VorstandView ziele={ziele} zielStand={zielStand} archiv={pressearchiv} saisonLabel={`Saison ${season}/${String(season + 1).slice(-2)}`} />;
+            return <VorstandView ziele={ziele} zielStand={zielStand} archiv={pressearchiv} historie={vorstandHistorie} saisonLabel={`Saison ${season}/${String(season + 1).slice(-2)}`} />;
           })()}
           {tab === "fanclub" && (
             <FanclubView
