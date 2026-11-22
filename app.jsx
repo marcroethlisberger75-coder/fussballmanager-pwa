@@ -9628,7 +9628,39 @@ function TabelleView({ division, managerTeam, managerBonus = 0 }) {
   );
 }
 
-function VertragsKarte({ spieler, managerDivId, season, onVerlaengern, ergebnis, gesperrt, frueh = false }) {
+// Kleine Markt-Zeile für die Vertragskarten: Verkaufsliste direkt aus den Spielerverträgen steuern.
+function VertragsMarktZeile({ name, marktInfo }) {
+  const [bestaetigen, setBestaetigen] = useState(false);
+  if (!marktInfo) return null;
+  if (marktInfo.sperre) return <div className="text-[11px] text-emerald-600">{marktInfo.sperre}</div>;
+  if (marktInfo.gelistet) {
+    return (
+      <div className="flex items-center justify-between gap-2 text-[11px]">
+        <span className="text-sky-300">Auf dem Transfermarkt{marktInfo.angebote > 0 ? ` · ${marktInfo.angebote} Angebot${marktInfo.angebote > 1 ? "e" : ""}` : ""}</span>
+        <button onClick={marktInfo.onNehmen} className="rounded px-2 py-1 border border-red-500/50 text-red-300">Vom Markt nehmen</button>
+      </div>
+    );
+  }
+  if (bestaetigen) {
+    return (
+      <div className="text-[11px]">
+        <div className="text-amber-300 mb-1.5">{marktInfo.kapitaen ? `${name} ist Kapitän und verliert die Binde. ` : ""}Er wird es merken: Zufriedenheit und Form sinken{marktInfo.kapitaen || marktInfo.leistungstraeger ? " deutlich" : " leicht"}. Wirklich auf die Verkaufsliste?</div>
+        <div className="flex gap-2">
+          <button onClick={() => { setBestaetigen(false); marktInfo.onSetzen(); }} className="rounded px-2 py-1 border border-sky-400/50 text-sky-300">Ja, auf Markt setzen</button>
+          <button onClick={() => setBestaetigen(false)} className="rounded px-2 py-1 border border-emerald-700 text-emerald-400">Abbrechen</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between gap-2 text-[11px]">
+      <span className="text-emerald-600">Lieber verkaufen statt verlängern?</span>
+      <button onClick={() => (marktInfo.kapitaen || marktInfo.leistungstraeger) ? setBestaetigen(true) : marktInfo.onSetzen()} className="rounded px-2 py-1 border border-sky-400/50 text-sky-300">Auf Markt setzen</button>
+    </div>
+  );
+}
+
+function VertragsKarte({ spieler, managerDivId, season, onVerlaengern, ergebnis, gesperrt, frueh = false, marktInfo = null }) {
   const maxLaufzeit = maxVertragsLaufzeit(spieler.alter);
   const [laufzeitRoh, setLaufzeit] = useState(2);
   const laufzeit = Math.min(laufzeitRoh, maxLaufzeit);
@@ -9682,6 +9714,7 @@ function VertragsKarte({ spieler, managerDivId, season, onVerlaengern, ergebnis,
       >
         {gesperrt ? "Möchte vorerst nicht weiterverhandeln" : "Angebot unterbreiten"}
       </button>
+      <VertragsMarktZeile name={spieler.name} marktInfo={marktInfo} />
     </div>
   );
 }
@@ -9921,7 +9954,16 @@ function SpielerDetailModal({ spieler: p, managerDivId, season, trophaeen, teamN
 // bald aus, wie bisher) sowie neu die Möglichkeit, Spieler mit noch längerer Laufzeit frühzeitig zu
 // verlängern — realistisch günstiger, weil ein fest gebundener Spieler kaum Verhandlungsmacht hat
 // (siehe berechneVertragsAkzeptanz).
-function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, vertragGesperrt, beraterVerlaengerungsAngebote, onBeraterVerlaengerungAnnehmen, onBeraterVerlaengerungAblehnen, gehaltsforderungen = [], onForderungAnnehmen, onForderungAblehnen }) {
+function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVerlaengern, letzteVertragsverhandlung, vertragGesperrt, beraterVerlaengerungsAngebote, onBeraterVerlaengerungAnnehmen, onBeraterVerlaengerungAblehnen, gehaltsforderungen = [], onForderungAnnehmen, onForderungAblehnen, verkaufsliste = [], eingehendeAngebote = [], kapitaenId = null, onAufMarktSetzen, onVonMarktNehmen }) {
+  const marktInfoFuer = (sp) => onAufMarktSetzen ? {
+    gelistet: verkaufsliste.includes(sp.id),
+    angebote: eingehendeAngebote.filter(a => a.spielerId === sp.id).length,
+    kapitaen: sp.id === kapitaenId,
+    leistungstraeger: [...squad].sort((a, b) => b.rating - a.rating).slice(0, 5).some(q => q.id === sp.id),
+    sperre: sp.leihspieler ? "Leihgabe: steht beim ausleihenden Verein nicht zum Verkauf." : null,
+    onSetzen: () => onAufMarktSetzen(sp.id),
+    onNehmen: () => onVonMarktNehmen(sp.id)
+  } : null;
   // vertragGesperrt speichert ein Datum ("gesperrt bis") statt eines einfachen true/false — eine
   // zeitlich begrenzte Abkühlphase (ca. 3 Wochen) statt einer kompletten Saisonsperre.
   const istAktuellGesperrt = spielerId => vertragGesperrt?.[spielerId] && vertragGesperrt[spielerId] > datum;
@@ -9990,6 +10032,7 @@ function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVer
                 onVerlaengern={onVerlaengernMitZaehler}
                 ergebnis={letzteVertragsverhandlung?.name === p.name ? letzteVertragsverhandlung : null}
                 gesperrt={istAktuellGesperrt(p.id)}
+                marktInfo={marktInfoFuer(p)}
               />
             ))}
           </div>
@@ -10012,6 +10055,7 @@ function SpielervertraegeView({ squad, managerDivId, season, datum, onVertragVer
                 onVerlaengern={onVerlaengernMitZaehler}
                 ergebnis={letzteVertragsverhandlung?.name === p.name ? letzteVertragsverhandlung : null}
                 gesperrt={istAktuellGesperrt(p.id)}
+                marktInfo={marktInfoFuer(p)}
                 frueh
               />
             ))}
@@ -11614,7 +11658,7 @@ function ElfDesTagesSpielfeld({ elfDesTages, titel, managerTeam }) {
   );
 }
 
-function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, squad, coach, philosophie, onPhilosophieChange, philosophiePaket, onPhilosophiePaketChange, results, managerTeam, managerDivId, season, trophaeen, eingespieltheitStreak = 0 }) {
+function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, squad, coach, philosophie, onPhilosophieChange, philosophiePaket, onPhilosophiePaketChange, results, managerTeam, managerDivId, season, trophaeen, eingespieltheitStreak = 0, verkaufsliste = [], eingehendeAngebote = [], kapitaenId = null, onAufMarktSetzen, onVonMarktNehmen }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   const formation = useMemo(() => waehleFormation(philosophie, coach?.stil), [philosophie, coach]);
   const { elf, bank, staerke } = useMemo(() => waehleStartelf(squad, formation), [squad, formation]);
@@ -11818,6 +11862,15 @@ function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, squad
           trophaeen={trophaeen}
           teamName={managerTeam}
           portrait={spielerPortraitFuer(ausgewaehlterSpieler.id)}
+          marktInfo={onAufMarktSetzen ? {
+            gelistet: verkaufsliste.includes(ausgewaehlterSpieler.id),
+            angebote: eingehendeAngebote.filter(a => a.spielerId === ausgewaehlterSpieler.id).length,
+            kapitaen: ausgewaehlterSpieler.id === kapitaenId,
+            leistungstraeger: [...squad].sort((a, b) => b.rating - a.rating).slice(0, 5).some(q => q.id === ausgewaehlterSpieler.id),
+            sperre: ausgewaehlterSpieler.leihspieler ? "Leihgabe: steht beim ausleihenden Verein nicht zum Verkauf." : null,
+            onSetzen: () => onAufMarktSetzen(ausgewaehlterSpieler.id),
+            onNehmen: () => onVonMarktNehmen(ausgewaehlterSpieler.id)
+          } : null}
           onClose={() => setAusgewaehlterSpieler(null)}
         />
       )}
@@ -17061,9 +17114,11 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 174; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "22.11.2026, 09:00";
+const APP_BUILD = 176; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "22.11.2026, 10:00";
 const APP_NEUIGKEITEN = [
+  { build: 176, titel: "Verkaufen auch in den Spielerverträgen", text: "Auf jeder Vertragskarte (auslaufende Verträge und frühzeitiges Verlängern) gibt es jetzt «Auf Markt setzen» bzw. «Vom Markt nehmen», mit denselben Folgen und Rückfragen wie im Kader." },
+  { build: 175, titel: "Verkaufen auch im Taktik-Tab", text: "Der Button «Auf Markt setzen» / «Vom Markt nehmen» war nur im Kader vorhanden. Jetzt gibt es ihn auch im Spieler-Detail des Taktik-Tabs (Startelf und Bank)." },
   { build: 174, titel: "Verkaufen direkt aus dem Kader", text: "Im Spieler-Detail unter Kader & Taktik gibt es jetzt «Auf Markt setzen» bzw. «Vom Markt nehmen», in der Kadertabelle zeigt ein blaues Label «Auf Markt» (mit Anzahl Angebote), wer schon gelistet ist. Der Spieler merkt es: Zufriedenheit und Form sinken, stärker bei Leistungsträgern, loyalen oder langjährigen Spielern und beim Kapitän (der verliert die Binde, vorher kommt eine Rückfrage). Beim Zurücknehmen gibt es die Hälfte der Zufriedenheit zurück. Gilt auch für den Transfermarkt. Leihgaben lassen sich nicht listen." },
   { build: 173, titel: "Form über die Sommerpause", text: "Die Form wird beim Saisonwechsel nicht mehr hart auf 60 zurückgesetzt, sondern wandert nur etwa zur Hälfte Richtung Mittelwert zurück (90 wird 75, 30 wird 45). Zusätzlich beeinflusst die Vorbereitung die Startform deines Kaders: ein zufriedener Trainer und ein Mentalcoach geben Pluspunkte, ein unzufriedener Trainer Abzüge. Neue Spieler starten weiter bei 60." },
   { build: 172, titel: "Kabine: Torhüter und Bank-Konflikte", text: "Torhüter lösen keine Bank- oder Positionskonflikte mehr aus, und Ersatztorhüter verlieren auf der Bank keine Form mehr (Nr. 1, 2 und 3 sind klar geregelt). Bank-Konflikte entstehen nur noch bei Spielern, die realistisch auf Einsatzzeit hoffen dürfen. Nach einem erfolgreichen Gespräch oder einer Einsatzzusage ist die Bankzeit zurückgesetzt, und derselbe Spieler hat 10 Wochen Ruhe." },
@@ -24348,9 +24403,14 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           {tab === "nationalmannschaft" && bundestrainerAmt && <NationalmannschaftView divisions={divisions} bundestrainerAmt={bundestrainerAmt} onNationalkaderSetzen={onNationalkaderSetzen} onNationalformationSetzen={onNationalformationSetzen} onRuecktritt={onBundestrainerRuecktritt} onKapitaenSetzen={onNationalkapitaenSetzen} turnierLaeuft={!!turnierspiel} managerDivId={managerDivId} season={season} trophaeen={trophaeen} />}
           {tab === "spielplan" && <SpielplanView division={division} managerTeam={profile.team} testspiele={testspiele} season={season} pokal={pokal} europapokal={europapokal} aktuellesDatum={datum} trainingslager={trainingslager} spielHistorie={spielHistorie} />}
           {tab === "kader" && <KaderView squad={division.squads[profile.team]} kapitaenId={kapitaenId} elfmeterSchuetzeId={elfmeterSchuetzeId} freistossSchuetzeId={freistossSchuetzeId} managerDivId={managerDivId} season={season} datum={datum} stab={stab} trophaeen={trophaeen} teamName={profile.team} onJugendfoerderungUmschalten={onJugendfoerderungUmschalten} onLeihoptionKaufen={onLeihoptionKaufen} meineAusgeliehenenSpieler={meineAusgeliehenenSpieler} alleDivisionen={divisions} schuetzenManuell={schuetzenManuell} onSchuetzeSetzen={onStandardSchuetzeSetzen} onSchuetzenAutomatisch={onStandardSchuetzenAutomatisch} verkaufsliste={verkaufsliste} eingehendeAngebote={eingehendeAngebote} onAufMarktSetzen={onSpielerAufMarktSetzen} onVonMarktNehmen={onSpielerVonMarktNehmen} />}
-          {tab === "vertraege" && <SpielervertraegeView squad={division.squads[profile.team]} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} beraterVerlaengerungsAngebote={beraterVerlaengerungsAngebote} onBeraterVerlaengerungAnnehmen={onBeraterVerlaengerungAnnehmen} onBeraterVerlaengerungAblehnen={onBeraterVerlaengerungAblehnen} gehaltsforderungen={gehaltsforderungen} onForderungAnnehmen={onGehaltsforderungAnnehmen} onForderungAblehnen={onGehaltsforderungAblehnen} />}
+          {tab === "vertraege" && <SpielervertraegeView verkaufsliste={verkaufsliste} eingehendeAngebote={eingehendeAngebote} kapitaenId={kapitaenId} onAufMarktSetzen={onSpielerAufMarktSetzen} onVonMarktNehmen={onSpielerVonMarktNehmen} squad={division.squads[profile.team]} managerDivId={managerDivId} season={season} datum={datum} onVertragVerlaengern={onSpielerVertragVerlaengern} letzteVertragsverhandlung={careerState.letzteVertragsverhandlung} vertragGesperrt={vertragAblehnungenSaison === season ? vertragGesperrt : {}} beraterVerlaengerungsAngebote={beraterVerlaengerungsAngebote} onBeraterVerlaengerungAnnehmen={onBeraterVerlaengerungAnnehmen} onBeraterVerlaengerungAblehnen={onBeraterVerlaengerungAblehnen} gehaltsforderungen={gehaltsforderungen} onForderungAnnehmen={onGehaltsforderungAnnehmen} onForderungAblehnen={onGehaltsforderungAblehnen} />}
           {tab === "taktik" && (
             <TaktikView
+              verkaufsliste={verkaufsliste}
+              eingehendeAngebote={eingehendeAngebote}
+              kapitaenId={kapitaenId}
+              onAufMarktSetzen={onSpielerAufMarktSetzen}
+              onVonMarktNehmen={onSpielerVonMarktNehmen}
               rotationsprinzipAktiv={rotationsprinzipAktiv}
               onRotationsprinzipUmschalten={onRotationsprinzipUmschalten}
               squad={division.squads[profile.team]}
