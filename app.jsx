@@ -2028,6 +2028,7 @@ const CHRONIK_TYPEN = {
   kabine: { label: "Kabine", farbe: "#c084fc" },
   rekord: { label: "Rekorde", farbe: "#f59e0b" },
   investition: { label: "Investitionen", farbe: "#38bdf8" },
+  marketing: { label: "Marketing", farbe: "#f472b6" },
   saison: { label: "Saisonabschluss", farbe: "#e6edf6" }
 };
 const CHRONIK_JUGENDSTUFEN = [["jugendKader", "U19"], ["jugendKader17", "U17"], ["jugendKader15", "U15"], ["jugendKader13", "U13"], ["jugendKader11", "U11"], ["jugendKader9", "U9"], ["jugendKader7", "U7"]];
@@ -2107,6 +2108,15 @@ function chronikAusDiff(prev, next, team) {
   (next.antraege?.aktiv || []).filter(x => !vorAntraege.has(x.id)).forEach(x => {
     eintrag("investition", `Investition: ${x.titel} (${x.mitgliedName || "Stab"}) für ${chronikEuro(x.kosten)}.`, { art: "investition", betrag: x.kosten });
   });
+  // Marketing: neue Massnahmen und Markenwert-Meilensteine (Stufenwechsel der Einordnung)
+  Object.entries(next.marketingKampagnen || {}).forEach(([id, e]) => {
+    if ((prev.marketingKampagnen || {})[id]?.gebuchtSaison === e.gebuchtSaison) return;
+    eintrag("marketing", e.flop ? `Marketing: ${e.name} verpufft weitgehend (Flop, Markenwert ${e.bonus >= 0 ? "+" : ""}${e.bonus}).` : `Marketing: ${e.name} gestartet (Markenwert ${e.bonus >= 0 ? "+" : ""}${e.bonus}).`);
+  });
+  if (typeof prev.markenwert === "number" && typeof next.markenwert === "number") {
+    const ea = markenwertEinordnung(prev.markenwert).label, eb = markenwertEinordnung(next.markenwert).label;
+    if (ea !== eb) eintrag("marketing", next.markenwert > prev.markenwert ? `Markenwert-Meilenstein: Der Verein gilt jetzt als «${eb}».` : `Imageverlust: Der Verein fällt auf «${eb}» zurück.`);
+  }
   return out;
 }
 
@@ -6354,20 +6364,22 @@ function waehleFanclubVorschlag(ctx) {
    Fanclub-Wachstum, Ticketpreis-Toleranz und Transferverhandlungen aus.
    ========================================================================= */
 
-function berechneMarkenwertAenderung(kontext) {
-  const { marketingRating, tabellenplatz, anzahlTeams, digitaleInfrastruktur, teamgeist } = kontext;
-  let aenderung = 0;
+function berechneMarkenwertDetail(kontext) {
+  const { marketingRating, tabellenplatz, anzahlTeams, digitaleInfrastruktur, teamgeist, dauerEffekt = 0 } = kontext;
   // Marketingchef: kontinuierlicher, passiver Aufbau — je besser, desto stärker der wöchentliche Zuwachs
-  if (marketingRating) aenderung += Math.max(0, (marketingRating - 30) / 400);
-  else aenderung -= 0.02; // ohne Marketingchef bröckelt der Markenwert langsam
+  const chef = marketingRating ? Math.max(0, (marketingRating - 30) / 400) : -0.02; // ohne Marketingchef bröckelt der Markenwert langsam
   // Sportlicher Erfolg: eine gute Tabellenposition hebt den Markenwert, eine schlechte senkt ihn
   const erfolgsFaktor = 1 - (tabellenplatz - 1) / Math.max(1, anzahlTeams - 1);
-  aenderung += (erfolgsFaktor - 0.5) * 0.15;
+  const erfolg = (erfolgsFaktor - 0.5) * 0.15;
   // Digitale Stadion-Infrastruktur: moderner Aussenauftritt zahlt auch aufs Markenimage ein
-  if (digitaleInfrastruktur) aenderung += 0.03;
+  const digital = digitaleInfrastruktur ? 0.03 : 0;
   // Teamgeist: eine sympathische, harmonische Truppe wird auch medial positiver wahrgenommen
-  aenderung += ((teamgeist ?? 50) - 50) / 2000;
-  return aenderung;
+  const tg = ((teamgeist ?? 50) - 50) / 2000;
+  // Dauerhafte Wirkung laufender Massnahmen (z.B. Vereins-App / Social-Team)
+  return { chef, erfolg, digital, teamgeist: tg, dauer: dauerEffekt, summe: chef + erfolg + digital + tg + dauerEffekt };
+}
+function berechneMarkenwertAenderung(kontext) {
+  return berechneMarkenwertDetail(kontext).summe;
 }
 
 function markenwertEinordnung(wert) {
@@ -6386,6 +6398,18 @@ function markenwertEinordnung(wert) {
 const MARKENWERT_DECKEL_NACH_TIER = { 5: 45, 4: 60, 3: 75, 2: 100, 1: 100 };
 function markenwertDeckel(managerDivId) {
   return MARKENWERT_DECKEL_NACH_TIER[divisionTier(managerDivId)] ?? 100;
+}
+// Ligarelativer Neutralpunkt: der Markenwert, bei dem die Wirkung (Umsatz, Sponsoren, Fanwachstum,
+// Preistoleranz) weder Bonus noch Malus ist. Früher fix 50 — in der Oberliga (Deckel 45) war damit
+// selbst ein Spitzenwert ein Malus. Entspricht dem Startwert eines neuen Vereins (55 % des Deckels).
+let MARKEN_NEUTRAL = 50;
+function markenwertNeutral(managerDivId) {
+  return Math.round(markenwertDeckel(managerDivId) * 0.55);
+}
+// Untergrenze, unter die der laufende Markenwert durch normale Entwicklung nicht mehr fällt
+// ("Auffang" gegen die Rückwärtsspirale) — nur Ereignisse können tiefer drücken.
+function markenwertBoden(managerDivId) {
+  return Math.round(markenwertDeckel(managerDivId) * 0.2);
 }
 
 /* =========================================================================
@@ -6527,6 +6551,27 @@ const EREIGNIS_POOL = [
     anwenden: () => ({ markenwertDelta: 5, text: "Euer Stadion wird von den Fans zum schönsten der Liga gewählt!" })
   },
   {
+    id: "social_shitstorm", kategorie: "fans", typ: "negativ", icon: "💬",
+    titel: "Shitstorm im Netz",
+    beschreibung: "Ein unglücklicher Beitrag sorgt für Empörung in den sozialen Medien.",
+    anwendbar: () => true,
+    anwenden: kontext => {
+      const schaden = 3 + Math.floor(Math.random() * 3);
+      return { markenwertDelta: -schaden, text: "Ein missglückter Social-Media-Beitrag des Vereins löst einen Shitstorm aus — Imageschaden." };
+    }
+  },
+  {
+    id: "medien_skandal", kategorie: "fans", typ: "negativ", icon: "📰",
+    titel: "Negative Schlagzeilen",
+    beschreibung: "Die Boulevardpresse berichtet kritisch über den Verein.",
+    anwendbar: kontext => (kontext.squad || []).length > 0,
+    anwenden: kontext => {
+      const spieler = kontext.squad[Math.floor(Math.random() * kontext.squad.length)];
+      const schaden = 4 + Math.floor(Math.random() * 4);
+      return { markenwertDelta: -schaden, text: `Die Boulevardpresse berichtet über einen Vorfall rund um ${spieler.name} — schlechte Schlagzeilen für den Verein.` };
+    }
+  },
+  {
     id: "fanproteste", kategorie: "fans", typ: "negativ", icon: "📢",
     titel: "Fanproteste",
     beschreibung: "Fans protestieren gegen die aktuelle Ticketpreispolitik.",
@@ -6534,7 +6579,7 @@ const EREIGNIS_POOL = [
     anwenden: kontext => {
       // Ein hoher Markenwert und ein gutes Sicherheitssystem dämpfen den Imageschaden.
       const sicherheitsWirkung = infrastrukturWirkung(kontext.stadion, "sicherheitssystem");
-      const daempfung = (kontext.markenwert - 50) / 200 + sicherheitsWirkung * 0.3;
+      const daempfung = (kontext.markenwert - MARKEN_NEUTRAL) / 200 + sicherheitsWirkung * 0.3;
       const schaden = Math.max(1, Math.round(5 - daempfung * 5));
       return { markenwertDelta: -schaden, text: `Fans protestieren gegen die Ticketpreise — Imageschaden${daempfung > 0 ? " (durch Markenwert/Sicherheitssystem abgefedert)" : ""}.` };
     }
@@ -6609,7 +6654,7 @@ const EREIGNIS_POOL = [
     anwendbar: kontext => kontext.squad.length >= 1,
     anwenden: kontext => {
       // Ein hoher Markenwert macht einen Verein attraktiver — Spieler bleiben eher entspannt.
-      const daempfung = Math.max(0, (kontext.markenwert - 50) / 100);
+      const daempfung = Math.max(0, (kontext.markenwert - MARKEN_NEUTRAL) / 100);
       const kern = [...kontext.squad].sort((a, b) => b.rating - a.rating).slice(0, 8);
       const betroffen = kern[Math.floor(Math.random() * kern.length)];
       const verlust = Math.round(18 * (1 - daempfung));
@@ -6727,11 +6772,51 @@ const EREIGNIS_POOL = [
 // Kampagnen: einmalig pro Saison buchbar, geben einen dauerhaften Markenwert-Schub — Kosten
 // skalieren mit der Liga, wie schon beim Trainingslager und den Co-Trainern.
 const MARKETING_KAMPAGNEN = [
-  { id: "social", name: "Social-Media-Kampagne", beschreibung: "Gezielte Reichweiten-Kampagne auf allen Kanälen — schneller, günstiger Markenaufbau.", kosten: { BL: 350000, L2: 90000, L3: 18000, RL: 10100, OL: 2200 }, markenwertBonus: 3 },
-  { id: "plakat", name: "Stadtweite Plakatwerbung", beschreibung: "Präsenz im ganzen Stadtgebiet — klassische, aber wirkungsvolle Vereinswerbung.", kosten: { BL: 500000, L2: 130000, L3: 26000, RL: 14600, OL: 3200 }, markenwertBonus: 4 },
-  { id: "launch", name: "Merchandise-Launch-Event", beschreibung: "Grosse Produktvorstellung mit Medienecho — Umsatz und Markenwert gleichzeitig.", kosten: { BL: 900000, L2: 220000, L3: 42000, RL: 23500, OL: 5000 }, markenwertBonus: 6 },
-  { id: "kooperation", name: "Kooperation mit lokalen Unternehmen", beschreibung: "Langfristige Partnerschaften öffnen Türen — verbessert auch kommende Sponsoring-Angebote.", kosten: { BL: 1400000, L2: 340000, L3: 65000, RL: 36250, OL: 7500 }, markenwertBonus: 8 }
+  { id: "social", name: "Social-Media-Kampagne", beschreibung: "Gezielte Reichweiten-Kampagne auf allen Kanälen — schneller, günstiger Markenaufbau.", kosten: { BL: 350000, L2: 90000, L3: 18000, RL: 10100, OL: 2200 }, markenwertBonus: 3, flop: 0.10 },
+  { id: "plakat", name: "Stadtweite Plakatwerbung", beschreibung: "Präsenz im ganzen Stadtgebiet — klassische, aber wirkungsvolle Vereinswerbung.", kosten: { BL: 500000, L2: 130000, L3: 26000, RL: 14600, OL: 3200 }, markenwertBonus: 4, flop: 0.08 },
+  { id: "launch", name: "Merchandise-Launch-Event", beschreibung: "Grosse Produktvorstellung mit Medienecho — Umsatz und Markenwert gleichzeitig.", kosten: { BL: 900000, L2: 220000, L3: 42000, RL: 23500, OL: 5000 }, markenwertBonus: 6, flop: 0.15 },
+  { id: "kooperation", name: "Kooperation mit lokalen Unternehmen", beschreibung: "Langfristige Partnerschaften öffnen Türen — verbessert auch kommende Sponsoring-Angebote.", kosten: { BL: 1400000, L2: 340000, L3: 65000, RL: 36250, OL: 7500 }, markenwertBonus: 8, flop: 0.10 },
+  { id: "trikot", name: "Trikot-Sonderedition", beschreibung: "Limitierte Sonderedition (Retro/Jubiläum) — 1 Saison lang rund 15 % mehr Fanartikel-/Verpflegungsumsatz.", kosten: { BL: 700000, L2: 170000, L3: 33000, RL: 18500, OL: 3800 }, markenwertBonus: 2, laufzeit: 1, flop: 0.15 },
+  { id: "fantag", name: "Fantag / Tag der offenen Tür", beschreibung: "Training, Autogramme, Stadionführung — 1 Saison lang rund 20 % stärkeres Fanclub-Wachstum.", kosten: { BL: 250000, L2: 65000, L3: 13000, RL: 7300, OL: 1600 }, markenwertBonus: 2, laufzeit: 1, flop: 0.05 },
+  { id: "benefiz", name: "Benefizspiel", beschreibung: "Spiel für den guten Zweck — gutes Image, das auch bei Skandalen als Puffer wirkt (Imageschäden −25 %).", kosten: { BL: 450000, L2: 110000, L3: 21000, RL: 11700, OL: 2600 }, markenwertBonus: 4, laufzeit: 2, flop: 0.10, schadenDaempfung: 0.25 },
+  { id: "schule", name: "Schul- und Vereinspartnerschaften", beschreibung: "Kooperation mit Schulen und Nachbarvereinen — günstig, langsam, aber nachhaltig.", kosten: { BL: 200000, L2: 50000, L3: 10000, RL: 5800, OL: 1200 }, markenwertBonus: 3, laufzeit: 3, flop: 0.05 },
+  { id: "app", name: "Vereins-App & Social-Team", beschreibung: "Eigene App und ein kleines Social-Media-Team — wirkt zusätzlich dauerhaft auf den wöchentlichen Markenaufbau.", kosten: { BL: 800000, L2: 200000, L3: 38000, RL: 21000, OL: 4400 }, markenwertBonus: 3, laufzeit: 3, flop: 0.15, dauerEffekt: 0.02 },
+  { id: "medien", name: "Medienpartnerschaft", beschreibung: "Exklusive Zusammenarbeit mit Regionalzeitung/-sender — grosse Reichweite, aber teuer und nicht immer erfolgreich.", kosten: { BL: 1800000, L2: 440000, L3: 85000, RL: 47000, OL: 9800 }, markenwertBonus: 5, laufzeit: 2, flop: 0.20 },
+  { id: "krisenkomm", name: "Krisenkommunikation", beschreibung: "Professioneller Kommunikations-Notfallplan — dämpft Imageschäden aus Skandalen und Ereignissen um 40 %.", kosten: { BL: 300000, L2: 75000, L3: 15000, RL: 8500, OL: 1900 }, markenwertBonus: 0, laufzeit: 2, flop: 0, schadenDaempfung: 0.40 },
 ];
+
+// Hilfsfunktionen für laufende Massnahmen
+function massnahmeLaufzeit(id, eintrag) {
+  return eintrag?.laufzeit ?? MARKETING_KAMPAGNEN.find(k => k.id === id)?.laufzeit ?? MARKETING_LAUFZEIT_SAISONS;
+}
+function massnahmeAktiv(marketingKampagnen, id) {
+  return !!marketingKampagnen?.[id] && !marketingKampagnen[id].abgelaufen;
+}
+// Wöchentlicher Dauer-Effekt laufender Massnahmen (z.B. Vereins-App)
+function marketingDauerEffekt(marketingKampagnen) {
+  return Object.entries(marketingKampagnen || {}).reduce((t, [id, e]) => t + (e.flop ? 0 : (MARKETING_KAMPAGNEN.find(k => k.id === id)?.dauerEffekt || 0)), 0);
+}
+// Dämpfungsfaktor für Imageschäden (1 = voller Schaden). Marketingchef dämpft leicht, Massnahmen stärker.
+function markenSchadenFaktor(marketingKampagnen, marketingRating = 0) {
+  let f = 1 - Math.max(0, Math.min(0.2, ((marketingRating || 0) - 30) / 350));
+  Object.entries(marketingKampagnen || {}).forEach(([id, e]) => {
+    if (e.flop) return;
+    const d = MARKETING_KAMPAGNEN.find(k => k.id === id)?.schadenDaempfung;
+    if (d) f *= (1 - d);
+  });
+  return Math.max(0.3, f);
+}
+// Flop-Risiko einer Massnahme: Grundrisiko je Massnahme, ein guter Marketingchef senkt es
+function marketingFlopChance(kampagne, marketingRating = 0) {
+  if (!kampagne.flop) return 0;
+  return Math.max(0.02, Math.min(0.4, kampagne.flop - ((marketingRating || 0) - 50) / 400));
+}
+// Tatsächlich gewährter Bonus: Deckel der Liga begrenzt, bei Flop nur 30 % der Wirkung
+function marketingEffektiverBonus(kampagne, markenwert, managerDivId, flop) {
+  const roh = flop ? Math.round(kampagne.markenwertBonus * 0.3) : kampagne.markenwertBonus;
+  return Math.max(0, Math.min(roh, markenwertDeckel(managerDivId) - markenwert));
+}
+
 
 // Jede Kampagne wirkt nur eine begrenzte Zeit (siehe MARKETING_LAUFZEIT_SAISONS) — danach lässt die
 // Reichweite nach, der Bonus verschwindet automatisch wieder (siehe verarbeiteMarketingAblaeufe) und
@@ -6780,8 +6865,9 @@ function verarbeiteMarketingAblaeufe(marketingKampagnen, markenwert, season, man
   const neueKampagnen = {};
   let meldung = null;
   Object.entries(marketingKampagnen || {}).forEach(([id, eintrag]) => {
-    if (season - eintrag.gebuchtSaison < MARKETING_LAUFZEIT_SAISONS) { neueKampagnen[id] = eintrag; return; }
-    neuerMarkenwert = Math.max(0, neuerMarkenwert - eintrag.bonus);
+    // season = die gerade endende Saison: eine Massnahme wirkt genau "Laufzeit" Saisons (inkl. Buchungssaison)
+    if (season - eintrag.gebuchtSaison + 1 < massnahmeLaufzeit(id, eintrag)) { neueKampagnen[id] = eintrag; return; }
+    neuerMarkenwert = Math.max(0, neuerMarkenwert - (eintrag.bonus || 0));
     if (!meldung) meldung = { name: eintrag.name };
   });
   return { markenwert: neuerMarkenwert, marketingKampagnen: neueKampagnen, meldung };
@@ -6813,6 +6899,14 @@ function wuerfleZufallsereignis(kontext, wahrscheinlichkeit = 0.05) {
   if (!anwendbare.length) return null;
   const ereignis = anwendbare[Math.floor(Math.random() * anwendbare.length)];
   const ergebnis = ereignis.anwenden(kontext);
+  // Imageschäden werden durch Marketingchef und Massnahmen (Krisenkommunikation, Benefizspiel) gedämpft
+  if (typeof ergebnis.markenwertDelta === "number" && ergebnis.markenwertDelta < 0) {
+    const f = markenSchadenFaktor(kontext.marketingKampagnen, kontext.marketingRating);
+    if (f < 1) {
+      const gedaempft = Math.min(-1, Math.round(ergebnis.markenwertDelta * f));
+      if (gedaempft > ergebnis.markenwertDelta) { ergebnis.markenwertDelta = gedaempft; ergebnis.text = `${ergebnis.text} (Imageschaden durch Marketing abgefedert)`; }
+    }
+  }
   return { id: ereignis.id, kategorie: ereignis.kategorie, typ: ereignis.typ, icon: ereignis.icon, titel: ereignis.titel, ...ergebnis };
 }
 /* =========================================================================
@@ -7156,7 +7250,7 @@ function berechneFanzufriedenheit(kontext) {
   // Ein modernes Sicherheits- & Zutrittssystem und ein hoher Markenwert machen hohe Preise
   // erträglicher — eine starke, bekannte Marke verzeiht Preise eher als ein unbekannter Verein.
   const sicherheitWirkung = infrastrukturWirkung(stadion, "sicherheitssystem");
-  const ticketpreisStrafeFaktor = Math.max(25, (60 - 15 * sicherheitWirkung) - (markenwert - 50) / 8);
+  const ticketpreisStrafeFaktor = Math.max(25, (60 - 15 * sicherheitWirkung) - (markenwert - MARKEN_NEUTRAL) / 8);
   const ticketpreise = clamp(100 - Math.max(0, ((durchschnittTicketpreis / erwarteterTicketpreis) - 1) * ticketpreisStrafeFaktor));
 
   let margeSumme = 0, margeAnzahl = 0;
@@ -7922,13 +8016,13 @@ const BANNER_BEREICH = { BL: [25000, 120000], L2: [8000, 40000], L3: [2000, 1000
 // Laufmeter Bandenfläche rund ums Spielfeld, kleine Oberliga-Plätze dagegen nur eine Handvoll Tafeln.
 const BANNER_MAX_PLAETZE = { BL: 55, L2: 35, L3: 20, RL: 14, OL: 8 };
 
-function generateSponsorKandidaten(divisionId, season, salt = 0, markenwert = 50, bereichMap = TRIKOT_BEREICH) {
+function generateSponsorKandidaten(divisionId, season, salt = 0, markenwert = MARKEN_NEUTRAL, bereichMap = TRIKOT_BEREICH) {
   const rng = rngFor(`sponsor|${divisionId}|s${season}|${salt}`);
   const bereich = bereichMap[divisionId] || bereichMap.OL;
   const anzahl = 4;
   // Ein hoher Markenwert zieht bessere, lukrativere Sponsoring-Angebote an — ein bekannter Verein
   // verhandelt aus einer stärkeren Position heraus.
-  const markenwertFaktor = 1 + (markenwert - 50) / 250;
+  const markenwertFaktor = 1 + (markenwert - MARKEN_NEUTRAL) / 250;
   const kandidaten = [];
   const namenPool = [...SPONSOR_FIRMEN];
   for (let i = 0; i < anzahl; i++) {
@@ -7941,9 +8035,9 @@ function generateSponsorKandidaten(divisionId, season, salt = 0, markenwert = 50
   return kandidaten.sort((a, b) => b.betragProJahr - a.betragProJahr);
 }
 
-function generateBannerAngebot(divisionId, tabellenplatz, anzahlTeams, existierendeFirmen, freiePlaetze, markenwert = 50) {
+function generateBannerAngebot(divisionId, tabellenplatz, anzahlTeams, existierendeFirmen, freiePlaetze, markenwert = MARKEN_NEUTRAL) {
   const bereich = BANNER_BEREICH[divisionId] || BANNER_BEREICH.OL;
-  const formFaktor = (0.6 + 0.6 * (1 - (tabellenplatz - 1) / Math.max(1, anzahlTeams - 1))) * (1 + (markenwert - 50) / 250); // Erfolg UND Markenwert ziehen mehr/höhere Angebote an
+  const formFaktor = (0.6 + 0.6 * (1 - (tabellenplatz - 1) / Math.max(1, anzahlTeams - 1))) * (1 + (markenwert - MARKEN_NEUTRAL) / 250); // Erfolg UND Markenwert ziehen mehr/höhere Angebote an
   const pool = SPONSOR_FIRMEN.filter(f => !existierendeFirmen.includes(f));
   if (!pool.length) return null;
   const firma = pool[Math.floor(Math.random() * pool.length)];
@@ -14394,7 +14488,10 @@ function RuhmeshalleView({ squad = [], season, spielerArchiv = [], saisonBilanze
     chronik.forEach((e, idx) => {
       if (e.art !== "abgang" || !(e.betrag > 0)) return;
       const z = [...chronik.slice(0, idx)].reverse().find(x => x.art === "zugang" && x.spieler === e.spieler && x.betrag > 0);
-      if (z) out.push({ spieler: e.spieler, kauf: z.betrag, verkauf: e.betrag, gewinn: e.betrag - z.betrag, saison: e.saison });
+      if (z) { out.push({ spieler: e.spieler, kauf: z.betrag, verkauf: e.betrag, gewinn: e.betrag - z.betrag, saison: e.saison }); return; }
+      // Eigengewächs (aus der eigenen Jugend befördert): kein Kaufpreis, der ganze Erlös ist Gewinn
+      const eigen = chronik.slice(0, idx).some(x => x.typ === "jugend" && x.text && x.text.startsWith(`${e.spieler} (`) && x.text.includes("befördert"));
+      if (eigen) out.push({ spieler: e.spieler, kauf: 0, verkauf: e.betrag, gewinn: e.betrag, saison: e.saison });
     });
     return out;
   })();
@@ -14540,12 +14637,12 @@ function RuhmeshalleView({ squad = [], season, spielerArchiv = [], saisonBilanze
           <Zeile k="Teuerster Verkauf" v={tv ? `${tv.spieler}, ${euro(tv.betrag)}` : "—"} sub={tv ? sl(tv.saison) : null} />
           <Zeile k="Wertvollster Spieler" v={rekorde.hoechsterMarktwert?.text || "—"} sub={rekorde.hoechsterMarktwert ? sl(rekorde.hoechsterMarktwert.saison) : null} />
           <Zeile k="Höchster Kaderwert" v={rekorde.hoechsterKaderwert?.text || "—"} sub={rekorde.hoechsterKaderwert ? sl(rekorde.hoechsterKaderwert.saison) : null} />
-          <Zeile k="Bester Transfergewinn" v={besterTransfer ? `${besterTransfer.spieler}, ${besterTransfer.gewinn >= 0 ? "+" : "−"}${euro(Math.abs(besterTransfer.gewinn))} (Kauf ${euro(besterTransfer.kauf)}, Verkauf ${euro(besterTransfer.verkauf)})` : "—"} sub={besterTransfer ? sl(besterTransfer.saison) : null} />
+          <Zeile k="Bester Transfergewinn" v={besterTransfer ? `${besterTransfer.spieler}, ${besterTransfer.gewinn >= 0 ? "+" : "−"}${euro(Math.abs(besterTransfer.gewinn))} (${besterTransfer.kauf > 0 ? `Kauf ${euro(besterTransfer.kauf)}` : "Eigengewächs"}, Verkauf ${euro(besterTransfer.verkauf)})` : "Noch kein gekaufter oder selbst ausgebildeter Spieler verkauft"} sub={besterTransfer ? sl(besterTransfer.saison) : null} />
           <Zeile k="Rekordtorschütze" v={top("tore")[0] ? `${top("tore")[0].name}, ${top("tore")[0].tore} Tore` : "—"} />
           <Zeile k="Rekord-Einsätze" v={top("spiele")[0] ? `${top("spiele")[0].name}, ${top("spiele")[0].spiele} Spiele` : "—"} />
           <Zeile k="Meiste Tore in einer Saison" v={besteSaison && besteSaison.tore > 0 ? `${besteSaison.name}, ${besteSaison.tore} Tore` : "—"} sub={besteSaison && besteSaison.tore > 0 ? sl(besteSaison.saison) : null} />
           <Zeile k="Punkterekord einer Saison" v={bestePunkte ? `${bestePunkte.tabelle.pkt} Punkte` : "—"} sub={bestePunkte ? `${sl(bestePunkte.saison)}, ${bestePunkte.liga}` : null} />
-          <div className="text-[10px] text-emerald-700 mt-2">Die laufende Saison wird live eingerechnet. Transferrekorde und Transfergewinn gelten ab der Chronik (Kauf und Verkauf desselben Spielers), Serien innerhalb einer Saison. Wertrekorde: Stand Saisonende bzw. aktuell.</div>
+          <div className="text-[10px] text-emerald-700 mt-2">Die laufende Saison wird live eingerechnet. Transferrekorde und Transfergewinn gelten ab der Chronik (Kauf und Verkauf desselben Spielers, bei Eigengewächsen der ganze Erlös), Serien innerhalb einer Saison. Wertrekorde: Stand Saisonende bzw. aktuell.</div>
         </div>
       )}
 
@@ -14569,6 +14666,7 @@ function RuhmeshalleView({ squad = [], season, spielerArchiv = [], saisonBilanze
                     {b.tabelle ? `${b.tabelle.pkt} Punkte · ${b.tabelle.s}-${b.tabelle.u}-${b.tabelle.n} · Tore ${b.tabelle.tore}:${b.tabelle.gegentore}` : ""}
                     {b.torjaeger ? ` · Torjäger ${b.torjaeger.name} (${b.torjaeger.wert})` : ""}
                     {b.zuschauerSchnitt ? ` · Ø ${b.zuschauerSchnitt.toLocaleString("de-CH")} Zuschauer` : ""}
+                    {typeof b.markenwert === "number" ? ` · Markenwert ${b.markenwert}` : ""}
                   </div>
                   {b.titel?.length > 0 && <div className="text-[11px] text-amber-300">🏆 {b.titel.join(", ")}</div>}
                 </div>
@@ -16868,7 +16966,7 @@ function TrainingsmaterialEinkaufView({ trainingsmaterial, budget, managerDivId,
   );
 }
 
-function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, kapazitaet = 5000, markenwert = 50, marketingKampagnen = {}, managerDivId, onMarketingKampagneKaufen, squad = [], onSpielerauftrittBuchen, fanshopHistorie = [], season }) {
+function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZielSetzen, kapazitaet = 5000, markenwert = 50, marketingKampagnen = {}, managerDivId, onMarketingKampagneKaufen, squad = [], onSpielerauftrittBuchen, fanshopHistorie = [], season, markenDetail = null, marketingRating = 0, marketingErgebnis = null, onErgebnisSchliessen, markenHistorie = [] }) {
   const [gewaehlterSpieler, setGewaehlterSpieler] = useState(squad[0]?.id || "");
   const [gewaehlteSaison, setGewaehlteSaison] = useState(season);
   const istAktuelleSaison = gewaehlteSaison === season;
@@ -16882,7 +16980,15 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
   const vorhandeneFanshopSaisons = [...fanshopHistorie.map(h => h.saison), season].sort((a, b) => b - a);
   const markenwertInfo = markenwertEinordnung(markenwert);
   // Für die Laufzeit-Anzeige der Kampagnen unten (siehe MARKETING_LAUFZEIT_SAISONS).
-  const restlaufzeit = (id) => marketingKampagnen[id] ? MARKETING_LAUFZEIT_SAISONS - (season - marketingKampagnen[id].gebuchtSaison) : 0;
+  const restlaufzeit = (id) => marketingKampagnen[id] ? Math.max(0, massnahmeLaufzeit(id, marketingKampagnen[id]) - (season - marketingKampagnen[id].gebuchtSaison)) : 0;
+  const deckel = markenwertDeckel(managerDivId);
+  const neutral = markenwertNeutral(managerDivId);
+  const boden = markenwertBoden(managerDivId);
+  const hatChef = !!marketingRating;
+  const prozent = v => `${v >= 0 ? "+" : "−"}${Math.abs(Math.round(v * 1000) / 10)} %`;
+  const wochenZuSaison = v => `${v >= 0 ? "+" : "−"}${Math.abs(Math.round(v * 34 * 10) / 10)}`;
+  const aktiveMassnahmen = Object.entries(marketingKampagnen).filter(([id]) => restlaufzeit(id) > 0);
+  const auslaufendeBoni = aktiveMassnahmen.reduce((t, [, e]) => t + (e.bonus || 0), 0);
   const spielerFuerAuftritt = squad.find(p => p.id === gewaehlterSpieler);
   const auftrittKosten = spielerFuerAuftritt ? berechneSpielerauftrittKosten(spielerFuerAuftritt, managerDivId) : 0;
   const auftrittBonus = spielerFuerAuftritt ? berechneSpielerauftrittBonus(spielerFuerAuftritt) : 0;
@@ -16896,36 +17002,84 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
           <div className="text-[11px] uppercase tracking-wider text-amber-400/90">Marketingabteilung — Markenwert</div>
           <span className={`text-sm font-bold ${markenwertInfo.farbe}`}>{Math.round(markenwert)}/100 — {markenwertInfo.label}</span>
         </div>
-        <div className="w-full h-2 rounded-full bg-emerald-950 overflow-hidden mb-3">
+        <div className="relative w-full h-2 rounded-full bg-emerald-950 overflow-hidden mb-1">
           <div className="h-full rounded-full bg-amber-400" style={{ width: `${markenwert}%` }} />
+          <div className="absolute top-0 h-full w-px bg-emerald-300/70" style={{ left: `${neutral}%` }} />
+          <div className="absolute top-0 h-full w-px bg-red-400/80" style={{ left: `${deckel}%` }} />
         </div>
+        <div className="text-[10px] text-emerald-600 mb-3">Neutralpunkt {neutral} (darüber Bonus, darunter Malus auf Umsatz/Sponsoren/Fanwachstum) · Liga-Obergrenze {deckel}{markenwert >= deckel - 0.5 ? " — erreicht, weitere Massnahmen bringen jetzt kaum noch etwas" : ""}</div>
+        {marketingErgebnis && (
+          <div className={`border rounded p-2 mb-3 text-[11px] ${marketingErgebnis.flop ? "border-red-700/60 text-red-300" : "border-emerald-700 text-emerald-300"}`} style={{ backgroundColor: "rgba(0,0,0,0.15)" }}>
+            <div className="flex justify-between gap-2">
+              <span>
+                {marketingErgebnis.flop ? `📉 Flop: «${marketingErgebnis.name}» verpufft weitgehend` : `✓ «${marketingErgebnis.name}» gebucht`}
+                {marketingErgebnis.id !== "spielerauftritt" && ` — Markenwert ${marketingErgebnis.bonus >= 0 ? "+" : ""}${marketingErgebnis.bonus}`}
+                {marketingErgebnis.gedeckelt ? ` (nur ${marketingErgebnis.bonus} von ${marketingErgebnis.nominal}: Liga-Obergrenze)` : ""}
+              </span>
+              <button onClick={onErgebnisSchliessen} className="text-emerald-600 shrink-0">✕</button>
+            </div>
+          </div>
+        )}
+        {markenDetail && (
+          <div className="border border-amber-800/40 rounded p-2 mb-3">
+            <div className="text-[11px] uppercase tracking-wider text-amber-400/90 mb-1">Wie sich der Markenwert entwickelt</div>
+            <div className="text-[10px] text-emerald-600 mb-1.5">Veränderung pro Saison (≈34 Spieltage) bei aktueller Lage:</div>
+            {[
+              ["Marketingchef" + (hatChef ? "" : " (fehlt — Markenwert bröckelt)"), markenDetail.chef],
+              ["Tabellenplatz / Erfolg", markenDetail.erfolg],
+              ["Digitale Infrastruktur", markenDetail.digital],
+              ["Teamgeist", markenDetail.teamgeist],
+              ["Dauerwirkung Massnahmen", markenDetail.dauer]
+            ].filter(([, v]) => Math.abs(v) > 0.00001).map(([k, v]) => (
+              <div key={k} className="flex justify-between text-[11px] py-0.5"><span className="text-emerald-500">{k}</span><span className={v >= 0 ? "text-emerald-300" : "text-red-400"}>{wochenZuSaison(v)}</span></div>
+            ))}
+            <div className="flex justify-between text-[11px] pt-1 mt-1 border-t border-emerald-900"><span className="text-emerald-300 font-semibold">Gesamt</span><span className={markenDetail.summe >= 0 ? "text-amber-300 font-semibold" : "text-red-400 font-semibold"}>{wochenZuSaison(markenDetail.summe)}</span></div>
+            <div className="text-[10px] text-emerald-700 mt-1.5">Nach unten fängt sich der Markenwert bei {boden} (nur Skandale drücken tiefer). Laufende Massnahmen tragen aktuell +{auslaufendeBoni} bei — dieser Anteil fällt bei Ablauf wieder weg.</div>
+            {markenHistorie.length > 0 && (
+              <div className="text-[10px] text-emerald-500 mt-1.5">Verlauf: {markenHistorie.map(h => `${h.saison}/${String(h.saison + 1).slice(-2)}: ${h.markenwert}`).join(" · ")}</div>
+            )}
+          </div>
+        )}
         <p className="text-[11px] text-emerald-600 mb-2">
           Wirkt sich auf Fanartikel-/Verpflegungsumsatz, Sponsoring-Angebote, Fanclub-Wachstum, Ticketpreis-Toleranz und Transferverhandlungen aus. Baut sich durch einen Marketingchef, sportlichen Erfolg, digitale Stadion-Infrastruktur und Teamgeist kontinuierlich auf.
         </p>
         <p className="text-[11px] text-emerald-600 mb-2">
-          Jede Massnahme unten wirkt {MARKETING_LAUFZEIT_SAISONS} Saisons lang, danach lässt die Reichweite nach und sie wird erneut buchbar.
+          Jede Massnahme wirkt eine feste Zahl Saisons (siehe Karte), danach fällt ihr Bonus weg und sie wird erneut buchbar. Nicht jede Aktion gelingt: ein guter Marketingchef senkt das Flop-Risiko. Über der Liga-Obergrenze verpufft der Bonus.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {MARKETING_KAMPAGNEN.map(k => {
             const kosten = k.kosten[managerDivId] || k.kosten.OL;
             const rest = restlaufzeit(k.id);
             const aktiv = rest > 0;
+            const eintrag = marketingKampagnen[k.id];
+            const flopRisiko = marketingFlopChance(k, marketingRating);
+            const wirksam = Math.max(0, Math.min(k.markenwertBonus, deckel - markenwert));
+            const laufzeit = k.laufzeit ?? MARKETING_LAUFZEIT_SAISONS;
             return (
               <div key={k.id} className={`border rounded p-2 ${aktiv ? "border-emerald-700" : "border-amber-800/50"}`}>
                 <div className="flex items-center justify-between">
                   <span className={`text-xs font-semibold ${aktiv ? "text-emerald-300" : "text-emerald-100"}`}>{k.name}</span>
+                  <span className="text-[10px] text-emerald-600">{laufzeit} Saison{laufzeit > 1 ? "s" : ""}</span>
                 </div>
                 <div className="text-[10px] text-emerald-600 mt-0.5 mb-1.5">{k.beschreibung}</div>
                 {aktiv ? (
-                  <div className="text-[11px] text-emerald-400 text-center py-1.5">✓ Aktiv — noch {rest} Saison{rest > 1 ? "en" : ""}</div>
+                  <div className={`text-[11px] text-center py-1.5 ${eintrag?.flop ? "text-red-300" : "text-emerald-400"}`}>
+                    {eintrag?.flop ? "📉 Flop" : "✓ Aktiv"} — noch {rest} Saison{rest > 1 ? "en" : ""}{eintrag?.bonus ? ` (aktuell +${eintrag.bonus} Markenwert${eintrag.bonus < (eintrag.nominal ?? eintrag.bonus) ? `, geplant +${eintrag.nominal}` : ""})` : ""}
+                  </div>
                 ) : (
-                  <button
-                    disabled={kosten > budget}
-                    onClick={() => onMarketingKampagneKaufen(k)}
-                    className="w-full text-[11px] border border-amber-400/50 text-amber-300 rounded py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Buchen — {kosten.toLocaleString("de-CH")} € (+{k.markenwertBonus} Markenwert)
-                  </button>
+                  <>
+                    <div className="text-[10px] text-emerald-700 mb-1">
+                      {flopRisiko > 0 ? `Flop-Risiko ${Math.round(flopRisiko * 100)} %` : "kein Flop-Risiko"}
+                      {k.markenwertBonus > 0 && wirksam < k.markenwertBonus ? ` · Obergrenze: nur +${wirksam} wirksam` : ""}
+                    </div>
+                    <button
+                      disabled={kosten > budget}
+                      onClick={() => onMarketingKampagneKaufen(k)}
+                      className="w-full text-[11px] border border-amber-400/50 text-amber-300 rounded py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Buchen — {kosten.toLocaleString("de-CH")} €{k.markenwertBonus > 0 ? ` (+${k.markenwertBonus} Markenwert)` : ""}
+                    </button>
+                  </>
                 )}
               </div>
             );
@@ -16958,6 +17112,43 @@ function FanshopView({ abschnitt, fanshop, budget, onKaufen, onPreisSetzen, onZi
               >
                 Buchen — {auftrittKosten.toLocaleString("de-CH")} € (+{auftrittBonus} Markenwert)
               </button>
+            </>
+          )}
+        </div>
+
+        <div className="border-t border-amber-800/40 mt-3 pt-3">
+          <div className="text-[11px] uppercase tracking-wider text-amber-400/90 mb-1">Marktanalyse</div>
+          {!hatChef ? (
+            <p className="text-[10px] text-emerald-600">Eine Marktanalyse braucht einen Marketingchef (Mitarbeiter-Tab).</p>
+          ) : (
+            <>
+              <p className="text-[10px] text-emerald-600 mb-2">Modellrechnung auf Basis deines aktuellen Markenwerts — keine Marktdaten anderer Vereine.</p>
+              <div className="text-[11px] text-emerald-500 mb-1">Was dein Markenwert ({Math.round(markenwert)}, Neutralpunkt {neutral}) heute bewirkt:</div>
+              {[
+                ["Fanartikel- & Verpflegungsumsatz", (markenwert - neutral) / 200],
+                ["Sponsoren-Angebote (Höhe)", (markenwert - neutral) / 250],
+                ["Fanclub-Wachstum", (markenwert - neutral) / 500]
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between text-[11px] py-0.5"><span className="text-emerald-500">{k}</span><span className={v >= 0 ? "text-emerald-300" : "text-red-400"}>{prozent(v)}</span></div>
+              ))}
+              <div className="text-[11px] text-emerald-500 mt-2 mb-1">Fanartikel-Preise (umsatzoptimal laut Modell):</div>
+              {FANARTIKEL_TYPEN.map(t => {
+                const aktuell = fanshop[t.id]?.verkaufspreis ?? t.einkaufspreis * 2;
+                let besterPreis = aktuell, besterGewinn = -Infinity;
+                for (let m = 1.1; m <= 4.001; m += 0.05) {
+                  const preis = Math.round(t.einkaufspreis * m * 2) / 2;
+                  const g = (preis - t.einkaufspreis) * preisNachfrageFaktor(preis, t.einkaufspreis * 2, 50, 0.7);
+                  if (g > besterGewinn) { besterGewinn = g; besterPreis = preis; }
+                }
+                const aktuellGewinn = (aktuell - t.einkaufspreis) * preisNachfrageFaktor(aktuell, t.einkaufspreis * 2, 50, 0.7);
+                const diffPct = besterGewinn > 0 ? Math.round((besterGewinn - aktuellGewinn) / besterGewinn * 100) : 0;
+                return (
+                  <div key={t.id} className="flex justify-between gap-2 text-[11px] py-0.5">
+                    <span className="text-emerald-500">{t.name}</span>
+                    <span className="text-right text-emerald-200">aktuell {aktuell.toLocaleString("de-CH")} € · Empfehlung {besterPreis.toLocaleString("de-CH")} €{diffPct >= 3 ? <span className="text-amber-300"> (bis {diffPct} % mehr Gewinn je Stück)</span> : <span className="text-emerald-600"> (passt)</span>}</span>
+                  </div>
+                );
+              })}
             </>
           )}
         </div>
@@ -17426,9 +17617,11 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 179; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "23.11.2026, 22:30";
+const APP_BUILD = 181; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "24.11.2026, 12:00";
 const APP_NEUIGKEITEN = [
+  { build: 181, titel: "Marketing überarbeitet", text: "Transparenz: Im Marketing-Tab siehst du, woraus sich dein Markenwert zusammensetzt (Marketingchef, Erfolg, Digital, Teamgeist) und wie er sich pro Saison entwickelt, dazu den Verlauf je Saison. Fehler behoben: Bei Erreichen der Liga-Obergrenze wird nur noch der wirksame Bonus gutgeschrieben und bei Ablauf wieder abgezogen; die Laufzeit stimmt jetzt genau (vorher 4 statt 3 Saisons). Der Neutralpunkt hängt jetzt von der Liga ab (Oberliga 25 statt 50), sodass ein guter Oberliga-Markenwert auch wirklich Bonus bringt. Neu: 7 weitere Massnahmen (Trikot-Sonderedition, Fantag, Benefizspiel, Schul-/Vereinspartnerschaften, Vereins-App & Social-Team, Medienpartnerschaft, Krisenkommunikation) mit eigener Laufzeit, Flop-Risiko (sinkt mit gutem Marketingchef) und Warnung bei Liga-Obergrenze. Krisen: Shitstorm und negative Schlagzeilen als neue Ereignisse, Imageschäden werden durch Marketingchef und Massnahmen gedämpft. Der Markenwert fällt durch normale Entwicklung nicht unter 20 % der Liga-Obergrenze. Marktanalyse (mit Marketingchef): Wirkung des Markenwerts und umsatzoptimale Fanartikel-Preise als Modellrechnung. Chronik: neue Kategorie «Marketing» mit Buchungen und Meilensteinen. Enthält Build 180 (Transfergewinn mit Eigengewächsen)." },
+  { build: 180, titel: "Transfergewinn mit Eigengewächsen", text: "Der Rekord «Bester Transfergewinn» zählt jetzt auch Spieler, die du aus der eigenen Jugend befördert und später verkauft hast (ganzer Erlös als Gewinn). Ohne passenden Verkauf steht eine Erklärung statt eines Strichs." },
   { build: 179, titel: "Fehlerbehebung Anzeigefehler", text: "Behebt den Anzeigefehler «Cannot access uninitialized variable», der seit den Stab-Anträgen (Build 178) beim Öffnen des Spielbildschirms auftrat." },
   { build: 178, titel: "Anträge deines Stabs", text: "Jeder Mitarbeiter kann jetzt kostenpflichtige Verbesserungen vorschlagen (Reha-Gerät, Mannschaftsküche, Datenbank-Zugang, Teambuilding, Turnierreisen u. v. m.). Neues Fach «Anträge» im Mitarbeiter-Tab, rote Markierung bei neuen Anträgen. Eine angenommene Investition stärkt den Mitarbeiter (effektive Stärke) und wirkt damit überall, wo seine Stärke zählt. Anschaffungen bleiben ca. 5 Saisons und werden modernisiert, Jahresabos laufen eine Saison, Massnahmen wirken ca. 300 Tage. Ablehnen kostet nichts, Investitionen erscheinen in der Chronik." },
   { build: 177, titel: "Marktwert überall", text: "Kader: neue Spalte «Wert» (antippen sortiert nach Marktwert) mit Trendpfeil seit Saisonstart bzw. Verpflichtung, dazu der Gesamtkaderwert mit Rang in der Liga. Spielerverträge: Marktwert auf jeder Karte und was dich das Auslaufen kostet. Spieler-Detail und Karriereverlauf: Marktwert-Trend und Wert pro Saison. Ruhmeshalle: Wertvollster Spieler, Höchster Kaderwert und Bester Transfergewinn (Kauf und Verkauf desselben Spielers, ab der Chronik)." },
@@ -17998,6 +18191,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [seasonEndInfo, setSeasonEndInfo] = useState(null);
   const [jahresberichtGelesen, setJahresberichtGelesen] = useState(false);
   const [saisonauswertungGelesen, setSaisonauswertungGelesen] = useState(false);
+  const [marketingErgebnis, setMarketingErgebnis] = useState(null); // Rückmeldung zur letzten Marketing-Buchung (Flop/Deckel)
   const [vertragsEntscheidung, setVertragsEntscheidung] = useState(null); // null | "verlaengert" | "gehen"
   const [verlaengerungsDauer, setVerlaengerungsDauer] = useState(2);
   const [managerVertragsEntscheidung, setManagerVertragsEntscheidung] = useState(null); // null | "verlaengert"
@@ -18012,6 +18206,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const stab = effektiverStab(stabRoh, antraege, careerState.datum);
   AKTUELLE_NATIONEN_OFFSETS = nationenOffsets || {};
   PREIS_SAISON = season;
+  MARKEN_NEUTRAL = markenwertNeutral(findManagerDivision(divisions, profile.team) || managerDivId);
   KARRIERE_DATEN = { spielerArchiv, chronik, eigeneIds: new Set(((divisions || {})[findManagerDivision(divisions, profile.team)]?.squads?.[profile.team] || []).map(q => q.id)), season, snapshots: marktwertSnapshots, divId: findManagerDivision(divisions, profile.team) };
   // Marktwert-Schnappschuss je eigenem Spieler (Saisonstart bzw. Verpflichtung) als Grundlage für den Trendpfeil
   useEffect(() => {
@@ -19401,7 +19596,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           // Videowürfel und digitale Bestell-Infrastruktur steigern den Umsatz bei Fanartikel,
           // Verkaufsständen und Vereinsheim spürbar — echte Investitionen zahlen sich hier aus.
           // Der Markenwert der Marketingabteilung wirkt zusätzlich als genereller Umsatz-Multiplikator.
-          const markenwertMultiplikator = 1 + (markenwert - 50) / 200;
+          const markenwertMultiplikator = (1 + (markenwert - MARKEN_NEUTRAL) / 200) * (massnahmeAktiv(marketingKampagnen, "trikot") ? 1.15 : 1);
           // Die gewählte Personalstufe wirkt sich direkt auf den Umsatz aus: bei "Sparsam" entstehen
           // Warteschlangen und entgangener Umsatz — digitale Infrastruktur fängt das aber teilweise auf
           // (nur bei Unterbesetzung, mildert "Grosszügig" nicht ab).
@@ -19857,7 +20052,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Abwerbeangebote für eigene Spieler: max. 4 gleichzeitig offen, damit es übersichtlich bleibt.
     // Hoher Markenwert/hohe Manager-Reputation machen den Verein für andere Klubs interessanter — mehr
     // UND gezieltere Angebote speziell für die eigenen Topspieler (siehe generiereEingehendesAngebot).
-    const anziehungsFaktor = ((markenwert - 50) + ((managerReputation ?? 25) - 50)) / 100;
+    const anziehungsFaktor = ((markenwert - MARKEN_NEUTRAL) + ((managerReputation ?? 25) - 50)) / 100;
     let neueEingehendeAngebote = eingehendeAngebote;
     if (spieltHeute && eingehendeAngebote.length < 4) {
       const chance = 0.12 + Math.max(0, anziehungsFaktor) * 0.12;
@@ -20503,7 +20698,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Nach oben begrenzt durch die aktuelle Liga-Ebene (markenwertDeckel) — ein Oberligist wird nicht
     // über Nacht "national bekannt" oder gar "Weltmarke".
     const platzFuerMarkenwert = sortedTable(division.table).findIndex(t => t.name === profile.team) + 1;
-    const neuerMarkenwert = Math.max(0, Math.min(markenwertDeckel(managerDivId), markenwert + berechneMarkenwertAenderung({
+    // "Auffang": die normale Entwicklung drückt den Markenwert nicht unter 20 % des Liga-Deckels (nur Ereignisse können das)
+    const neuerMarkenwert = Math.max(Math.min(markenwert, markenwertBoden(managerDivId)), Math.min(markenwertDeckel(managerDivId), markenwert + berechneMarkenwertAenderung({
+      dauerEffekt: marketingDauerEffekt(marketingKampagnen),
       marketingRating: stab.marketing?.rating,
       tabellenplatz: platzFuerMarkenwert || 1,
       anzahlTeams: division.teams.length,
@@ -20532,7 +20729,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     let fanclubDeltaEreignis = 0;
     let neuesLetztesEreignis = null;
     const zufallsereignis = wuerfleZufallsereignis({
-      squad: squadNachEreignis, stadion: stadionNachEreignis, stab: stabNachEreignis, markenwert: neuerMarkenwert, personalabteilungen
+      squad: squadNachEreignis, stadion: stadionNachEreignis, stab: stabNachEreignis, markenwert: neuerMarkenwert, personalabteilungen,
+      marketingKampagnen, marketingRating: stab.marketing?.rating
     });
     if (zufallsereignis) {
       if (zufallsereignis.squad) squadNachEreignis = zufallsereignis.squad;
@@ -21389,7 +21587,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // bei anhaltender Vernachlässigung schrumpft er auch deutlich fühlbar.
     // Ein hoher Markenwert zieht zusätzlich neue Fans an — unabhängig von der reinen Zufriedenheit
     // der bestehenden Basis, ganz wie eine erfolgreiche Marketingabteilung das leisten soll.
-    const markenwertWachstumsBonus = 1 + (markenwert - 50) / 500;
+    const markenwertWachstumsBonus = (1 + (markenwert - MARKEN_NEUTRAL) / 500) * (massnahmeAktiv(marketingKampagnen, "fantag") ? 1.2 : 1);
     // Fanhaus (+3% je Stufe) und aktive Fanclub-Aktionen (+1% je Aktion, max. +5%) beschleunigen das Wachstum
     const fanclubAktivBonus = (1 + 0.03 * (fanclub.fanhausStufe || 0)) * (1 + Math.min(0.05, (fanclub.saisonAktionen || 0) * 0.01));
     let neueFanclubGroesse = Math.max(50, Math.round(fanclub.groesse * (0.85 + (gesamtZufrFanclub / 100) * 0.4) * markenwertWachstumsBonus * fanclubAktivBonus));
@@ -21661,7 +21859,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         if (!r) return saisonBilanzen || [];
         return [...(saisonBilanzen || []).filter(x => x.saison !== season), {
           saison: season, liga: division.name, platz: r.platz, anzahlTeams: r.anzahlTeams, aufgestiegen: r.aufgestiegen, abgestiegen: r.abgestiegen,
-          tabelle: r.tabelle, torjaeger: r.topTorjaeger, zuschauerSchnitt: r.zuschauerSchnitt, titel: r.titel, reingewinn: r.reingewinn
+          tabelle: r.tabelle, torjaeger: r.topTorjaeger, zuschauerSchnitt: r.zuschauerSchnitt, titel: r.titel, reingewinn: r.reingewinn, markenwert: Math.round(markenwert ?? 0)
         }];
       })(),
       vereinsRekorde: (() => {
@@ -21994,36 +22192,52 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   };
 
   const buchMarketingKampagne = (kampagne) => {
+    const kostenVorab = kampagne.kosten[managerDivId] || kampagne.kosten.OL;
+    const vorhanden = (marketingKampagnen || {})[kampagne.id];
+    if ((vorhanden && season - vorhanden.gebuchtSaison < massnahmeLaufzeit(kampagne.id, vorhanden)) || kostenVorab > budget) return;
+    // Der Zufall wird ausserhalb des State-Updaters gewürfelt (der Updater kann mehrfach laufen)
+    const flop = Math.random() < marketingFlopChance(kampagne, stab.marketing?.rating);
+    const effektiv = marketingEffektiverBonus(kampagne, markenwert ?? MARKEN_NEUTRAL, managerDivId, flop);
+    setMarketingErgebnis({ id: kampagne.id, name: kampagne.name, flop, bonus: effektiv, nominal: kampagne.markenwertBonus, gedeckelt: !flop && effektiv < kampagne.markenwertBonus });
     setCareerState(cs => {
       const kosten = kampagne.kosten[managerDivId] || kampagne.kosten.OL;
       const laufende = cs.marketingKampagnen || {};
-      const bereitsAktiv = laufende[kampagne.id] && cs.season - laufende[kampagne.id].gebuchtSaison < MARKETING_LAUFZEIT_SAISONS;
+      const bereitsAktiv = laufende[kampagne.id] && cs.season - laufende[kampagne.id].gebuchtSaison < massnahmeLaufzeit(kampagne.id, laufende[kampagne.id]);
       if (bereitsAktiv || kosten > cs.budget) return cs;
+      // Bonus wird nur in der Höhe gutgeschrieben (und später wieder abgezogen), in der er unter dem Liga-Deckel tatsächlich wirkt
+      const bonus = marketingEffektiverBonus(kampagne, cs.markenwert ?? MARKEN_NEUTRAL, managerDivId, flop);
       return {
         ...cs,
         budget: cs.budget - kosten,
-        markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? 50) + kampagne.markenwertBonus)),
-        marketingKampagnen: { ...laufende, [kampagne.id]: { gebuchtSaison: cs.season, bonus: kampagne.markenwertBonus, name: kampagne.name } },
+        markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? MARKEN_NEUTRAL) + bonus)),
+        marketingKampagnen: { ...laufende, [kampagne.id]: { gebuchtSaison: cs.season, bonus, name: kampagne.name, laufzeit: kampagne.laufzeit ?? MARKETING_LAUFZEIT_SAISONS, flop, nominal: kampagne.markenwertBonus } },
         saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandSonstiges: (cs.saisonFinanzen?.aufwandSonstiges || 0) + kosten }
       };
     });
   };
 
   // Spielerauftritt beim Sponsor: braucht zusätzlich die Wahl eines konkreten Spielers (siehe
-  // berechneSpielerauftrittKosten/-Bonus) — läuft technisch wie die vier festen Kampagnen (eigener
+  // berechneSpielerauftrittKosten/-Bonus) — läuft technisch wie die festen Kampagnen (eigener
   // Schlüssel "spielerauftritt" in marketingKampagnen, gleiche Laufzeit/Ablauf), zusätzlich mit einem
   // kleinen Zufriedenheits-Malus für "ehrgeizige" Spieler, die den Termin nur widerwillig wahrnehmen.
   const onSpielerauftrittBuchen = (spielerId) => {
+    const vorhanden = (marketingKampagnen || {}).spielerauftritt;
+    if (vorhanden && season - vorhanden.gebuchtSaison < massnahmeLaufzeit("spielerauftritt", vorhanden)) return;
+    const sp = (divisions[managerDivId].squads[profile.team] || []).find(p => p.id === spielerId);
+    if (!sp || berechneSpielerauftrittKosten(sp, managerDivId) > budget) return;
+    const flopA = Math.random() < marketingFlopChance({ flop: 0.05 }, stab.marketing?.rating);
+    setMarketingErgebnis({ id: "spielerauftritt", name: `Spielerauftritt (${sp.name})`, flop: flopA, bonus: 0, nominal: berechneSpielerauftrittBonus(sp), gedeckelt: false });
     setCareerState(cs => {
       const laufende = cs.marketingKampagnen || {};
-      const bereitsAktiv = laufende.spielerauftritt && cs.season - laufende.spielerauftritt.gebuchtSaison < MARKETING_LAUFZEIT_SAISONS;
+      const bereitsAktiv = laufende.spielerauftritt && cs.season - laufende.spielerauftritt.gebuchtSaison < massnahmeLaufzeit("spielerauftritt", laufende.spielerauftritt);
       if (bereitsAktiv) return cs;
       const squad = cs.divisions[managerDivId].squads[profile.team];
       const spieler = squad.find(p => p.id === spielerId);
       if (!spieler) return cs;
       const kosten = berechneSpielerauftrittKosten(spieler, managerDivId);
       if (kosten > cs.budget) return cs;
-      const bonus = berechneSpielerauftrittBonus(spieler);
+      const nominal = berechneSpielerauftrittBonus(spieler);
+      const bonus = marketingEffektiverBonus({ markenwertBonus: nominal }, cs.markenwert ?? MARKEN_NEUTRAL, managerDivId, flopA);
       const neuesSquad = squad.map(p => p.id === spielerId && p.persoenlichkeit === "ehrgeizig"
         ? { ...p, zufriedenheit: Math.max(0, p.zufriedenheit - 5) }
         : p
@@ -22031,8 +22245,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       return {
         ...cs,
         budget: cs.budget - kosten,
-        markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? 50) + bonus)),
-        marketingKampagnen: { ...laufende, spielerauftritt: { gebuchtSaison: cs.season, bonus, name: `Spielerauftritt (${spieler.name})`, spielerId: spieler.id, spielerName: spieler.name } },
+        markenwert: Math.max(0, Math.min(markenwertDeckel(managerDivId), (cs.markenwert ?? MARKEN_NEUTRAL) + bonus)),
+        marketingKampagnen: { ...laufende, spielerauftritt: { gebuchtSaison: cs.season, bonus, name: `Spielerauftritt (${spieler.name})`, spielerId: spieler.id, spielerName: spieler.name, laufzeit: MARKETING_LAUFZEIT_SAISONS, flop: flopA, nominal } },
         divisions: { ...cs.divisions, [managerDivId]: { ...cs.divisions[managerDivId], squads: { ...cs.divisions[managerDivId].squads, [profile.team]: neuesSquad } } },
         saisonFinanzen: { ...(cs.saisonFinanzen || leereSaisonFinanzen()), aufwandSonstiges: (cs.saisonFinanzen?.aufwandSonstiges || 0) + kosten }
       };
@@ -25003,6 +25217,18 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onSpielerauftrittBuchen={onSpielerauftrittBuchen}
               fanshopHistorie={fanshopHistorie}
               season={season}
+              markenDetail={berechneMarkenwertDetail({
+                marketingRating: stab.marketing?.rating,
+                tabellenplatz: (sortedTable(division.table).findIndex(t => t.name === profile.team) + 1) || 1,
+                anzahlTeams: division.teams.length,
+                digitaleInfrastruktur: division.stadien[profile.team]?.digitaleInfrastruktur,
+                teamgeist: teamgeistDaten.gesamt,
+                dauerEffekt: marketingDauerEffekt(marketingKampagnen)
+              })}
+              marketingRating={stab.marketing?.rating || 0}
+              marketingErgebnis={marketingErgebnis}
+              onErgebnisSchliessen={() => setMarketingErgebnis(null)}
+              markenHistorie={(saisonBilanzen || []).filter(b => typeof b.markenwert === "number").sort((x, y) => x.saison - y.saison).map(b => ({ saison: b.saison, markenwert: b.markenwert }))}
             />
           )}
           {tab === "stadion" && (
