@@ -1505,11 +1505,67 @@ function sortRatingFuerStartelf(p) {
   return p.rating + (p.jugendfoerderung && p.junior ? JUGENDFOERDERUNG_BONUS : 0) + (p.einsatzZusage ? 12 : 0);
 }
 
-function waehleStartelf(squad, formation) {
+/* =========================================================================
+   SPIELFRISCHE — jeder Einsatz kostet Kraft, Pausen und gute Betreuung bringen sie zurück. Wer
+   dauerhaft ohne Pause spielt, wird müde: leichter Leistungsabzug und höheres Verletzungsrisiko.
+   Rotation lohnt sich also, weil sonst Punkte und Gesundheit leiden (siehe ROTATIONS_STUFEN).
+   ========================================================================= */
+let ROTATIONS_STUFE_GLOBAL = "behutsam";
+const ROTATIONS_STUFEN = {
+  aus: { label: "Aus", info: "Immer die stärkste Elf. Müde Spieler spielen weiter, Leistung und Verletzungsrisiko leiden.", schwelle: 0, gewicht: 0 },
+  trainer: { label: "Trainer greift ein", info: "Dein erfahrener Trainer schont Spieler erst bei akuter Erschöpfung.", schwelle: 48, gewicht: 0.3 },
+  behutsam: { label: "Behutsam", info: "Müde Stammspieler (unter 60) werden durch gleichwertige Ersatzleute ersetzt.", schwelle: 60, gewicht: 0.35 },
+  konsequent: { label: "Konsequent", info: "Stamm wird früh geschont (ab 80) — mehr Rotation, dafür etwas weniger Spitzenbesetzung.", schwelle: 80, gewicht: 0.35 }
+};
+function effektiveRotationsStufe(stufe, coach) {
+  const st = ROTATIONS_STUFEN[stufe] ? stufe : "behutsam";
+  return st === "aus" && coach && (coach.rating || 0) >= 70 ? "trainer" : st;
+}
+// Leistungsabzug (Rating-Punkte) durch Müdigkeit: erst unter 60 spürbar, unter 40 deutlich
+function frischeAbzug(f) {
+  if (f == null || f >= 60) return 0;
+  if (f >= 40) return (60 - f) * 0.1;
+  return 2 + (40 - f) * 0.2;
+}
+// Verletzungsrisiko-Faktor für Spieler im Einsatz: ab 60 abwärts steigend (max. ca. 2.5x)
+function frischeVerletzungsFaktor(f) {
+  if (f == null || f >= 60) return 1;
+  return 1 + (60 - f) / 40;
+}
+function frischeFarbe(f) {
+  const v = f ?? 100;
+  return v >= 75 ? "text-emerald-300" : v >= 60 ? "text-amber-300" : v >= 40 ? "text-orange-400" : "text-red-400";
+}
+// Gewicht für die Aufstellung: je nach Stufe wird ein müder Spieler in der Reihenfolge nach hinten gesetzt
+function frischeSortAbzug(p, stufe) {
+  if (p.pos === "TW") return 0; // Torhüter spielen real fast durch
+  const st = ROTATIONS_STUFEN[stufe];
+  if (!st || !st.gewicht) return 0;
+  return Math.max(0, st.schwelle - (p.frische ?? 100)) * st.gewicht;
+}
+// Frische nach einer Spielwoche: Kosten für Einsatz (Startelf 13, Einwechslung 4; Torhüter halb), Erholung
+// 8.5 + 0.1 pro fehlendem Punkt (+ Alters- und Betreuungsbonus), pro 7 Tage. `geschont` merkt sich, wer
+// müde auf der Bank/Tribüne pausiert hat — das nimmt ihm den Frust über den Bankplatz.
+function aktualisiereFrische(squad, { startIds = new Set(), einwechselIds = new Set(), tage = 7, erholungsBonus = 0 } = {}) {
+  return squad.map(p => {
+    const vorher = p.frische ?? 100;
+    let kosten = startIds.has(p.id) ? 13 : einwechselIds.has(p.id) ? 4 : 0;
+    if (p.pos === "TW") kosten *= 0.5;
+    const alter = p.alter ?? 26;
+    const altersMod = alter >= 31 ? -1 : alter <= 22 ? 1.5 : 0;
+    const erholung = tage > 0 ? (8.5 + 0.1 * (100 - vorher) + altersMod + erholungsBonus) * (tage / 7) : 0;
+    const neu = Math.max(0, Math.min(100, vorher - kosten + erholung));
+    const geschont = kosten === 0 && !p.verletzung && vorher < 65 && p.pos !== "TW";
+    if (Math.abs(neu - vorher) < 0.05 && !!p.geschont === geschont) return p;
+    return { ...p, frische: Math.round(neu * 10) / 10, geschont };
+  });
+}
+
+function waehleStartelf(squad, formation, stufe = ROTATIONS_STUFE_GLOBAL) {
   const verfuegbar = squad.filter(p => !p.verletzung && !p.laenderspielSperre && !p.kartenSperre);
   const nachPosition = {};
   POSITIONEN.forEach(p => {
-    nachPosition[p.code] = verfuegbar.filter(s => s.pos === p.code).sort((a, b) => sortRatingFuerStartelf(b) - sortRatingFuerStartelf(a));
+    nachPosition[p.code] = verfuegbar.filter(s => s.pos === p.code).sort((a, b) => (sortRatingFuerStartelf(b) - frischeSortAbzug(b, stufe)) - (sortRatingFuerStartelf(a) - frischeSortAbzug(a, stufe)));
   });
   const elf = [];
   const genutzteIds = new Set();
@@ -1522,7 +1578,7 @@ function waehleStartelf(squad, formation) {
       const zufriedenheitsAbzug = (p.zufriedenheit ?? 70) < 40 ? (40 - (p.zufriedenheit ?? 70)) * 0.15 : 0;
       // Nach längerer Verletzung noch nicht bei voller Leistung (nimmt mit jedem Einsatz ab)
       const rueckkehrAbzug = p.rueckkehr ? (p.rueckkehr.art === "schwer" ? 6 : 3) * (p.rueckkehr.spiele / p.rueckkehr.gesamt) : 0;
-      elf.push({ ...p, gespielterPos: code, effektivesRating: p.rating - zufriedenheitsAbzug - rueckkehrAbzug });
+      elf.push({ ...p, gespielterPos: code, effektivesRating: p.rating - zufriedenheitsAbzug - rueckkehrAbzug - frischeAbzug(p.frische) });
       genutzteIds.add(p.id);
     });
   });
@@ -1547,7 +1603,7 @@ function waehleStartelf(squad, formation) {
       if (!kandidat) kandidat = rest.find(p => !genutzteIds.has(p.id)); // wirklich nur im äussersten Notfall
       if (!kandidat) break;
       const strafe = positionsStrafe(kandidat.pos, zielPos);
-      elf.push({ ...kandidat, gespielterPos: zielPos, effektivesRating: Math.max(15, kandidat.rating - strafe) });
+      elf.push({ ...kandidat, gespielterPos: zielPos, effektivesRating: Math.max(15, kandidat.rating - strafe - frischeAbzug(kandidat.frische)) });
       genutzteIds.add(kandidat.id);
     }
   }
@@ -1577,7 +1633,7 @@ function wendeRotationsprinzipAn({ elf, bank, staerke }, aktiv, datum) {
   if (!juengereAlternativen.length) return { elf, bank, staerke };
   const juengerer = juengereAlternativen[Math.floor(rng() * juengereAlternativen.length)];
   const neueElf = [...elf];
-  neueElf[idx] = { ...juengerer, gespielterPos: alterSpieler.gespielterPos, effektivesRating: juengerer.rating, rotiert: true };
+  neueElf[idx] = { ...juengerer, gespielterPos: alterSpieler.gespielterPos, effektivesRating: juengerer.rating - frischeAbzug(juengerer.frische), rotiert: true };
   const neueBank = bank.map(p => p.id === juengerer.id ? alterSpieler : p);
   const neueStaerke = neueElf.reduce((s, p) => s + (p.effektivesRating ?? p.rating), 0) / 11;
   return { elf: neueElf, bank: neueBank, staerke: neueStaerke };
@@ -1594,7 +1650,7 @@ function aktualisiereSpielerZufriedenheit(squad, startelfIds, season, offeneFord
     const persoenlichkeit = PERSOENLICHKEITEN[p.persoenlichkeit];
     const toleranz = persoenlichkeit?.bankToleranz ?? 1;
     const aktuelle = p.zufriedenheit ?? 70;
-    let delta = startelfIds.has(p.id) ? 1.2 : -1.4 / toleranz;
+    let delta = startelfIds.has(p.id) ? 1.2 : p.geschont ? 0 : -1.4 / toleranz; // geschonte Spieler (müde Stammkräfte) sind nicht frustriert
     const jahreVerbleibend = (p.vertragBisSaison ?? season + 9) - season;
     if (jahreVerbleibend <= 0) delta -= 0.6;
     if (offeneForderungIds.includes(p.id)) delta -= 1.0; // unbeantwortete Gehaltsforderung nagt an ihm
@@ -2140,7 +2196,7 @@ function verarbeiteVerletzungen(squad, spielendeIds, arzt, tageVergangen, zusatz
     }
     const hatGespielt = spielendeIds.includes(p.id);
     const rueckfallFaktor = p.rueckkehr ? (p.rueckkehr.art === "schwer" ? 2.5 : 1.8) : 1;
-    const basisChance = (hatGespielt ? 0.018 : 0.004) * praeventionsFaktor * zusatzFaktorSpieler * rueckfallFaktor;
+    const basisChance = (hatGespielt ? 0.018 : 0.004) * praeventionsFaktor * zusatzFaktorSpieler * rueckfallFaktor * (hatGespielt ? frischeVerletzungsFaktor(p.frische) : 1);
     if (Math.random() < basisChance) {
       const verletzung = wuerfleVerletzung(arztRating);
       neueVerletzten.push({ name: p.name, ...verletzung });
@@ -5701,7 +5757,7 @@ function journalistPortraitFuer(journalist) {
 
 const PRESSEKONFERENZ_FRAGEN = [
   {
-    id: "fans_zuschauer", bedingung: k => k.fanUnterstuetzungNiedrig, thema: "Fans", frage: "Die Zuschauerzahlen sind zuletzt gesunken. Was sagen Sie den Fans?",
+    id: "fans_zuschauer", bedingung: k => k.zuschauerGesunken, thema: "Fans", frage: "Die Zuschauerzahlen sind zuletzt gesunken. Was sagen Sie den Fans?",
     antworten: [
       { text: "Wir tun alles, um das Stadionerlebnis für unsere Fans spürbar zu verbessern.", ziel: "fans", delta: 3 },
       { text: "Wir bleiben im engen Austausch mit der Fanszene.", ziel: "fans", delta: 1 },
@@ -5746,7 +5802,7 @@ const PRESSEKONFERENZ_FRAGEN = [
     ]
   },
   {
-    id: "spieler_matchwinner", bedingung: k => k.matchwinnerVorhanden, thema: "Spieler", frage: "Ihr Matchwinner heute war überragend. Ihre Einschätzung?",
+    id: "spieler_matchwinner", bedingung: k => k.matchwinnerVorhanden && k.letztesErgebnis === "sieg", thema: "Spieler", frage: "Ihr Matchwinner heute war überragend. Ihre Einschätzung?",
     antworten: [
       { text: "Eine überragende Leistung, absolut verdient.", ziel: "spieler", delta: 5, nebenziel: "fans", nebendelta: 2 },
       { text: "Er hat seine Chance gut genutzt.", ziel: "spieler", delta: 2 },
@@ -5764,7 +5820,7 @@ const PRESSEKONFERENZ_FRAGEN = [
     ]
   },
   {
-    id: "spieler_kabine", bedingung: k => k.trainerZufriedenheitNiedrig, thema: "Spieler", frage: "Es gibt Gerüchte über Unstimmigkeiten in der Kabine. Was sagen Sie dazu?",
+    id: "spieler_kabine", bedingung: k => k.trainerZufriedenheitNiedrig || k.kabinenKonfliktOffen, thema: "Spieler", frage: "Es gibt Gerüchte über Unstimmigkeiten in der Kabine. Was sagen Sie dazu?",
     antworten: [
       { text: "Solche Gerüchte entsprechen nicht der Realität, der Zusammenhalt ist gut.", ziel: "spieler", delta: 3, nebenziel: "marke", nebendelta: 1 },
       { text: "Interna bleiben intern, das ist bei uns immer so.", ziel: "spieler", delta: 1 },
@@ -5845,7 +5901,7 @@ const PRESSEKONFERENZ_FRAGEN = [
     ]
   },
   {
-    id: "mitarbeiter_medizin", bedingung: k => k.hatVerletzung, thema: "Mitarbeiter", frage: "Nach mehreren Verletzungen: wie bewerten Sie die medizinische Abteilung?",
+    id: "mitarbeiter_medizin", bedingung: k => k.verletzteAnzahl >= 2, thema: "Mitarbeiter", frage: "Nach mehreren Verletzungen: wie bewerten Sie die medizinische Abteilung?",
     antworten: [
       { text: "Unser medizinisches Team leistet trotz der Häufung hervorragende Arbeit.", ziel: "trainer", delta: 3, nebenziel: "spieler", nebendelta: 2 },
       { text: "Sie tun ihr Bestes unter schwierigen Umständen.", ziel: "trainer", delta: 1 },
@@ -6158,6 +6214,122 @@ const PRESSEKONFERENZ_FRAGEN = [
       { text: "Im Zweifel ist ein erfahrener Neuzugang meist die sicherere Wahl.", ziel: "marke", delta: -1 },
       { text: "Nachwuchsarbeit ist mir persönlich nicht besonders wichtig.", ziel: "marke", delta: -5, nebenziel: "fans", nebendelta: -2 },
     ]
+  },  {
+    id: "rotation_muede", bedingung: k => k.muedeInStartelf >= 2, thema: "Spieler", frage: "Mehrere Ihrer Stammspieler wirkten zuletzt platt. Warum rotieren Sie nicht mehr?",
+    antworten: [
+      { text: "Wir beobachten die Belastung genau und schonen Spieler, sobald es nötig ist.", ziel: "spieler", delta: 4, nebenziel: "trainer", nebendelta: 1 },
+      { text: "Der Kader ist breit genug — wir werden die Belastung künftig besser steuern.", ziel: "spieler", delta: 2 },
+      { text: "Wer Stammspieler ist, spielt. Müde sind andere Mannschaften auch.", ziel: "spieler", delta: -4, nebenziel: "trainer", nebendelta: -2 },
+      { text: "Ehrlich gesagt hatte ich die Belastung nicht im Blick.", ziel: "spieler", delta: -6, nebenziel: "marke", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "rotation_geschont_niederlage", bedingung: k => k.geschontAnzahl >= 1 && k.letztesErgebnis === "niederlage", thema: "Trainer", frage: "Sie haben zuletzt Stammspieler geschont und das Spiel verloren. War die Rotation ein Fehler?",
+    antworten: [
+      { text: "Nein. Wer müde spielt, riskiert Verletzungen — das war die richtige Entscheidung.", ziel: "spieler", delta: 3, nebenziel: "trainer", nebendelta: 2 },
+      { text: "Mit der besten Elf wäre es vielleicht anders gelaufen, aber wir denken langfristig.", ziel: "spieler", delta: 1 },
+      { text: "Im Nachhinein hätte ich vielleicht anders entschieden.", ziel: "trainer", delta: -2 },
+      { text: "Die Ersatzspieler haben das Spiel verloren, nicht die Rotation.", ziel: "spieler", delta: -7, nebenziel: "trainer", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "rotation_geschont_sieg", bedingung: k => k.geschontAnzahl >= 1 && k.letztesErgebnis === "sieg", thema: "Spieler", frage: "Sie haben erschöpfte Stammspieler geschont und trotzdem gewonnen. Zeigt das die Breite Ihres Kaders?",
+    antworten: [
+      { text: "Absolut. Jeder im Kader hat heute gezeigt, dass er Verantwortung übernehmen kann.", ziel: "spieler", delta: 5 },
+      { text: "Es freut mich für die Spieler, die heute ihre Chance bekommen haben.", ziel: "spieler", delta: 3 },
+      { text: "Der Gegner hat es uns auch leicht gemacht.", ziel: "spieler", delta: -2 },
+      { text: "Mit der Stammelf wäre das deutlicher ausgefallen.", ziel: "spieler", delta: -5, nebenziel: "trainer", nebendelta: -1 },
+    ]
+  },
+  {
+    id: "markt_verkaufsliste", bedingung: k => k.verkaufslisteAnzahl >= 1, thema: "Transfers", frage: "Sie haben Spieler auf die Verkaufsliste gesetzt. Beginnt in der Mannschaft ein Umbruch?",
+    antworten: [
+      { text: "Nein, wir prüfen nur, wo ein Wechsel für alle Seiten Sinn ergibt.", ziel: "spieler", delta: 3, nebenziel: "marke", nebendelta: 1 },
+      { text: "Wer einen guten Preis bringt und nicht mehr ins Konzept passt, darf gehen.", ziel: "spieler", delta: 0 },
+      { text: "Jeder Spieler hat seinen Preis, so ist das Geschäft.", ziel: "spieler", delta: -3, nebenziel: "fans", nebendelta: -1 },
+      { text: "Wer nicht spurt, fliegt raus.", ziel: "spieler", delta: -6, nebenziel: "trainer", nebendelta: -1 },
+    ]
+  },
+  {
+    id: "markt_angebot_eingegangen", bedingung: k => k.eingehendeAngeboteAnzahl >= 1, thema: "Transfers", frage: "Für einen Ihrer Spieler liegt ein Angebot vor. Ist er verkäuflich?",
+    antworten: [
+      { text: "Jeder ist unter Umständen verkäuflich — aber nur zu einem Preis, der uns sportlich nicht schwächt.", ziel: "marke", delta: 3, nebenziel: "spieler", nebendelta: 1 },
+      { text: "Wir prüfen das Angebot in Ruhe und sprechen mit dem Spieler.", ziel: "spieler", delta: 2 },
+      { text: "Das Angebot interessiert mich nicht, er bleibt auf jeden Fall.", ziel: "fans", delta: 3, nebenziel: "spieler", nebendelta: -1 },
+      { text: "Für das richtige Geld verkaufe ich jeden — notfalls auch den Kapitän.", ziel: "spieler", delta: -6, nebenziel: "fans", nebendelta: -3 },
+    ]
+  },
+  {
+    id: "markt_kaderwert_hoch", bedingung: k => k.kaderwertRang && k.kaderwertRang.von >= 6 && k.kaderwertRang.rang <= 3, thema: "Transfers", frage: "Laut Marktwert gehört Ihr Kader zu den wertvollsten der Liga. Müssen Sie jetzt auch liefern?",
+    antworten: [
+      { text: "Der Marktwert sagt wenig über Titel aus, aber wir wissen um unsere Qualität und die Erwartungen.", ziel: "spieler", delta: 3, nebenziel: "marke", nebendelta: 1 },
+      { text: "Ein hoher Kaderwert ist eine Verpflichtung, aber auch eine Chance.", ziel: "marke", delta: 3 },
+      { text: "Marktwerte sind Zahlen auf dem Papier. Auf dem Platz zählt etwas anderes.", ziel: "spieler", delta: 0 },
+      { text: "Natürlich müssen wir liefern — alles andere wäre eine Blamage.", ziel: "spieler", delta: -3, nebenziel: "trainer", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "markt_kaderwert_tief", bedingung: k => k.kaderwertRang && k.kaderwertRang.von >= 6 && k.kaderwertRang.rang >= k.kaderwertRang.von - 2, thema: "Transfers", frage: "Laut Marktwert ist Ihr Kader einer der günstigsten der Liga. Reicht das für die Saisonziele?",
+    antworten: [
+      { text: "Marktwerte sind nur eine Zahl. Teamgeist und Einsatz lassen sich nicht berechnen.", ziel: "spieler", delta: 4, nebenziel: "fans", nebendelta: 1 },
+      { text: "Wir arbeiten mit den Mitteln, die wir haben, und wollen uns Schritt für Schritt verbessern.", ziel: "marke", delta: 2 },
+      { text: "Wir sind klarer Aussenseiter, das ist uns bewusst.", ziel: "spieler", delta: -1 },
+      { text: "Mit diesem Kader wird es schwer, ehrlich gesagt.", ziel: "spieler", delta: -5, nebenziel: "marke", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "stab_antrag_offen", bedingung: k => k.antragOffenAnzahl >= 1, thema: "Mitarbeiter", frage: "Aus dem Mitarbeiterstab hört man, dass einige Vorschläge für Anschaffungen noch unbeantwortet sind. Warum zögern Sie?",
+    antworten: [
+      { text: "Jede Investition wird sorgfältig geprüft — Nutzen und Kosten müssen zusammenpassen.", ziel: "marke", delta: 2, nebenziel: "trainer", nebendelta: 1 },
+      { text: "Wir sprechen intern mit den Mitarbeitern und entscheiden zeitnah.", ziel: "trainer", delta: 2 },
+      { text: "Unsere finanziellen Möglichkeiten sind begrenzt.", ziel: "marke", delta: -1 },
+      { text: "Mitarbeiter sollen arbeiten und nicht ständig neue Wünsche äussern.", ziel: "trainer", delta: -5, nebenziel: "marke", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "stab_antrag_investition", bedingung: k => k.antragJuengstGenehmigt, thema: "Mitarbeiter", frage: "Sie haben kürzlich eine kostspielige Anschaffung für Ihren Stab bewilligt. Wird sich das auszahlen?",
+    antworten: [
+      { text: "Davon bin ich überzeugt — wer in Qualität investiert, wird langfristig belohnt.", ziel: "marke", delta: 3, nebenziel: "spieler", nebendelta: 1 },
+      { text: "Das werden die kommenden Monate zeigen, wir haben es sorgfältig geprüft.", ziel: "marke", delta: 1 },
+      { text: "Es war eher ein Wunsch der Mitarbeiter als meine Überzeugung.", ziel: "trainer", delta: -2 },
+      { text: "Ob es etwas bringt, weiss ich ehrlich gesagt nicht.", ziel: "marke", delta: -4 },
+    ]
+  },
+  {
+    id: "marketing_flop", bedingung: k => k.marketingFlopDieseSaison, thema: "Verein", frage: "Ihre jüngste Marketingaktion hat kaum Wirkung gezeigt. Was ist schiefgelaufen?",
+    antworten: [
+      { text: "Das war nicht der erhoffte Erfolg — wir analysieren das und machen es beim nächsten Mal besser.", ziel: "marke", delta: 2 },
+      { text: "Nicht jede Idee zündet sofort, wir bleiben dran.", ziel: "marke", delta: 0 },
+      { text: "Die Agentur hat uns schlecht beraten.", ziel: "marke", delta: -3 },
+      { text: "Marketing wird ohnehin überschätzt.", ziel: "marke", delta: -6, nebenziel: "fans", nebendelta: -1 },
+    ]
+  },
+  {
+    id: "marketing_marke_stark", bedingung: k => k.markenwertHoch, thema: "Verein", frage: "Der Verein hat in den letzten Jahren stark an Strahlkraft gewonnen. Wie nachhaltig ist dieser Aufschwung?",
+    antworten: [
+      { text: "Das ist das Ergebnis harter Arbeit im ganzen Verein — und die muss weitergehen.", ziel: "marke", delta: 4, nebenziel: "fans", nebendelta: 1 },
+      { text: "Wir freuen uns, ruhen uns aber nicht darauf aus.", ziel: "marke", delta: 2 },
+      { text: "Marke und Bekanntheit sind nett, aber Ergebnisse zählen am Ende.", ziel: "marke", delta: -1 },
+      { text: "Das ist ohnehin selbstverständlich bei einem Verein wie unserem.", ziel: "marke", delta: -4, nebenziel: "fans", nebendelta: -1 },
+    ]
+  },
+  {
+    id: "marketing_marke_schwach", bedingung: k => k.markenwertTief, thema: "Verein", frage: "Der Verein hat spürbar an Ausstrahlung verloren. Wie wollen Sie das Image wieder verbessern?",
+    antworten: [
+      { text: "Wir investieren gezielt in Fan- und Öffentlichkeitsarbeit und setzen auf sportliche Konstanz.", ziel: "marke", delta: 4, nebenziel: "fans", nebendelta: 1 },
+      { text: "Das braucht Zeit. Image baut man nicht über Nacht auf.", ziel: "marke", delta: 1 },
+      { text: "Entscheidend ist, was auf dem Platz passiert.", ziel: "marke", delta: -2 },
+      { text: "Das Image beschäftigt mich nicht.", ziel: "marke", delta: -6, nebenziel: "fans", nebendelta: -2 },
+    ]
+  },
+  {
+    id: "krise_imageschaden", bedingung: k => k.imageKriseJuengst, thema: "Verein", frage: "Der Verein stand zuletzt negativ in den Schlagzeilen. Wie gehen Sie damit um?",
+    antworten: [
+      { text: "Wir stellen uns der Kritik offen, übernehmen Verantwortung und arbeiten das auf.", ziel: "marke", delta: 4, nebenziel: "fans", nebendelta: 2 },
+      { text: "Wir haben den Vorfall intern besprochen und die nötigen Schlüsse gezogen.", ziel: "marke", delta: 2 },
+      { text: "Die Medien machen aus jeder Kleinigkeit eine Schlagzeile.", ziel: "marke", delta: -3, nebenziel: "fans", nebendelta: -1 },
+      { text: "Dazu sage ich nichts, das ist nicht mein Problem.", ziel: "marke", delta: -7, nebenziel: "fans", nebendelta: -3 },
+    ]
   },
 ];
 
@@ -6351,7 +6523,8 @@ function baueFanclubVorschlag(id, ctx, termin = null) {
   return null;
 }
 function waehleFanclubVorschlag(ctx) {
-  const ids = ["choreo", "fanmarsch", "spendenaktion", "fanfest", "auswaertsfahrt", "stehplaetze", "trikot"];
+  const ids = ["choreo", "fanmarsch", "spendenaktion", "fanfest", "auswaertsfahrt", "trikot"];
+  if (ctx.preiseGesenktSinnvoll) ids.push("stehplaetze"); // Preissenkung nur vorschlagen, wenn Preise hoch UND Stadion nicht ausverkauft
   if (ctx.liebling && !ctx.lieblingZusage) ids.push("liebling");
   const frei = ids.filter(i => i !== ctx.letzteId);
   return baueFanclubVorschlag(frei[Math.floor(Math.random() * frei.length)], ctx);
@@ -7215,6 +7388,29 @@ function generiereJahresbericht(kontext) {
   return { positiv: positiv.slice(0, 5), achtung: achtung.slice(0, 5), jugendStufen: jugendStufenErgebnisse, rueckblick };
 }
 
+// Preisniveau der Tickets relativ zum Richtwert — dieselbe Referenz wie die Nachfrage (obere Spanne der
+// Liga, je Kategorie mit TICKET_KATEGORIE_FAKTOR skaliert: Sitzplatz 1.8x, Logen 20x). 1.0 = Preis genau
+// auf Richtwert, darüber teurer. Früher wurde der kapazitätsgewichtete Durchschnitt aller Kategorien
+// gegen den Preis eines Stehplatzes gehalten, wodurch Sitzplätze und Logen unveränderte Standardpreise
+// automatisch «zu teuer» wirken liessen.
+function ticketPreisVerhaeltnis(stadion, managerDivId) {
+  if (!stadion) return 1;
+  const richtwert = (STADION_BEREICHE[managerDivId] || STADION_BEREICHE.OL).ticket[1]; // wie bei der Nachfrage (berechneHeimspielEinnahmen)
+  let ist = 0, soll = 0;
+  STADION_KATEGORIEN.forEach(k => {
+    const kap = stadion[k]?.kapazitaet || 0;
+    ist += kap * (stadion[k]?.ticketpreis || 0);
+    soll += kap * richtwert * (TICKET_KATEGORIE_FAKTOR[k] || 1);
+  });
+  return soll > 0 ? ist / soll : 1;
+}
+// Durchschnittliche Auslastung der letzten Heimspiele (0-1) oder null, wenn zu wenige Spiele vorliegen
+function letzteAuslastung(stadion, n = 3) {
+  const h = (stadion?.zuschauerHistorie || []).slice(-n);
+  if (h.length < n) return null;
+  return h.reduce((t, x) => t + ((x.auslastung || 0) > 1 ? x.auslastung / 100 : (x.auslastung || 0)), 0) / h.length;
+}
+
 function berechneFanzufriedenheit(kontext) {
   const { taktikKennzahlen, trainerZufriedenheit, platz, anzahlTeams, anzahlSaisonsImAmt, trophaeenAnzahl, stadion, managerDivId, fanshop, imbiss, vereinsheim, unterstuetzungsBonus = 0, markenwert = 50 } = kontext;
   const clamp = v => Math.max(0, Math.min(100, Math.round(v)));
@@ -7251,7 +7447,7 @@ function berechneFanzufriedenheit(kontext) {
   // erträglicher — eine starke, bekannte Marke verzeiht Preise eher als ein unbekannter Verein.
   const sicherheitWirkung = infrastrukturWirkung(stadion, "sicherheitssystem");
   const ticketpreisStrafeFaktor = Math.max(25, (60 - 15 * sicherheitWirkung) - (markenwert - MARKEN_NEUTRAL) / 8);
-  const ticketpreise = clamp(100 - Math.max(0, ((durchschnittTicketpreis / erwarteterTicketpreis) - 1) * ticketpreisStrafeFaktor));
+  const ticketpreise = clamp(100 - Math.max(0, (ticketPreisVerhaeltnis(stadion, managerDivId) - 1) * ticketpreisStrafeFaktor));
 
   let margeSumme = 0, margeAnzahl = 0;
   FANARTIKEL_TYPEN.forEach(t => {
@@ -7286,10 +7482,10 @@ const FANCLUB_ANLIEGEN_KATALOG = {
   spieler: { text: "Die Mannschaft enttäuscht uns sportlich — wir erwarten mehr Einsatz und bessere Ergebnisse.", aktion: null },
   trainer: { text: "Wir sind mit der Arbeit des Trainers nicht zufrieden.", aktion: null },
   manager: { text: "Wir haben Zweifel an deiner Vereinsführung, so geht es nicht weiter.", aktion: null },
-  stadion: { text: "Unser Stadion ist zu klein — bei Heimspielen bekommen viele treue Fans kein Ticket mehr.", aktion: "stadion" },
+  stadion: { text: "Unser Stadion ist zu klein — bei Heimspielen bekommen viele treue Fans kein Ticket mehr.", aktion: "stadionausbau" },
   fanartikel: { text: "Die Preise im Fanshop sind uns viel zu hoch — das können sich viele nicht mehr leisten.", aktion: "fanartikel" },
   ticketpreise: { text: "Die Ticketpreise steigen und steigen — bald können sich normale Fans keine Karten mehr leisten.", aktion: "ticketpreise" },
-  verpflegung: { text: "Die Preise an den Ständen und im Vereinsheim sind uns viel zu hoch — ein Bier und eine Wurst sollten sich alle noch leisten können.", aktion: "stadion" }
+  verpflegung: { text: "Die Preise an den Ständen und im Vereinsheim sind uns viel zu hoch — ein Bier und eine Wurst sollten sich alle noch leisten können.", aktion: "verpflegung" }
 };
 
 /* =========================================================================
@@ -9241,7 +9437,7 @@ function fallbackSeasonTransition(divisions, season, managerTeam) {
               gesamtkarriereGelb: (p.gesamtkarriereGelb || 0) + (p.gelb || 0),
               gesamtkarriereRot: (p.gesamtkarriereRot || 0) + (p.rot || 0),
               gesamtkarriereSpiele: (p.gesamtkarriereSpiele || 0) + (p.spiele || 0),
-              tore: 0, ligaTore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0, form: sommerForm(p.form), verletzung: null, kartenSperre: false, junior: false, jugendfoerderung: false
+              tore: 0, ligaTore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0, form: sommerForm(p.form), frische: 100, geschont: false, verletzung: null, kartenSperre: false, junior: false, jugendfoerderung: false
               };
             })
             .filter(p => {
@@ -9543,7 +9739,7 @@ function processSeasonTransitionInner(divisions_, season, managerTeam, relegatio
               gesamtkarriereGelb: (p.gesamtkarriereGelb || 0) + (p.gelb || 0),
               gesamtkarriereRot: (p.gesamtkarriereRot || 0) + (p.rot || 0),
               gesamtkarriereSpiele: (p.gesamtkarriereSpiele || 0) + (p.spiele || 0),
-              tore: 0, ligaTore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0, form: sommerForm(p.form), verletzung: null, kartenSperre: false, junior: false, jugendfoerderung: false
+              tore: 0, ligaTore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0, form: sommerForm(p.form), frische: 100, geschont: false, verletzung: null, kartenSperre: false, junior: false, jugendfoerderung: false
             };
           })
           // Rente: Spieler ab 38 hören auf, ab 35 mit steigender Wahrscheinlichkeit — sonst würden
@@ -10524,6 +10720,7 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
             <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Vorlagen">🅰️</th>
             <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Gelbe Karten">🟨</th>
             <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Rote Karten">🟥</th>
+            <th className={`text-center py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Spielfrische (0–100): sinkt mit Einsätzen, steigt mit Pausen. Unter 60 Leistungsabzug und höheres Verletzungsrisiko.">Frische</th>
             <th className={`text-right py-2 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title="Jahresgehalt">Lohn</th>
             <th className={`text-right py-2 cursor-pointer select-none ${ausgewaehlterSpieler ? "lg:hidden" : ""} ${wertSortierung ? "text-amber-400" : ""}`} title="Marktwert. Antippen sortiert nach Wert, nochmal antippen zurück nach Position." onClick={() => setWertSortierung(v => !v)}>Wert{wertSortierung ? " ▼" : ""}</th>
             <th className="text-center py-2" title="Vertrag bis Saison">Vertrag</th>
@@ -10615,6 +10812,7 @@ function KaderView({ squad, kapitaenId, elfmeterSchuetzeId, freistossSchuetzeId,
               <td className={`py-1.5 text-center text-emerald-300 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{p.vorlagen || 0}</td>
               <td className={`py-1.5 text-center text-emerald-300 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{p.gelb || 0}</td>
               <td className={`py-1.5 text-center text-red-400 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{p.rot || 0}</td>
+              <td className={`py-1.5 text-center font-semibold ${frischeFarbe(p.frische)} ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title={p.geschont ? "Geschont" : `Spielfrische ${Math.round(p.frische ?? 100)}`}>{Math.round(p.frische ?? 100)}</td>
               <td className={`py-1.5 pl-2 text-right text-emerald-500 whitespace-nowrap ${ausgewaehlterSpieler ? "lg:hidden" : ""}`}>{(p.gehalt ?? berechneSpielerlohn(p, managerDivId)).toLocaleString("de-CH")} €</td>
               <td className={`py-1.5 px-1 text-right whitespace-nowrap text-amber-400/90 ${ausgewaehlterSpieler ? "lg:hidden" : ""}`} title={(() => { const w = berechneMarktwert(p, managerDivId); const tr = marktwertTrend(p, w); return `Marktwert ${w.toLocaleString("de-CH")} €${tr ? ` · ${marktwertTrendText(tr)} seit Saisonstart` : ""}`; })()}>
                 {(() => { const w = berechneMarktwert(p, managerDivId); const tr = marktwertTrend(p, w); return <>{marktwertKurz(w)}{tr ? <span className={tr > 0 ? "text-emerald-400" : "text-red-400"}> {tr > 0 ? "↑" : "↓"}</span> : null}</>; })()}
@@ -11960,10 +12158,10 @@ function ElfDesTagesSpielfeld({ elfDesTages, titel, managerTeam }) {
   );
 }
 
-function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, squad, coach, philosophie, onPhilosophieChange, philosophiePaket, onPhilosophiePaketChange, results, managerTeam, managerDivId, season, trophaeen, eingespieltheitStreak = 0, verkaufsliste = [], eingehendeAngebote = [], kapitaenId = null, onAufMarktSetzen, onVonMarktNehmen }) {
+function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, rotationsStufe = "behutsam", onRotationsStufeSetzen, squad, coach, philosophie, onPhilosophieChange, philosophiePaket, onPhilosophiePaketChange, results, managerTeam, managerDivId, season, trophaeen, eingespieltheitStreak = 0, verkaufsliste = [], eingehendeAngebote = [], kapitaenId = null, onAufMarktSetzen, onVonMarktNehmen }) {
   const [ausgewaehlterSpieler, setAusgewaehlterSpieler] = useState(null);
   const formation = useMemo(() => waehleFormation(philosophie, coach?.stil), [philosophie, coach]);
-  const { elf, bank, staerke } = useMemo(() => waehleStartelf(squad, formation), [squad, formation]);
+  const { elf, bank, staerke } = useMemo(() => waehleStartelf(squad, formation, effektiveRotationsStufe(rotationsStufe, coach)), [squad, formation, rotationsStufe, coach]);
   // Nur für die Bank-Anzeige nach Position sortiert (Torwart → Innenverteidiger → Aussenverteidiger →
   // Zentrales Mittelfeld → Offensives Mittelfeld → Stürmer, je Position nach Stärke) — die eigentliche
   // Einwechsel-Logik (waehleEinwechslungen) bleibt unverändert weiterhin rein nach Stärke sortiert.
@@ -12023,6 +12221,28 @@ function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, squad
             ? `Bewertung anhand der letzten ${taktikKennzahlen.spiele} Ligaspiele: Ø ${taktikKennzahlen.toreProSpiel.toFixed(1)} Tore, Ø ${taktikKennzahlen.gegentoreProSpiel.toFixed(1)} Gegentore.`
             : "Noch keine Spiele dieser Saison — Bewertung erscheint nach dem ersten Ligaspiel."}
         </div>
+      </div>
+
+      <div className="border border-emerald-700/50 rounded p-3 mb-4" style={{ backgroundColor: "rgba(16,185,129,0.05)" }}>
+        <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">Rotation nach Spielfrische</div>
+        <p className="text-[11px] text-emerald-600 mb-2">Jeder Einsatz kostet Kraft, Pausen bringen sie zurück (Zahl und Farbe im Kader). Unter 60 gibt es Leistungsabzug und mehr Verletzungen — Torhüter spielen real fast durch und rotieren nicht.</p>
+        <div className="flex gap-1.5 mb-1.5">
+          {["aus", "behutsam", "konsequent"].map(id => (
+            <button key={id} onClick={() => onRotationsStufeSetzen && onRotationsStufeSetzen(id)} className={`flex-1 text-xs py-1.5 rounded border ${rotationsStufe === id ? "bg-emerald-600 border-emerald-500 text-white" : "border-emerald-800 text-emerald-400"}`}>{ROTATIONS_STUFEN[id].label}</button>
+          ))}
+        </div>
+        <p className="text-[11px] text-emerald-500">{ROTATIONS_STUFEN[rotationsStufe]?.info}{rotationsStufe === "aus" && coach && (coach.rating || 0) >= 70 ? ` ${coach.name} greift bei akuter Erschöpfung (unter 48) trotzdem ein.` : ""}</p>
+        {(() => {
+          const muede = squad.filter(sp => !sp.verletzung && (sp.frische ?? 100) < 60 && sp.pos !== "TW");
+          const imEinsatz = muede.filter(sp => elf.some(e => e.id === sp.id));
+          const geschont = squad.filter(sp => sp.geschont);
+          return (
+            <>
+              {muede.length > 0 && <p className="text-[11px] mt-1.5 text-orange-400">{muede.length} müde Spieler (unter 60): {muede.slice(0, 5).map(sp => `${sp.name} ${Math.round(sp.frische)}`).join(", ")}{imEinsatz.length ? ` — davon ${imEinsatz.length} in der Startelf${rotationsStufe === "aus" ? ". Mit «Behutsam» würden sie ersetzt." : "."}` : " — alle geschont."}</p>}
+              {geschont.length > 0 && <p className="text-[11px] mt-1 text-emerald-500">Geschont: {geschont.slice(0, 6).map(sp => sp.name).join(", ")}</p>}
+            </>
+          );
+        })()}
       </div>
 
       <div className="border border-emerald-700/50 rounded p-3 mb-4" style={{ backgroundColor: "rgba(16,185,129,0.05)" }}>
@@ -12128,6 +12348,7 @@ function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, squad
             <div key={sp.id} onClick={() => setAusgewaehlterSpieler(sp)} className={`flex items-center justify-between text-xs px-3 py-1.5 rounded border cursor-pointer hover:bg-emerald-900/20 ${fehlPlatziert ? "border-red-500/40" : "border-emerald-900"}`} style={{ backgroundColor: "var(--fm-surface)" }}>
               <span className="text-emerald-100">
                 {sp.name} <span className="text-emerald-600">· {sp.posName} · {sp.alter}J</span>
+                <span className={`ml-1.5 text-[10px] font-semibold ${frischeFarbe(sp.frische)}`} title="Spielfrische">⚡{Math.round(sp.frische ?? 100)}</span>
                 {fehlPlatziert && (
                   <span className="ml-1.5 text-[9px] uppercase tracking-wide text-red-400 border border-red-500/40 rounded px-1 py-0.5" title="Ausserhalb seiner Position — deutlich schwächere Leistung">
                     ⚠ spielt als {POSITIONEN.find(p => p.code === sp.gespielterPos)?.name || sp.gespielterPos}
@@ -12149,6 +12370,7 @@ function TaktikView({ rotationsprinzipAktiv, onRotationsprinzipUmschalten, squad
           <div key={sp.id} onClick={() => setAusgewaehlterSpieler(sp)} className={`flex items-center justify-between text-xs px-3 py-1 rounded border cursor-pointer hover:bg-emerald-900/20 ${(sp.verletzung || sp.kartenSperre) ? "border-red-500/40 opacity-70" : "border-emerald-900 opacity-60"}`} style={{ backgroundColor: "var(--fm-surface)" }}>
             <span className="text-emerald-200">
               {sp.name} <span className="text-emerald-600">· {sp.posName} · {sp.alter}J</span>
+              <span className={`ml-1.5 text-[10px] font-semibold ${frischeFarbe(sp.frische)}`} title="Spielfrische">⚡{Math.round(sp.frische ?? 100)}</span>
               {sp.verletzung && <span className="ml-1.5 text-[9px] uppercase tracking-wide text-red-400 border border-red-500/40 rounded px-1 py-0.5">🩹 {sp.verletzung.tageVerbleibend}T</span>}
               {sp.kartenSperre && <span className="ml-1.5 text-[9px] uppercase tracking-wide text-red-400 border border-red-500/40 rounded px-1 py-0.5">🟥 Gesperrt</span>}
             </span>
@@ -16552,10 +16774,11 @@ function FanclubView({ fanclub, zufriedenheit, teamName, budget, managerDivId, o
         <div className="border border-red-500/40 rounded p-4 mb-4 space-y-2.5" style={{ backgroundColor: "rgba(239,68,68,0.06)" }}>
           <div className="text-xs uppercase tracking-wider text-red-400/80 flex items-center gap-1.5"><Megaphone size={13} /> Sprachrohr des Fanclubs — {sprecher}</div>
           <p className="text-sm text-red-200 italic">„{fanclub.anliegen.text}"</p>
+          {fanclub.anliegen.aktion === "stadionausbau" && <p className="text-[11px] text-emerald-500">Hilfreich ist hier kein Preisnachlass, sondern mehr Platz: Im Stadion-Tab lässt sich die Kapazität ausbauen.</p>}
           <div className="flex gap-1.5">
-            {fanclub.anliegen.aktion && (
+            {fanclub.anliegen.aktion && fanclub.anliegen.aktion !== "stadionausbau" && (
               <button onClick={onHandeln} className="flex-1 bg-amber-500 hover:bg-amber-400 text-[#0b1f14] font-bold text-xs rounded py-2">
-                {fanclub.anliegen.aktion === "fanartikel" ? "Fanartikel-Preise senken (−15%)" : "Ticketpreise senken (−15%)"}
+                {fanclub.anliegen.aktion === "fanartikel" ? "Fanartikel-Preise senken (−15%)" : fanclub.anliegen.aktion === "verpflegung" ? "Verpflegungspreise senken (−15%)" : "Ticketpreise senken (−15%)"}
               </button>
             )}
             <button onClick={onZurKenntnis} className="flex-1 border border-emerald-700 text-emerald-300 text-xs rounded py-2">Zur Kenntnis genommen</button>
@@ -17617,9 +17840,12 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 181; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "24.11.2026, 12:00";
+const APP_BUILD = 184; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "25.11.2026, 18:00";
 const APP_NEUIGKEITEN = [
+  { build: 184, titel: "Fehlerbehebung Ticketpreise", text: "Die Fans forderten tiefere Ticketpreise, obwohl nie etwas verändert wurde und das Stadion fast voll war. Ursache: Die Preiszufriedenheit verglich den Durchschnittspreis aller Plätze (Sitzplätze 1,8-fach, Logen 20-fach) mit dem Preis eines Stehplatzes, dadurch galten unveränderte Standardpreise als zu teuer, besonders mit Logen. Jetzt wird pro Kategorie gegen denselben Richtwert wie bei der Nachfrage gerechnet. Das Fan-Anliegen «Ticketpreise» und der Fanclub-Vorschlag «Preise für Stammgäste» erscheinen nur noch, wenn die Preise wirklich über dem Richtwert liegen und die letzten drei Heimspiele nicht fast ausverkauft waren. Das Anliegen «Stadion zu klein» bietet keine Preissenkung mehr an, sondern verweist auf den Ausbau; das Anliegen «Verpflegung» senkt jetzt wirklich die Verpflegungspreise (vorher stand «Ticketpreise senken» und es passierte nichts). Die Fan-Zufriedenheit fällt damit insgesamt höher aus." },
+  { build: 183, titel: "Saisonwechsel-Anzeige & Pressekonferenz", text: "Fehlerbehebung: Die Bildschirme beim Saisonwechsel (Saisonauswertung, Jahresbericht, «Saison beendet») waren auf dem iPad nur etwa ein Drittel bis die Hälfte so breit wie der Bildschirm, die Elf des Jahres war rechts abgeschnitten. Sie nutzen jetzt auf Tablet und Desktop die volle Breite. Pressekonferenz: 12 neue Fragen zu den neuen Systemen (Rotation/Spielfrische, Verkaufsliste und Angebote, Kaderwert, Mitarbeiter-Anträge, Marketing-Flop, Markenwert, Imageschäden), dazu Korrekturen: «Zuschauerzahlen gesunken» beruht jetzt auf den echten Heimspiel-Zuschauern, «Matchwinner» nur nach einem Sieg, «Kabine» auch bei offenen Kabinenkonflikten, «mehrere Verletzungen» erst ab zwei Verletzten." },
+  { build: 182, titel: "Spielfrische & Rotation", text: "Jeder Spieler hat jetzt eine Spielfrische (0–100, Zahl und Farbe im Kader und Taktik-Tab). Einsätze kosten Kraft (Startelf mehr, Einwechslung wenig, Torhüter halb), Pausen bringen sie zurück — schneller bei Jungen, langsamer ab 31, besser mit Regeneration im Training, Belastung «Schonen» und einem guten Vereinsarzt. Unter 60 gibt es einen Leistungsabzug und ein höheres Verletzungsrisiko; Pokal- und Europapokalspiele belasten zusätzlich. Neu im Taktik-Tab: Rotation Aus / Behutsam (Standard) / Konsequent. Wer müde pausiert, wird nicht frustriert. Bei «Aus» greift ein erfahrener Trainer (Stärke 70+) bei akuter Erschöpfung trotzdem ein. Zur neuen Saison sind alle wieder frisch." },
   { build: 181, titel: "Marketing überarbeitet", text: "Transparenz: Im Marketing-Tab siehst du, woraus sich dein Markenwert zusammensetzt (Marketingchef, Erfolg, Digital, Teamgeist) und wie er sich pro Saison entwickelt, dazu den Verlauf je Saison. Fehler behoben: Bei Erreichen der Liga-Obergrenze wird nur noch der wirksame Bonus gutgeschrieben und bei Ablauf wieder abgezogen; die Laufzeit stimmt jetzt genau (vorher 4 statt 3 Saisons). Der Neutralpunkt hängt jetzt von der Liga ab (Oberliga 25 statt 50), sodass ein guter Oberliga-Markenwert auch wirklich Bonus bringt. Neu: 7 weitere Massnahmen (Trikot-Sonderedition, Fantag, Benefizspiel, Schul-/Vereinspartnerschaften, Vereins-App & Social-Team, Medienpartnerschaft, Krisenkommunikation) mit eigener Laufzeit, Flop-Risiko (sinkt mit gutem Marketingchef) und Warnung bei Liga-Obergrenze. Krisen: Shitstorm und negative Schlagzeilen als neue Ereignisse, Imageschäden werden durch Marketingchef und Massnahmen gedämpft. Der Markenwert fällt durch normale Entwicklung nicht unter 20 % der Liga-Obergrenze. Marktanalyse (mit Marketingchef): Wirkung des Markenwerts und umsatzoptimale Fanartikel-Preise als Modellrechnung. Chronik: neue Kategorie «Marketing» mit Buchungen und Meilensteinen. Enthält Build 180 (Transfergewinn mit Eigengewächsen)." },
   { build: 180, titel: "Transfergewinn mit Eigengewächsen", text: "Der Rekord «Bester Transfergewinn» zählt jetzt auch Spieler, die du aus der eigenen Jugend befördert und später verkauft hast (ganzer Erlös als Gewinn). Ohne passenden Verkauf steht eine Erklärung statt eines Strichs." },
   { build: 179, titel: "Fehlerbehebung Anzeigefehler", text: "Behebt den Anzeigefehler «Cannot access uninitialized variable», der seit den Stab-Anträgen (Build 178) beim Öffnen des Spielbildschirms auftrat." },
@@ -18200,13 +18426,14 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const [spieltagPopup, setSpieltagPopup] = useState(null); // { spieltag, ligaName, ergebnisse } | null
   const [saisonAbschliessenBestaetigt, setSaisonAbschliessenBestaetigt] = useState(false);
   const [autoSkipAktiv, setAutoSkipAktiv] = useState(false);
-  const { spielerArchiv = [], saisonBilanzen = [], vereinsRekorde = null, kabinenKonflikte = [], kabinenLog = [], chronik = [], divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, darlehen = null, vorstandHistorie = [], gehaltsforderungen = [], schuetzenManuell = false, stab: stabRoh = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "trainer", belastung = "trainer", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, dfbAbgang = null, dfbSperreBis = 0, nationenOffsets = {}, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], pressearchiv = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null, marktwertSnapshots = {}, antraege = { offen: [], aktiv: [], gestellt: {} } } = careerState;
+  const { spielerArchiv = [], saisonBilanzen = [], vereinsRekorde = null, kabinenKonflikte = [], kabinenLog = [], chronik = [], divisions, season, coach, budget, winterpauseGenommen = false, trainingslager = { vorrunde: false, rueckrunde: false }, campBonus = null, letzteEinnahmen = null, jugend = { investition: null, termine: [] }, philosophie = "ausgeglichen", philosophiePaket = "ballbesitz", philosophiePaketSeitSaison = null, interimTrainer = null, trainerVorschlaege = null, trainerZufriedenheit = 70, pokal = null, trophaeen = [], saisonHistorie = [], trikotsponsor = null, werbebanner = { vertraege: [], angebote: [] }, saisonFinanzen = null, darlehen = null, vorstandHistorie = [], gehaltsforderungen = [], schuetzenManuell = false, stab: stabRoh = { assistent: null, torwart: null, defensive: null, stuermer: null, standard: null, mental: null, scout: null, arzt: null, platzwart: null, material: null, marketing: null, unterhalt: null, psychologe: null, akademieleiter: null, jugendtrainer: null, jugendtrainer17: null, jugendtrainer15: null, jugendtrainer13: null, jugendkoordinator: null, ernaehrung: null }, kapitaenId = null, elfmeterSchuetzeId = null, freistossSchuetzeId = null, ziele = null, anzahlSaisonsImAmt = 0, managerVertrag = null, jobAngebot = null, sponsorenAbschluesseDieseSaison = 0, fanshop = initialerFanshop(), imbiss = initialerImbissstand(), vereinsheim = initialerVereinsheim(), trainerZiele = null, letzteHeimspielKategorien = null, eingehendeAngebote = [], trainingsmaterial = initialesTrainingsmaterial(), testspiele = { vorsaison: [], winter: null }, letzteVerletzungen = null, naechsteSpielerLohnzahlung = null, fanclub = { groesse: 500, aktivitaeten: [], anliegen: null }, tvGeldProSpieltag = 0, europapokal = null, verkaufsliste = [], laenderspielPause = null, laenderspielFensterErledigt = [], trainingsschwerpunkt = "trainer", belastung = "trainer", akademie = { level: 0, umbau: null, absolventenGesamt: 0 }, letzterJahresbericht = null, markenwert = 50, marketingKampagnen = {}, karriereAufstiege = 0, karriereAbstiege = 0, letztesEreignis = null, transferAblehnungen = {}, transferGesperrt = {}, vertragAblehnungen = {}, vertragGesperrt = {}, vertragAblehnungenSaison = null, letzteElfDesTages = null, pressekonferenz = null, letzteVertragsablaeufe = null, pressekonferenzenDieseSaison = 0, bankrottWarnstufe = 0, budgetKrise = null, spielerSchwerpunkt = {}, aermelsponsor = null, trainingsanzugsponsor = null, aermelsponsorKandidaten = null, trainingsanzugsponsorKandidaten = null, trikotsponsorKandidaten = null, vereinsinfosGelesenAmDatum = null, sternTransferBoost = null, vereinsHistorien = {}, dfbAngebot = false, dfbAbgang = null, dfbSperreBis = 0, nationenOffsets = {}, bundestrainerAmt = null, letzteStartelfIds = [], eingespieltheitStreak = 0, spielHistorie = [], relegationsspiel = null, karriereEntlassungen = [], zwangsentlassung = null, spielerberaterAngebote = [], eingespieltheitStreakMaxDieseSaison = 0, spielerberaterVerpflichtungenDieseSaison = 0, ehemaligeEigengewaechse = [], meineAusgeliehenenSpieler = [], managerReputation = 25, markenwertStartSaison = null, turnierspiel = null, jugendliga = null, jugendKader = [], jugendDivId = "U19T3", letztesJugendligaErgebnis = null, letzteJugendbeforderung = null, pressefragenGestelltDieseSaison = [], pressearchiv = [], jugendbefoerderungenDieseSaison = 0, fanshopHistorie = [], imbissHistorie = [], finanzenHistorie = [], letztesU19Highlight = null, letzteMarketingAblauf = null, abgelehnteVerkaufsvorschlaege = [], letzterAufstieg = false, letzterAbstieg = false, letzterVereinswechselAngebot = null, letzterSpielerauftrittVerkauf = null, letzteU19Freistellung = null, letzteTopspielerVerlaengerung = null, beraterVerlaengerungsAngebote = [], jugendliga17 = null, jugendKader17 = [], jugendDivId17 = "U17T3", letztesJugendliga17Ergebnis = null, letztesU17Highlight = null, letzteU17NachU19Befoerderung = null, letzterTitelverteidigerMalus = null, wartetAufNachfolgerEffekt = null, letzteTrainerEingewoehnung = null, rotationsprinzipAktiv = false, rotationsStufe = "behutsam", jugendliga15 = null, jugendKader15 = [], jugendDivId15 = "U15T3", letztesJugendliga15Ergebnis = null, letztesU15Highlight = null, letzteU15NachU17Befoerderung = null, jugendliga13 = null, jugendKader13 = [], jugendDivId13 = "U13T3", letztesJugendliga13Ergebnis = null, letztesU13Highlight = null, letzteU13NachU15Befoerderung = null, letzterMeistertitelPK = null, letzterTorschuetzenkoenigPK = null, letzterPokalsiegPK = null, letzterEuropapokalsiegPK = null, letzterPokalFinaleVerlorenPK = null, letzterEuropapokalFinaleVerlorenPK = null, letzterWmEmSiegPK = null, letzterWmEmFinalVerlorenPK = null, pokalFinaleVerlorenDieseSaisonMarker = false, europapokalFinaleVerlorenDieseSaisonMarker = false, jugendliga11 = null, jugendKader11 = [], letztesU11Highlight = null, letzteU11NachU13Befoerderung = null, letztesJugendliga11Ergebnis = null, jugendliga9 = null, jugendKader9 = [], letztesU9Highlight = null, letzteU9NachU11Befoerderung = null, letztesJugendliga9Ergebnis = null, jugendKader7 = [], letzteU7NachU9Befoerderung = null, personalabteilungen = { juniorassistenten: "minimal", sicherheit: "minimal", medizin: "minimal", sichtung: "minimal", platzpflege: "minimal" }, naechstePersonalabteilungenLohnzahlung = null, ruecktritt = null, marktwertSnapshots = {}, antraege = { offen: [], aktiv: [], gestellt: {} } } = careerState;
   // Effektiver Stab: laufende Investitionen erhöhen die Stärke der Mitarbeiter, die sie betreiben (siehe effektiverStab).
   // Wird ein Stab in den Spielstand geschrieben, immer stabRohMitglied() bzw. stabRoh verwenden.
   const stab = effektiverStab(stabRoh, antraege, careerState.datum);
   AKTUELLE_NATIONEN_OFFSETS = nationenOffsets || {};
   PREIS_SAISON = season;
   MARKEN_NEUTRAL = markenwertNeutral(findManagerDivision(divisions, profile.team) || managerDivId);
+  ROTATIONS_STUFE_GLOBAL = effektiveRotationsStufe(rotationsStufe, coach);
   KARRIERE_DATEN = { spielerArchiv, chronik, eigeneIds: new Set(((divisions || {})[findManagerDivision(divisions, profile.team)]?.squads?.[profile.team] || []).map(q => q.id)), season, snapshots: marktwertSnapshots, divId: findManagerDivision(divisions, profile.team) };
   // Marktwert-Schnappschuss je eigenem Spieler (Saisonstart bzw. Verpflichtung) als Grundlage für den Trendpfeil
   useEffect(() => {
@@ -18390,8 +18617,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   const zufriedenheitsBonus = coach ? (trainerZufriedenheit - 70) / 15 : 0;
   const aktuelleFormation = useMemo(() => waehleFormation(philosophie, coach?.stil), [philosophie, coach]);
   const aktuelleStartelf = useMemo(
-    () => wendeRotationsprinzipAn(waehleStartelf(division.squads[profile.team], aktuelleFormation), rotationsprinzipAktiv, datum),
-    [division.squads, profile.team, aktuelleFormation, rotationsprinzipAktiv, datum]
+    () => wendeRotationsprinzipAn(waehleStartelf(division.squads[profile.team], aktuelleFormation, effektiveRotationsStufe(rotationsStufe, coach)), rotationsprinzipAktiv, datum),
+    [division.squads, profile.team, aktuelleFormation, rotationsprinzipAktiv, datum, rotationsStufe, coach]
   );
   const taktikBrauchtAktion = aktuelleStartelf.elf.some(sp => sp.gespielterPos && sp.gespielterPos !== sp.pos);
   const formationsBonus = (aktuelleStartelf.staerke - teamStrength(division.squads[profile.team])) * 0.6;
@@ -19098,6 +19325,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         const einwechslungenEuro = letzterEuroBericht ? waehleEinwechslungen(aktuelleStartelf.bank, rotationsprinzipAktiv) : [];
         const spielerDesSpieltagesEuro = letzterEuroBericht ? bestimmeSpielerDesSpieltages({ tore: letzteEuroEreignisse.torSpieler, vorlagen: letzteEuroEreignisse.vorlagenSpieler }, aktuelleStartelf.elf, euroGegentoreDiesesSpiel) : null;
         if (spielerDesSpieltagesEuro) squadNachEuroSpiel = erhoeheMotmZaehler(squadNachEuroSpiel, spielerDesSpieltagesEuro.id);
+        if (letzterEuroBericht) squadNachEuroSpiel = aktualisiereFrische(squadNachEuroSpiel, { startIds: new Set(aktuelleStartelf.elf.map(p => p.id)), einwechselIds: new Set(einwechslungenEuro.map(p => p.id)), tage: 0 });
 
         setCareerState(cs => ({
           ...cs,
@@ -19272,7 +19500,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           ...neueDivisionsPokal,
           [managerDivId]: {
             ...neueDivisionsPokal[managerDivId],
-            squads: { ...neueDivisionsPokal[managerDivId].squads, [profile.team]: squadNachVerletzungenPokal }
+            squads: { ...neueDivisionsPokal[managerDivId].squads, [profile.team]: aktualisiereFrische(squadNachVerletzungenPokal, { startIds: aktiveIds, tage: 3 }) }
           }
         };
       }
@@ -19826,6 +20054,33 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         const pkEuropasiegJetzt = (vereinsHistorien[profile.team] || []).some(t => t.saison === season && t.typ === "europapokal");
         const pkKontext = {
           hatVerletzung: squadNachSpieltag.some(p => p.verletzung),
+          verletzteAnzahl: squadNachSpieltag.filter(p => p.verletzung).length,
+          // Zuschauerzahlen: echter Rückgang der letzten drei Heimspiele gegenüber den drei davor
+          zuschauerGesunken: (() => {
+            const z = zuschauerAusSpielHistorie(spielHistorie).map(h => h.zuschauer);
+            if (z.length < 6) return false;
+            const mw = a => a.reduce((t, x) => t + x, 0) / a.length;
+            return mw(z.slice(-3)) < mw(z.slice(-6, -3)) * 0.95;
+          })(),
+          kabinenKonfliktOffen: (kabinenKonflikte || []).length > 0,
+          // Rotation/Spielfrische (siehe aktualisiereFrische): müde Spieler der gerade eingesetzten Startelf
+          // bzw. müde Spieler, die nicht gespielt haben (= geschont)
+          muedeInStartelf: aktuelleStartelf.elf.filter(p => p.pos !== "TW" && (p.frische ?? 100) < 60).length,
+          geschontAnzahl: (() => { const ids = new Set(aktuelleStartelf.elf.map(p => p.id)); return squadNachSpieltag.filter(p => !ids.has(p.id) && !p.verletzung && !p.leihspieler && p.pos !== "TW" && (p.frische ?? 100) < 65).length; })(),
+          verkaufslisteAnzahl: (verkaufsliste || []).filter(id => squadNachSpieltag.some(p => p.id === id)).length,
+          eingehendeAngeboteAnzahl: (eingehendeAngebote || []).length,
+          kaderwertRang: (() => {
+            const d = neueDivisions[managerDivId];
+            const l = d.teams.map(tm => ({ tm, w: (d.squads[tm] || []).reduce((t, p) => t + (p.leihspieler ? 0 : berechneMarktwert(p, managerDivId)), 0) })).sort((a, b) => b.w - a.w);
+            const rang = l.findIndex(x => x.tm === profile.team) + 1;
+            return rang ? { rang, von: l.length } : null;
+          })(),
+          antragOffenAnzahl: ((antraege || {}).offen || []).length,
+          antragJuengstGenehmigt: ((antraege || {}).aktiv || []).some(a => a.start && datum <= addTage(a.start, 28)),
+          marketingFlopDieseSaison: Object.values(marketingKampagnen || {}).some(e => e.flop && e.gebuchtSaison === season),
+          markenwertHoch: markenwert >= markenwertDeckel(managerDivId) * 0.85,
+          markenwertTief: markenwert <= markenwertDeckel(managerDivId) * 0.3,
+          imageKriseJuengst: ["social_shitstorm", "medien_skandal", "fanproteste", "hooligan_vorfall"].includes(careerState.letztesEreignis?.id),
           schwacherSpielerVorhanden: squadNachSpieltag.some(p => (p.form || 60) < 40),
           letztesErgebnis: managerBericht ? (
             (managerBericht.istHeim ? managerBericht.tHeim > managerBericht.tGast : managerBericht.tGast > managerBericht.tHeim) ? "sieg" :
@@ -20191,8 +20446,13 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
           anzahlSaisonsImAmt, trophaeenAnzahl: trophaeen.length, stadion: division.stadien[profile.team], managerDivId, fanshop, imbiss, vereinsheim,
           unterstuetzungsBonus: fanclub.unterstuetzungsBonus, markenwert
         });
-        const schwaechsterEintrag = Object.entries(zufr).sort((a, b) => a[1] - b[1])[0];
-        if (schwaechsterEintrag[1] < 38 && Math.random() < 0.15) {
+        // Ein Preis-Anliegen ist nur glaubwürdig, wenn die Tickets wirklich über dem Richtwert liegen UND das
+        // Stadion nicht fast ausverkauft ist (bei vollem Haus sind die Preise offensichtlich kein Hindernis).
+        const stadionFan = division.stadien[profile.team];
+        const auslastungFan = letzteAuslastung(stadionFan);
+        const ticketAnliegenMoeglich = ticketPreisVerhaeltnis(stadionFan, managerDivId) > 1.05 && auslastungFan !== null && auslastungFan < 0.9;
+        const schwaechsterEintrag = Object.entries(zufr).filter(([bereich]) => bereich !== "ticketpreise" || ticketAnliegenMoeglich).sort((a, b) => a[1] - b[1])[0];
+        if (schwaechsterEintrag && schwaechsterEintrag[1] < 38 && Math.random() < 0.15) {
           anliegen = { bereich: schwaechsterEintrag[0], ...FANCLUB_ANLIEGEN_KATALOG[schwaechsterEintrag[0]] };
         }
       }
@@ -20208,7 +20468,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       }
       if (!vorschlag) {
         const squadFan = neueDivisions[managerDivId].squads[profile.team];
-        const ctxFan = { managerDivId, spNr, liebling: ermittleFanliebling(squadFan, season, kapitaenId), lieblingZusage: fanclub.lieblingZusage, letzteId: letzterVorschlagId };
+        const auslastungVorschlag = letzteAuslastung(division.stadien[profile.team]);
+        const ctxFan = { managerDivId, spNr, liebling: ermittleFanliebling(squadFan, season, kapitaenId), lieblingZusage: fanclub.lieblingZusage, letzteId: letzterVorschlagId,
+          preiseGesenktSinnvoll: ticketPreisVerhaeltnis(division.stadien[profile.team], managerDivId) > 1.05 && auslastungVorschlag !== null && auslastungVorschlag < 0.9 };
         const faellig = fanclubKalender(gesamtSp).find(t => t.spieltag <= spNr && spNr - t.spieltag <= 3 && !kalenderErledigt.includes(t.id));
         if (faellig) {
           vorschlag = baueFanclubVorschlag(faellig.aktion, ctxFan, faellig);
@@ -20655,14 +20917,23 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     );
     // Trainingsschwerpunkt wirkt sich zusätzlich leicht auf die Form aus (Kondition kostet kurzfristig
     // etwas Frische, Regeneration hebt sie) — jetzt pro Spieler statt kaderweit einheitlich
-    const squadNachSchwerpunktForm = squadNachVerletzungen.map(p => {
+    // Spielfrische: Einsatz kostet Kraft, Pause/Regeneration/Arzt bringen sie zurück
+    const frischeErholungsBonus = (trainingsplanHeute.schwerpunkt === "regeneration" ? 4 : 0)
+      + (trainingsplanHeute.belastung === "schonen" ? 3 : trainingsplanHeute.belastung === "vollgas" ? -2 : 0)
+      + (stab.arzt ? Math.max(0, (stab.arzt.rating - 30) / 35) : 0);
+    const squadNachFrische = aktualisiereFrische(squadNachVerletzungen, {
+      startIds: new Set(spieltHeute ? aktuelleStartelf.elf.map(p => p.id) : []),
+      einwechselIds: new Set(spieltHeute ? einwechslungen.map(p => p.id) : []),
+      tage: 7, erholungsBonus: frischeErholungsBonus
+    });
+    const squadNachSchwerpunktForm = squadNachFrische.map(p => {
       const delta = schwerpunktFuerSpieler(p.id, trainingsplanHeute.individuell, trainingsplanHeute.schwerpunkt).formDelta;
       return delta !== 0 ? { ...p, form: Math.max(0, Math.min(100, (p.form ?? 60) + delta)) } : p;
     });
     // Bankfrustration: wer heute nicht in der Startelf stand, sammelt Frustration — wie schnell hängt
     // von der Persönlichkeit ab
     const squadNachBank = spieltHeute
-      ? verarbeiteBankfrustration(squadNachSchwerpunktForm, aktuelleStartelf.elf.map(p => p.id))
+      ? verarbeiteBankfrustration(squadNachSchwerpunktForm, [...aktuelleStartelf.elf.map(p => p.id), ...squadNachSchwerpunktForm.filter(p => p.geschont).map(p => p.id)])
       : squadNachSchwerpunktForm;
     neueDivisions[managerDivId] = {
       ...neueDivisions[managerDivId],
@@ -22086,6 +22357,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       // bisherigen careerState), ging der Schalter dadurch bei jedem Saisonübergang verloren und fiel
       // auf seinen Standardwert (aus) zurück, statt bis zur manuellen Deaktivierung aktiv zu bleiben.
       rotationsprinzipAktiv,
+      rotationsStufe,
       jugendliga17: jugendliga17ErgebnisVorAlterung.jugendliga,
       jugendDivId17: jugendliga17ErgebnisVorAlterung.jugendDivId,
       jugendKader17: u17KaderMitU15Zugaengen,
@@ -22276,6 +22548,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
 
   const onRotationsprinzipUmschalten = () => {
     setCareerState(cs => ({ ...cs, rotationsprinzipAktiv: !cs.rotationsprinzipAktiv }));
+  };
+  const onRotationsStufeSetzen = (stufe) => {
+    if (!ROTATIONS_STUFEN[stufe]) return;
+    setCareerState(cs => ({ ...cs, rotationsStufe: stufe }));
   };
 
   const onBannerAnnehmen = (angebot) => {
@@ -23396,7 +23672,11 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       if (!cs.fanclub.anliegen) return cs;
       const { bereich } = cs.fanclub.anliegen;
       const div = { ...cs.divisions[managerDivId], stadien: { ...cs.divisions[managerDivId].stadien } };
-      if (bereich === "ticketpreise" || bereich === "stadion") {
+      if (bereich === "verpflegung") {
+        const senke = (artikel) => { const neu = { ...artikel }; IMBISS_ARTIKEL_TYPEN.forEach(t => { if (neu[t.id]) neu[t.id] = { ...neu[t.id], verkaufspreis: Math.max(t.einkaufspreis, Math.round(neu[t.id].verkaufspreis * 0.85 * 10) / 10) }; }); return neu; };
+        return { ...cs, imbiss: senke(cs.imbiss || {}), vereinsheim: senke(cs.vereinsheim || {}), fanclub: { ...cs.fanclub, anliegen: null } };
+      }
+      if (bereich === "ticketpreise") {
         const stadion = div.stadien[profile.team];
         const gesenkt = {};
         STADION_KATEGORIEN.forEach(k => { gesenkt[k] = { ...stadion[k], ticketpreis: Math.max(1, Math.round(stadion[k].ticketpreis * 0.85)) }; });
@@ -24326,7 +24606,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const saisonStatistik = ermittleSaisonStatistiken(division);
       return (
         <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
-          <div className="w-full max-w-3xl border border-amber-400/50 rounded-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto" style={{backgroundColor: "var(--fm-surface-raised)"}}>
+          <div className="w-full max-w-3xl md:max-w-5xl border border-amber-400/50 rounded-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto" style={{backgroundColor: "var(--fm-surface-raised)"}}>
             <div className="text-center">
               <Trophy className="mx-auto text-amber-400 mb-2" size={28} />
               <h2 className="text-xl font-bold">Saisonauswertung {season}/{(season + 1) % 100}</h2>
@@ -24381,7 +24661,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       });
       return (
         <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
-          <div className="w-full max-w-lg border border-amber-400/50 rounded-lg p-6 space-y-4" style={{backgroundColor: "var(--fm-surface-raised)"}}>
+          <div className="w-full max-w-lg md:max-w-4xl border border-amber-400/50 rounded-lg p-6 space-y-4" style={{backgroundColor: "var(--fm-surface-raised)"}}>
             <div className="text-center">
               <ClipboardList className="mx-auto text-amber-400 mb-2" size={28} />
               <h2 className="text-xl font-bold">Jahresbericht Saison {season}/{(season + 1) % 100}</h2>
@@ -24408,7 +24688,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     const brauchtEntscheidung = (seasonEndInfo.vertragLaeuftAusSnapshot && vertragsEntscheidung === null) || (seasonEndInfo.managerVertragLaeuftAusSnapshot && managerVertragsEntscheidung === null);
     return (
       <div className="min-h-screen text-emerald-50 flex items-center justify-center p-4 font-mono" style={{background: "var(--fm-bg)"}}>
-        <div className="w-full max-w-md border border-amber-400/50 rounded-lg p-6 text-center space-y-4" style={{backgroundColor: "var(--fm-surface-raised)"}}>
+        <div className="w-full max-w-md md:max-w-3xl border border-amber-400/50 rounded-lg p-6 text-center space-y-4" style={{backgroundColor: "var(--fm-surface-raised)"}}>
           <Trophy className="mx-auto text-amber-400" size={32} />
           <h2 className="text-xl font-bold">Saison {season}/{(season + 1) % 100} beendet</h2>
           <p className="text-emerald-300 text-sm">
@@ -25003,6 +25283,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onAufMarktSetzen={onSpielerAufMarktSetzen}
               onVonMarktNehmen={onSpielerVonMarktNehmen}
               rotationsprinzipAktiv={rotationsprinzipAktiv}
+              rotationsStufe={rotationsStufe}
+              onRotationsStufeSetzen={onRotationsStufeSetzen}
               onRotationsprinzipUmschalten={onRotationsprinzipUmschalten}
               squad={division.squads[profile.team]}
               coach={coach}
