@@ -1468,6 +1468,42 @@ function eigengewaechsBereitschaft(sp, e, season, squadDesVereins, spielerDivId,
 }
 
 /* =========================================================================
+   ABSOLVENTEN-REGISTER — jeder Spieler aus der eigenen Akademie steht dauerhaft mit Namen im Register,
+   auch wenn er den Verein verlassen hat oder nicht mehr auffindbar ist (Karriereende, ohne Verein).
+   ========================================================================= */
+function absolventenRegisterAbgleich(register, cs, teamName, season) {
+  const reg = register || [];
+  const live = new Map(); // id -> { p, ort, verein }
+  Object.values(cs.divisions || {}).forEach(d => Object.entries(d.squads || {}).forEach(([team, k]) => k.forEach(q => {
+    live.set(q.id, { p: q, verein: team, ort: team === teamName ? (q.leihspieler ? "Leihgabe" : "Profikader") : (q.leihspieler && q.leihVerein === teamName ? "verliehen" : "extern") });
+  })));
+  [["U19", cs.jugendKader], ["U17", cs.jugendKader17], ["U15", cs.jugendKader15], ["U13", cs.jugendKader13], ["U11", cs.jugendKader11], ["U9", cs.jugendKader9], ["U7", cs.jugendKader7]]
+    .forEach(([label, k]) => (k || []).forEach(q => live.set(q.id, { p: q, verein: teamName, ort: label })));
+  const bekannt = new Set(reg.map(e => e.id));
+  let geaendert = false;
+  const neu = reg.map(e => {
+    const l = live.get(e.id);
+    let n = e;
+    if (l) {
+      n = { ...e, name: l.p.name, pos: l.p.pos, posName: l.p.posName, ratingLetzt: l.p.rating, alterLetzt: l.p.alter, verein: l.verein, ort: l.ort, status: "aktiv" };
+      if (n.ratingLetzt === e.ratingLetzt && n.alterLetzt === e.alterLetzt && n.verein === e.verein && n.ort === e.ort && n.status === e.status) n = e;
+    } else if (e.status === "aktiv" || !e.status) {
+      n = { ...e, status: (e.alterLetzt || 0) >= 34 ? "ende" : "ohneVerein", letzteSaison: season };
+    }
+    if (n !== e) geaendert = true;
+    return n;
+  });
+  // Neue Absolventen (und Altbestand beim ersten Lauf) ins Register aufnehmen
+  live.forEach(({ p, verein, ort }, id) => {
+    if (bekannt.has(id) || !p.akademieProdukt) return;
+    if (p.ausgebildetVon && p.ausgebildetVon !== teamName) return;
+    neu.push({ id, name: p.name, pos: p.pos, posName: p.posName, saisonEintritt: season, ratingEintritt: p.rating, ratingLetzt: p.rating, alterLetzt: p.alter, verein, ort, status: "aktiv" });
+    geaendert = true;
+  });
+  return geaendert ? neu : reg;
+}
+
+/* =========================================================================
    VERTRAGSKLAUSELN — wie im echten Fussball steht in einem Vertrag mehr als Laufzeit und Gehalt:
    Handgeld, Leistungsprämien, Ausstiegsklausel und Einsatzgarantie (bei Verlängerungen), sowie
    Weiterverkaufsbeteiligung und Rückkaufoption (bei Verkäufen). Jede Klausel hat einen Preis und
@@ -16091,7 +16127,7 @@ function JugendVertragsPanel({ spieler, managerDivId, onBestaetigen, onAbbrechen
   );
 }
 
-function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen, jugendliga17, jugendDivId17, jugendKader17, onJugendspieler17Hochziehen, jugendliga15, jugendDivId15, jugendKader15, jugendliga13, jugendDivId13, jugendKader13, jugendliga11, jugendKader11, jugendliga9, jugendKader9, jugendKader7, letzterJugendVertrag, onJugendVerleihen, alleDivisionen, trophaeen, season }) {
+function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen, jugendliga17, jugendDivId17, jugendKader17, onJugendspieler17Hochziehen, jugendliga15, jugendDivId15, jugendKader15, jugendliga13, jugendDivId13, jugendKader13, jugendliga11, jugendKader11, jugendliga9, jugendKader9, jugendKader7, letzterJugendVertrag, onJugendVerleihen, alleDivisionen, trophaeen, season, absolventenRegister = [] }) {
   const [vertragFuer, setVertragFuer] = useState(null);
   const [absolventenAnsicht, setAbsolventenAnsicht] = useState(null); // "kader" | "gesamt" | null
   const [absolventDetail, setAbsolventDetail] = useState(null);
@@ -16123,7 +16159,13 @@ function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, t
       absolventenAuswaertsListe.push({ p: q, ort: q.leihspieler && q.leihVerein === teamName ? `verliehen an ${team}` : `jetzt bei ${team}` });
     });
   }));
-  const absolventenGesamtListe = [...absolventenImKaderListe, ...absolventenAuswaertsListe].sort((a, b) => b.p.rating - a.p.rating);
+  const absolventenLiveIds = new Set([...absolventenImKaderListe, ...absolventenAuswaertsListe].map(x => x.p.id));
+  // Wer nicht mehr in der Spielwelt existiert, steht trotzdem mit Namen und letztem bekannten Stand im Register
+  const absolventenEhemalige = (absolventenRegister || []).filter(e => !absolventenLiveIds.has(e.id)).map(e => ({
+    p: { id: e.id, name: e.name, pos: e.pos, posName: e.posName, alter: e.alterLetzt, rating: e.ratingLetzt, nurRegister: true, saisonEintritt: e.saisonEintritt, ratingEintritt: e.ratingEintritt },
+    ort: e.status === "ende" ? `Karriereende${e.letzteSaison ? ` (Saison ${e.letzteSaison})` : ""}` : `ohne Verein${e.letzteSaison ? ` seit ${e.letzteSaison}` : ""}${e.verein ? `, zuletzt ${e.verein}` : ""}`
+  }));
+  const absolventenGesamtListe = [...absolventenImKaderListe, ...absolventenAuswaertsListe, ...absolventenEhemalige].sort((a, b) => b.p.rating - a.p.rating);
   const absolventenNichtAuffindbar = Math.max(0, absolventenGesamt - absolventenGesamtListe.length);
   const naechsteStufeKosten = level < akademieMaxLevelLiga ? akademieKosten(managerDivId, level + 1) : null;
   const naechsteStufeBautage = level < akademieMaxLevelLiga ? AKADEMIE_BAUTAGE_PRO_LEVEL[level] : null;
@@ -16326,10 +16368,21 @@ function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, t
             </button>
           ))}
           {(absolventenAnsicht === "kader" ? absolventenImKaderListe : absolventenGesamtListe).length === 0 && <div className="text-xs text-emerald-700 text-center py-3">Noch keine Absolventen.</div>}
-          {absolventenAnsicht === "gesamt" && absolventenNichtAuffindbar > 0 && <div className="text-[10px] text-emerald-700 pt-1">{absolventenNichtAuffindbar} weitere Absolvent{absolventenNichtAuffindbar === 1 ? "" : "en"} nicht mehr auffindbar (z.B. Karriereende oder ohne Verein).</div>}
+          {absolventenAnsicht === "gesamt" && absolventenNichtAuffindbar > 0 && <div className="text-[10px] text-emerald-700 pt-1">{absolventenNichtAuffindbar} Absolvent{absolventenNichtAuffindbar === 1 ? "" : "en"} aus der Zeit vor dem Absolventen-Register: Der Name wurde damals nicht gespeichert und ist nicht mehr verfügbar.</div>}
         </div>
       )}
-      {absolventDetail && (
+      {absolventDetail?.nurRegister && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(6,10,18,0.82)" }} onClick={() => setAbsolventDetail(null)}>
+          <div className="w-full max-w-sm border border-amber-400/50 rounded-lg p-5 space-y-2" style={{ backgroundColor: "var(--fm-bg, #0b1f14)" }} onClick={e => e.stopPropagation()}>
+            <div className="text-lg font-bold text-amber-300">{absolventDetail.name}</div>
+            <div className="text-xs text-emerald-500">{absolventDetail.posName || absolventDetail.pos} · zuletzt {absolventDetail.alter} Jahre · zuletzt Stärke {absolventDetail.rating}</div>
+            <div className="text-xs text-emerald-400">Akademie-Absolvent seit Saison {absolventDetail.saisonEintritt}, Stärke beim Eintritt {absolventDetail.ratingEintritt}.</div>
+            <div className="text-[11px] text-emerald-600">Der Spieler existiert nicht mehr in der Spielwelt, deshalb gibt es nur den letzten bekannten Stand.</div>
+            <button onClick={() => setAbsolventDetail(null)} className="w-full border border-emerald-700 text-emerald-300 rounded py-1.5 text-xs">Schliessen</button>
+          </div>
+        </div>
+      )}
+      {absolventDetail && !absolventDetail.nurRegister && (
         <SpielerDetailModal spieler={absolventDetail} managerDivId={managerDivId} season={season} trophaeen={trophaeen} teamName={teamName} portrait={spielerPortraitFuer(absolventDetail.id)} onClose={() => setAbsolventDetail(null)} />
       )}
       </>)}
@@ -18413,9 +18466,10 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 193; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "26.11.2026, 18:10";
+const APP_BUILD = 194; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "26.11.2026, 18:50";
 const APP_NEUIGKEITEN = [
+  { build: 194, titel: "Absolventen-Register", text: "Jeder Akademie-Absolvent steht jetzt dauerhaft mit Namen in einem Register, auch nach Verkauf, Abgang, Karriereende oder wenn er verdrängt wurde und keinen Verein mehr hat. In der Liste «Absolventen insgesamt» erscheinen auch diese Ehemaligen mit letzter bekannter Stärke, Alter und Status (Karriereende, ohne Verein, zuletzt bei X). Nur Absolventen aus der Zeit vor dieser Änderung, deren Name nicht mehr gespeichert ist, werden als Zahl vermerkt." },
   { build: 193, titel: "Absolventen anklickbar", text: "In der Jugendabteilung sind «Absolventen im Kader» und «Absolventen insgesamt» jetzt antippbar. Die Liste zeigt jeden Absolventen mit Position, Alter, Stärke, Ort (Profikader, Jugendmannschaft, verliehen oder bei einem anderen Verein) und Vertragsende; ein Tipp auf einen Spieler öffnet seine komplette Detailansicht. «Im Kader» zählt jetzt auch alle Jugendmannschaften (U19 bis U7), «insgesamt» zusätzlich verkaufte und verliehene Absolventen; nicht mehr auffindbare werden als Zahl vermerkt." },
   { build: 192, titel: "Leihe nach dem letzten Spieltag", text: "Wer nach dem letzten Spieltag verliehen wird (z.B. ein frisch hochgezogener Jugendspieler), bleibt jetzt für die ganze neue Saison beim Leihverein und kehrt erst am Ende der neuen Saison zurück. Vorher wäre die Leihe schon beim Saisonwechsel wieder vorbei gewesen." },
   { build: 191, titel: "Spieler des Spieltages & Kader nach Saisonende", text: "Spieler des Spieltages: Das Spielergebnis zählt jetzt mit. Spieler der siegreichen Mannschaft bekommen einen Bonus, die der Verlierer einen Abzug (wächst mit der Tordifferenz), und Gegner mit Torbeteiligung bekommen ihren Grundwert. Bei einer Niederlage wird so fast immer ein Gegner gewählt, ausser bei einer herausragenden Einzelleistung. Fehlerbehebung: Was du nach dem letzten Spieltag noch am eigenen Kader machst (Jugendspieler hochziehen, verleihen, Verträge verlängern, Spieler verkaufen), ging beim Saisonstart verloren, weil der Saisonübergang schon am letzten Spieltag berechnet wird. Jetzt wird der Kader vor dem Saisonstart damit abgeglichen. Wer nach dem letzten Spieltag verliehen wird, bleibt für die ganze neue Saison beim Leihverein." },
@@ -19091,6 +19145,16 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
   };
   const managerDivId = findManagerDivision(divisions, profile.team);
   const division = divisions[managerDivId];
+  // Absolventen-Register nachführen (Namen bleiben dauerhaft erhalten, auch nach Abgang oder Karriereende)
+  useEffect(() => {
+    const aktuell = careerState.absolventenRegister || [];
+    if (absolventenRegisterAbgleich(aktuell, careerState, profile.team, careerState.season) === aktuell) return;
+    setCareerState(cs => {
+      const alt = cs.absolventenRegister || [];
+      const neu = absolventenRegisterAbgleich(alt, cs, profile.team, cs.season);
+      return neu === alt ? cs : { ...cs, absolventenRegister: neu };
+    });
+  }, [careerState.divisions, careerState.jugendKader, careerState.jugendKader17, careerState.jugendKader15, careerState.jugendKader13, careerState.jugendKader11, careerState.jugendKader9, careerState.jugendKader7, careerState.season]);
   // Dieselbe Kalenderberechnung wie SpielplanView — als einzige "Quelle der Wahrheit" fürs Datum
   // eines konkreten Spieltags. Die laufend fortschreitende Variable "datum" (aktuelles Simulations-
   // datum) kann durch reine Pokal-/Europapokal-Wochen, in denen die eigene Liga nicht spielt, leicht
@@ -22822,6 +22886,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       trophaeen: trophaeenNachTurnier,
       letzteAusbildungsentschaedigung: ausbildungsentschaedigungen.length ? { zahlungen: ausbildungsentschaedigungen, gesamt: ausbildungsentschaedigungGesamt } : null,
       letzteKlauselEreignisse: klauselEreignisse ? { ...klauselEreignisse, ausstiegsSpieler: undefined } : null,
+      absolventenRegister: careerState.absolventenRegister || [],
       ehemaligeEigengewaechse: ehemaligeNeu,
       verkaufsRechte: verkaufsRechteNeu,
       vermieterAusbauAngekuendigt: vermieterErgebnisNachAufstieg?.ankuendigung || null,
@@ -26226,6 +26291,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               letzterJugendVertrag={careerState.letzterJugendVertrag}
               onJugendVerleihen={onJugendVerleihen}
               alleDivisionen={divisions}
+              absolventenRegister={careerState.absolventenRegister || []}
               trophaeen={trophaeen}
               season={season}
               jugendbefoerderungenDieseSaison={jugendbefoerderungenDieseSaison}
