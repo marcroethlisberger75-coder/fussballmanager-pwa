@@ -8876,6 +8876,14 @@ function wendeEreignisseUndKartenAn(squad, ereignisse, istLigaSpiel = false) {
 // bessere Spieler ist. Gilt einheitlich für Liga, Pokal, Europapokal und Testspiel.
 function bestimmeSpielerDesSpieltages(bericht, startelf, gegentore = null, gegnerBericht = null) {
   const punkte = {};
+  // Ergebnis gewichten: Spieler der siegreichen Mannschaft bekommen einen Bonus, die der Verlierer einen
+  // Abzug (wächst mit der Tordifferenz). Ohne Gegenbericht (z.B. Testspiel ohne Gegner-Daten) bleibt es neutral.
+  const eigeneTore = bericht.tore.length;
+  const diff = gegentore === null || gegentore === undefined ? 0 : eigeneTore - gegentore;
+  const ergebnisBonus = (eigeneSeite) => {
+    const d = eigeneSeite ? diff : -diff;
+    return d > 0 ? Math.min(2.5, 0.5 + 0.75 * d) : d < 0 ? -Math.min(3, 0.5 + 0.75 * -d) : 0;
+  };
   const addiere = (p, wert) => {
     if (!p) return;
     punkte[p.id] = punkte[p.id] || { player: p, punkte: 0 };
@@ -8891,10 +8899,19 @@ function bestimmeSpielerDesSpieltages(bericht, startelf, gegentore = null, gegne
     // Zu-Null-Bonus für Abwehr und Torwart: eine reale, sonst unsichtbare Einzelleistung, wenn das
     // eigene Team kein Gegentor kassiert hat.
     if (gegentore === 0 && (p.pos === "TW" || p.pos === "IV" || p.pos === "AV")) addiere(p, 2.5);
+    addiere(p, ergebnisBonus(true));
   });
   if (gegnerBericht) {
     gegnerBericht.tore.forEach(p => addiere(p, 4));
     gegnerBericht.vorlagen.forEach(p => addiere(p, 2));
+    // Auch ein Gegner mit Torbeteiligung bekommt Grundwert (Stärke, Tagesform) und den Ergebnisbonus seiner Mannschaft
+    const beteiligt = new Map();
+    [...gegnerBericht.tore, ...gegnerBericht.vorlagen].forEach(p => { if (p && !beteiligt.has(p.id)) beteiligt.set(p.id, p); });
+    beteiligt.forEach(p => {
+      addiere(p, (p.rating || 60) / 20);
+      addiere(p, Math.random() * 1.4);
+      addiere(p, ergebnisBonus(false));
+    });
   }
   const sortiert = Object.values(punkte).sort((a, b) => b.punkte - a.punkte);
   return sortiert[0]?.player || (startelf && startelf[0]) || null;
@@ -10064,6 +10081,68 @@ function divisionName(divId) {
   return OBERLIGA_REGIONEN.find(r => r.id === divId)?.name
     || REGIONALLIGA_REGIONEN.find(r => r.id === divId)?.name
     || (def ? def.name : "Oberliga");
+}
+
+// Der Saisonübergang (seasonEndInfo) wird schon beim letzten Spieltag berechnet. Was der Manager danach noch
+// tut (Jugendspieler hochziehen, verleihen, Verträge verlängern, verkaufen), steckt deshalb nicht im
+// Übergangs-Stand und ging beim Saisonstart verloren. Dieser Abgleich überträgt solche Änderungen am eigenen
+// Kader in den Übergangs-Stand.
+function neuerSaisonSpieler(p) {
+  return {
+    ...p, alter: (p.alter || 0) + 1, attributeSaisonStart: p.attribute,
+    karriereTore: (p.karriereTore || 0) + (p.tore || 0), karriereVorlagen: (p.karriereVorlagen || 0) + (p.vorlagen || 0),
+    karriereGelb: (p.karriereGelb || 0) + (p.gelb || 0), karriereRot: (p.karriereRot || 0) + (p.rot || 0), karriereSpiele: (p.karriereSpiele || 0) + (p.spiele || 0),
+    gesamtkarriereTore: (p.gesamtkarriereTore || 0) + (p.tore || 0), gesamtkarriereVorlagen: (p.gesamtkarriereVorlagen || 0) + (p.vorlagen || 0),
+    gesamtkarriereGelb: (p.gesamtkarriereGelb || 0) + (p.gelb || 0), gesamtkarriereRot: (p.gesamtkarriereRot || 0) + (p.rot || 0), gesamtkarriereSpiele: (p.gesamtkarriereSpiele || 0) + (p.spiele || 0),
+    tore: 0, ligaTore: 0, vorlagen: 0, gelb: 0, rot: 0, elfmeterTore: 0, eckballTore: 0, freistossTore: 0, verletzungenSaison: 0, spiele: 0, saisonEntwicklungen: 0,
+    form: sommerForm(p.form), frische: 100, geschont: false, startelf: 0, verletzung: null, kartenSperre: false
+  };
+}
+function gleicheManagerKaderAb(snapshotDivs, aktuelleDivs, managerTeam, alteManagerDivId, ausgeliehen, neueSaison) {
+  const snapDivId = findManagerDivision(snapshotDivs, managerTeam);
+  const aktuell = aktuelleDivs[alteManagerDivId]?.squads?.[managerTeam];
+  if (!snapDivId || !aktuell) return { divisions: snapshotDivs, neueLeihen: [] };
+  const snapKader = snapshotDivs[snapDivId].squads[managerTeam] || [];
+  const snapIds = new Set(snapKader.map(p => p.id));
+  const aktuellMap = new Map(aktuell.filter(p => !p.leihspieler).map(p => [p.id, p]));
+  const leihIds = new Set((ausgeliehen || []).map(e => e.spielerId));
+  // Nach dem letzten Spieltag verliehene Spieler gehen ins nächste Jahr: sie bleiben beim Leihverein und
+  // kehren erst am Ende der neuen Saison zurück (sonst wäre die Leihe sofort wieder vorbei)
+  const spaeteLeihIds = new Set((ausgeliehen || []).filter(e => e.nachSaisonende).map(e => e.spielerId));
+  // Aktuelle Leihspieler des Managers samt Leihverein
+  const leihObjekte = new Map();
+  Object.values(aktuelleDivs).forEach(d => Object.entries(d.squads || {}).forEach(([team, k]) => k.forEach(p => {
+    if (p.leihspieler && p.leihVerein === managerTeam && leihIds.has(p.id)) leihObjekte.set(p.id, { p, team });
+  })));
+  let kader = snapKader
+    .filter(p => !spaeteLeihIds.has(p.id) && (aktuellMap.has(p.id) || leihIds.has(p.id)))
+    .map(p => {
+      const a = aktuellMap.get(p.id);
+      return a ? { ...p, vertragBisSaison: a.vertragBisSaison, gehalt: a.gehalt, klauseln: a.klauseln, jugendVertrag: a.jugendVertrag } : p;
+    });
+  // Spieler ab 34 fehlen im Übergangs-Stand, weil sie dort ihre Karriere beendet haben: nicht zurückholen
+  aktuellMap.forEach((a, id) => { if (!snapIds.has(id) && (a.alter || 0) < 34) kader.push(neuerSaisonSpieler(a)); });
+  let divsNeu = snapshotDivs;
+  const neueLeihen = [];
+  leihObjekte.forEach(({ p: l, team }, id) => {
+    const { leihspieler, leihVerein, leihVereinDivId, leihBisSaison, leihRueckkehrVertrag, leihNachSaisonende, ...basis } = l;
+    const mitVertrag = { ...basis, gehalt: leihRueckkehrVertrag?.gehalt ?? l.gehalt, vertragBisSaison: leihRueckkehrVertrag?.vertragBisSaison ?? l.vertragBisSaison };
+    if (spaeteLeihIds.has(id)) {
+      const clubDivId = findeVereinsDivision(divsNeu, team);
+      const club = clubDivId && divsNeu[clubDivId].squads[team];
+      if (club) {
+        const beimClub = { ...neuerSaisonSpieler(mitVertrag), nr: vergibtEindeutigeNummer(club, 1, 99), leihspieler: true, leihVerein: managerTeam, leihVereinDivId: snapDivId, leihBisSaison: neueSaison, leihRueckkehrVertrag: { gehalt: mitVertrag.gehalt, vertragBisSaison: mitVertrag.vertragBisSaison }, beimVereinSeitSaison: neueSaison };
+        divsNeu = { ...divsNeu, [clubDivId]: { ...divsNeu[clubDivId], squads: { ...divsNeu[clubDivId].squads, [team]: [...club.filter(q => q.id !== id), beimClub] } } };
+        neueLeihen.push({ spielerId: id, name: l.name, pos: l.pos, posName: l.posName, verliehenAn: team, verliehenAnDivId: clubDivId, verliehenSaison: neueSaison, ratingBeiVerleih: l.rating });
+        return;
+      }
+    }
+    if (snapIds.has(id)) return;
+    kader.push(neuerSaisonSpieler(mitVertrag));
+  });
+  const unveraendert = kader.length === snapKader.length && kader.every((p, i) => p === snapKader[i]) && divsNeu === snapshotDivs;
+  if (unveraendert) return { divisions: snapshotDivs, neueLeihen };
+  return { divisions: { ...divsNeu, [snapDivId]: { ...divsNeu[snapDivId], squads: { ...divsNeu[snapDivId].squads, [managerTeam]: bereinigeDoppelteNummern(kader) } } }, neueLeihen };
 }
 
 function findManagerDivision(divisions, managerTeam) {
@@ -11508,7 +11587,7 @@ function SortierLeiste({ optionen, aktuell, onWahl }) {
 }
 
 // Abwerbeangebot mit Verkaufsklauseln: Weiterverkaufsbeteiligung und Rückkaufoption senken die sofortige Summe
-function AbwerbeAngebotKarte({ a, onAnnehmen, onAblehnen, eigengewaechs = false }) {
+function AbwerbeAngebotKarte({ a, onAnnehmen, onAblehnen, eigengewaechs = false, spieler = null, marktwert = null }) {
   const [beteiligung, setBeteiligung] = useState(0);
   const [rueckkauf, setRueckkauf] = useState(false);
   const eff = verkaufsKlauselEffekt(a.summe, beteiligung, rueckkauf);
@@ -11516,9 +11595,10 @@ function AbwerbeAngebotKarte({ a, onAnnehmen, onAblehnen, eigengewaechs = false 
   return (
     <div className="border border-amber-400/40 rounded p-2.5" style={{ backgroundColor: "rgba(251,191,36,0.06)" }}>
       <div className="flex items-center justify-between text-xs">
-        <span className="text-amber-300 font-semibold">{a.spielerName}</span>
+        <span className="text-amber-300 font-semibold">{a.spielerName}{spieler && <span className="text-emerald-500 font-normal"> · {spieler.posName || spieler.pos} · {spieler.alter} J · Stärke {spieler.rating}</span>}</span>
         <span className="text-emerald-400">{a.summe.toLocaleString("de-CH")} €</span>
       </div>
+      {spieler && <div className="text-[11px] text-emerald-600 mt-0.5">Vertrag bis {spieler.vertragBisSaison ?? "–"}{marktwert ? ` · Marktwert ${marktwert.toLocaleString("de-CH")} €` : ""}{spieler.akademieProdukt ? " · Eigengewächs" : ""}</div>}
       <div className="text-[11px] text-emerald-500 mt-0.5">{a.team} ({a.ligaName}) macht ein Angebot{a.spielerWillWechseln ? " — der Spieler würde gerne wechseln!" : ""}</div>
       <div className="mt-2 space-y-1.5 text-[11px]">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -11687,7 +11767,7 @@ function TransfermarktView({ division, alleDivisionen, managerTeam, managerDivId
       {eingehendeAngebote && eingehendeAngebote.length > 0 && (
         <div className="mb-3 space-y-2">
           <div className="text-[11px] uppercase tracking-wider text-amber-400/80">Abwerbeangebote für deine Spieler</div>
-          {eingehendeAngebote.map(a => <AbwerbeAngebotKarte key={a.id} a={a} onAnnehmen={onAngebotAnnehmen} onAblehnen={onAngebotAblehnen} eigengewaechs={!!(division?.squads?.[managerTeam] || []).find(q => q.id === a.spielerId)?.akademieProdukt} />)}
+          {eingehendeAngebote.map(a => <AbwerbeAngebotKarte key={a.id} a={a} onAnnehmen={onAngebotAnnehmen} onAblehnen={onAngebotAblehnen} eigengewaechs={!!(division?.squads?.[managerTeam] || []).find(q => q.id === a.spielerId)?.akademieProdukt} spieler={(division?.squads?.[managerTeam] || []).find(q => q.id === a.spielerId) || null} marktwert={(() => { const q = (division?.squads?.[managerTeam] || []).find(x => x.id === a.spielerId); return q ? berechneMarktwert(q, managerDivId) : null; })()} />)}
         </div>
       )}
 
@@ -16011,8 +16091,10 @@ function JugendVertragsPanel({ spieler, managerDivId, onBestaetigen, onAbbrechen
   );
 }
 
-function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen, jugendliga17, jugendDivId17, jugendKader17, onJugendspieler17Hochziehen, jugendliga15, jugendDivId15, jugendKader15, jugendliga13, jugendDivId13, jugendKader13, jugendliga11, jugendKader11, jugendliga9, jugendKader9, jugendKader7, letzterJugendVertrag, onJugendVerleihen }) {
+function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, teamName, squad, onAusbauen, onNamensSponsorAnnehmen, onNamensSponsorAblehnen, jugend, onJugendInvestition, onTalentWaehlen, onTalentAblehnen, saisonLabel, baseRating, datum, markenwert, jugendliga, jugendDivId, jugendKader, onJugendspielerHochziehen, jugendbefoerderungenDieseSaison, maxJugendbefoerderungen, jugendliga17, jugendDivId17, jugendKader17, onJugendspieler17Hochziehen, jugendliga15, jugendDivId15, jugendKader15, jugendliga13, jugendDivId13, jugendKader13, jugendliga11, jugendKader11, jugendliga9, jugendKader9, jugendKader7, letzterJugendVertrag, onJugendVerleihen, alleDivisionen, trophaeen, season }) {
   const [vertragFuer, setVertragFuer] = useState(null);
+  const [absolventenAnsicht, setAbsolventenAnsicht] = useState(null); // "kader" | "gesamt" | null
+  const [absolventDetail, setAbsolventDetail] = useState(null);
   const [betrag, setBetrag] = useState(0);
   const level = akademie?.level || 0;
   const umbau = akademie?.umbau || null;
@@ -16023,7 +16105,26 @@ function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, t
   const markenwertNoetig = naechsteZielLevel >= AKADEMIE_MARKENWERT_AB_STUFE;
   const markenwertReicht = !markenwertNoetig || (markenwert ?? 50) >= AKADEMIE_MARKENWERT_MINDESTWERT;
   const absolventenGesamt = akademie?.absolventenGesamt || 0;
-  const absolventenImKader = (squad || []).filter(p => p.akademieProdukt).length + (jugendKader || []).filter(p => p.akademieProdukt).length;
+  // Absolventen im Kader: Profikader und alle Jugendmannschaften; insgesamt zusätzlich die an andere Vereine
+  // verkauften oder verliehenen Absolventen (liegen noch als Spielerobjekte in der Spielwelt)
+  const absolventenImKaderListe = [
+    ...(squad || []).filter(p => p.akademieProdukt).map(p => ({ p, ort: p.leihspieler ? `Leihgabe von ${p.leihVerein}` : "Profikader" })),
+    ...[["U19", jugendKader], ["U17", jugendKader17], ["U15", jugendKader15], ["U13", jugendKader13], ["U11", jugendKader11], ["U9", jugendKader9], ["U7", jugendKader7]]
+      .flatMap(([label, kader]) => (kader || []).filter(p => p.akademieProdukt).map(p => ({ p, ort: label })))
+  ];
+  const absolventenImKader = absolventenImKaderListe.length;
+  const kaderIdsAbsolventen = new Set(absolventenImKaderListe.map(x => x.p.id));
+  const absolventenAuswaertsListe = [];
+  Object.values(alleDivisionen || {}).forEach(d => Object.entries(d.squads || {}).forEach(([team, k]) => {
+    if (team === teamName) return;
+    k.forEach(q => {
+      if (!q.akademieProdukt || kaderIdsAbsolventen.has(q.id)) return;
+      if (q.ausgebildetVon && q.ausgebildetVon !== teamName) return;
+      absolventenAuswaertsListe.push({ p: q, ort: q.leihspieler && q.leihVerein === teamName ? `verliehen an ${team}` : `jetzt bei ${team}` });
+    });
+  }));
+  const absolventenGesamtListe = [...absolventenImKaderListe, ...absolventenAuswaertsListe].sort((a, b) => b.p.rating - a.p.rating);
+  const absolventenNichtAuffindbar = Math.max(0, absolventenGesamt - absolventenGesamtListe.length);
   const naechsteStufeKosten = level < akademieMaxLevelLiga ? akademieKosten(managerDivId, level + 1) : null;
   const naechsteStufeBautage = level < akademieMaxLevelLiga ? AKADEMIE_BAUTAGE_PRO_LEVEL[level] : null;
   const investitionMax = JUGEND_INVESTITION_MAX[managerDivId] || JUGEND_INVESTITION_MAX.OL;
@@ -16200,15 +16301,37 @@ function JugendAkademieView({ abschnitt, stab, akademie, budget, managerDivId, t
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
+        <button onClick={() => setAbsolventenAnsicht(a => a === "kader" ? null : "kader")} className={`border rounded p-3 text-center ${absolventenAnsicht === "kader" ? "border-amber-400" : "border-emerald-800"}`} style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-2xl font-bold text-emerald-300">{absolventenImKader}</div>
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Absolventen im Kader</div>
-        </div>
-        <div className="border border-emerald-800 rounded p-3 text-center" style={{ backgroundColor: "var(--fm-surface)" }}>
+          <div className="text-[10px] text-sky-400 mt-1">{absolventenAnsicht === "kader" ? "Liste schliessen" : "Antippen für Details"}</div>
+        </button>
+        <button onClick={() => setAbsolventenAnsicht(a => a === "gesamt" ? null : "gesamt")} className={`border rounded p-3 text-center ${absolventenAnsicht === "gesamt" ? "border-amber-400" : "border-emerald-800"}`} style={{ backgroundColor: "var(--fm-surface)" }}>
           <div className="text-2xl font-bold text-amber-400">{absolventenGesamt}</div>
           <div className="text-[10px] text-emerald-600 uppercase tracking-wider mt-0.5">Absolventen insgesamt</div>
-        </div>
+          <div className="text-[10px] text-sky-400 mt-1">{absolventenAnsicht === "gesamt" ? "Liste schliessen" : "Antippen für Details"}</div>
+        </button>
       </div>
+      {absolventenAnsicht && (
+        <div className="border border-emerald-800 rounded p-3 space-y-1" style={{ backgroundColor: "var(--fm-surface)" }}>
+          <div className="text-[11px] uppercase tracking-wider text-emerald-400/80 mb-1">{absolventenAnsicht === "kader" ? "Absolventen im Kader (Profis und Jugend)" : "Alle bekannten Absolventen"}</div>
+          {(absolventenAnsicht === "kader" ? absolventenImKaderListe : absolventenGesamtListe).map(({ p: q, ort }) => (
+            <button key={q.id} onClick={() => setAbsolventDetail(q)} className="w-full flex items-center justify-between gap-2 border border-emerald-900 hover:border-amber-400/60 rounded px-2.5 py-1.5 text-xs text-left">
+              <span className="text-emerald-200">{q.name} <span className="text-emerald-600">· {q.posName || q.pos} · {q.alter} J</span></span>
+              <span className="flex items-center gap-3 shrink-0">
+                <span className="text-emerald-600">{ort}</span>
+                {q.vertragBisSaison != null && !String(ort).startsWith("U") && <span className="text-emerald-700">Vertrag bis {q.vertragBisSaison}</span>}
+                <span className="text-amber-300 font-semibold">Stärke {q.rating}</span>
+              </span>
+            </button>
+          ))}
+          {(absolventenAnsicht === "kader" ? absolventenImKaderListe : absolventenGesamtListe).length === 0 && <div className="text-xs text-emerald-700 text-center py-3">Noch keine Absolventen.</div>}
+          {absolventenAnsicht === "gesamt" && absolventenNichtAuffindbar > 0 && <div className="text-[10px] text-emerald-700 pt-1">{absolventenNichtAuffindbar} weitere Absolvent{absolventenNichtAuffindbar === 1 ? "" : "en"} nicht mehr auffindbar (z.B. Karriereende oder ohne Verein).</div>}
+        </div>
+      )}
+      {absolventDetail && (
+        <SpielerDetailModal spieler={absolventDetail} managerDivId={managerDivId} season={season} trophaeen={trophaeen} teamName={teamName} portrait={spielerPortraitFuer(absolventDetail.id)} onClose={() => setAbsolventDetail(null)} />
+      )}
       </>)}
 
       {abschnitt === "u19" && (<>
@@ -18290,9 +18413,13 @@ function PressekonferenzModal({ pressekonferenz, onAntwort }) {
    ÜBER / IMPRESSUM — Version, Updates, Neuigkeiten, Impressum, Datenschutz, Lizenzen
    ========================================================================= */
 const APP_VERSION = "1.0";
-const APP_BUILD = 189; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
-const APP_BUILD_DATUM = "26.11.2026, 14:30";
+const APP_BUILD = 193; // MUSS mit der Zahl in CACHE_NAME ("fussball-manager-v137") in sw.js übereinstimmen
+const APP_BUILD_DATUM = "26.11.2026, 18:10";
 const APP_NEUIGKEITEN = [
+  { build: 193, titel: "Absolventen anklickbar", text: "In der Jugendabteilung sind «Absolventen im Kader» und «Absolventen insgesamt» jetzt antippbar. Die Liste zeigt jeden Absolventen mit Position, Alter, Stärke, Ort (Profikader, Jugendmannschaft, verliehen oder bei einem anderen Verein) und Vertragsende; ein Tipp auf einen Spieler öffnet seine komplette Detailansicht. «Im Kader» zählt jetzt auch alle Jugendmannschaften (U19 bis U7), «insgesamt» zusätzlich verkaufte und verliehene Absolventen; nicht mehr auffindbare werden als Zahl vermerkt." },
+  { build: 192, titel: "Leihe nach dem letzten Spieltag", text: "Wer nach dem letzten Spieltag verliehen wird (z.B. ein frisch hochgezogener Jugendspieler), bleibt jetzt für die ganze neue Saison beim Leihverein und kehrt erst am Ende der neuen Saison zurück. Vorher wäre die Leihe schon beim Saisonwechsel wieder vorbei gewesen." },
+  { build: 191, titel: "Spieler des Spieltages & Kader nach Saisonende", text: "Spieler des Spieltages: Das Spielergebnis zählt jetzt mit. Spieler der siegreichen Mannschaft bekommen einen Bonus, die der Verlierer einen Abzug (wächst mit der Tordifferenz), und Gegner mit Torbeteiligung bekommen ihren Grundwert. Bei einer Niederlage wird so fast immer ein Gegner gewählt, ausser bei einer herausragenden Einzelleistung. Fehlerbehebung: Was du nach dem letzten Spieltag noch am eigenen Kader machst (Jugendspieler hochziehen, verleihen, Verträge verlängern, Spieler verkaufen), ging beim Saisonstart verloren, weil der Saisonübergang schon am letzten Spieltag berechnet wird. Jetzt wird der Kader vor dem Saisonstart damit abgeglichen. Wer nach dem letzten Spieltag verliehen wird, bleibt für die ganze neue Saison beim Leihverein." },
+  { build: 190, titel: "Abwerbeangebote mit Spielerdaten", text: "Bei Abwerbeangeboten für deine Spieler stehen jetzt Position, Alter, Stärke, Vertragsende und Marktwert direkt auf der Karte (und ob es ein Eigengewächs ist)." },
   { build: 189, titel: "Talent verloren, Leihe, Garantie-Stand", text: "Die Vertragskarte zeigt den Zwischenstand der Einsatzgarantie (Startelfquote gegen Zusage). U19-Spieler mit 18 Jahren zeigen jetzt die Warnung «muss diesen Sommer befördert werden, sonst verlässt er den Verein». Wer nicht rechtzeitig befördert wird, wechselt wie bisher zu einem echten Verein, bleibt aber jetzt als ehemaliges Eigengewächs rückholbar (Vorkaufsrecht); bei Toptalenten (Potenzial ab 85) gibt es Unmut bei den Fans und bei grossen Talenten einen Chronik-Eintrag. Neu im Vertragsangebot beim Hochziehen (U19 und U17): «Stattdessen ein Jahr verleihen». Der Jugendspieler sammelt bei einem schwächer besetzten Verein Spielpraxis und kehrt am Saisonende mit Perspektivvertrag zurück; das zählt als Beförderung." },
   { build: 188, titel: "Heimkehr: Verein, Spieler, Fans", text: "Das Zurückholen ehemaliger Eigengewächse ist jetzt eine Anfrage: Der abgebende Verein und der Spieler müssen zustimmen, die Wahrscheinlichkeiten stehen mit Begründung auf der Karte. Der Verein verkauft im Vorkaufsrecht fast sicher, danach sperrt er sich bei Stammspielern, Topspielern und langen Verträgen. Der Spieler kommt eher, wenn er loyal ist, auf der Bank sitzt oder in eine höhere Liga wechseln würde; wer in einer höheren Liga spielt, lehnt öfter ab. Eine Absage sperrt den nächsten Versuch für 4 Wochen. Bei einer Heimkehr steigt die Fanunterstützung, es gibt einen Chronik-Eintrag und eine neue Pressekonferenz-Frage." },
   { build: 187, titel: "Eigengewächse zurückholen", text: "Verlässt ein selbst ausgebildeter Spieler den Verein, bekommt er jetzt immer einen echten neuen Verein in der Spielwelt und entwickelt sich dort weiter: bei einem Verkauf, einem angenommenen Abwerbeangebot, einer gezogenen Ausstiegsklausel und bei ablösefreiem Vertragsende. Im Transfermarkt unter «Ehemalige Eigengewächse» kannst du ihn zurückholen. Zwei Jahre lang gilt ein Vorkaufsrecht (Marktwert +5 %), danach +15 %; stark entwickelte Spieler (+5 Stärke) kosten +10 %, Stammspieler beim neuen Verein +15 %. Fehlerbehebung: Die Liste ehemaliger Eigengewächse ging bisher bei jedem Saisonwechsel verloren und wird nun mitgeführt, auch wenn der Spieler oder sein Verein die Liga wechselt." },
@@ -22138,7 +22265,8 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
     // Länderspiel-Einsätze für die tatsächlich im Turnier eingesetzten Spieler gutschreiben (siehe
     // vergebeLaenderspielCaps) — einmal pro gespieltem Turnierspiel, über alle Divisionen hinweg, da
     // der Nationalkader von verschiedenen Vereinen/Ligen kommt.
-    let divisionenMitLaenderspielCaps = seasonEndInfo.divisions;
+    const kaderAbgleich = gleicheManagerKaderAb(seasonEndInfo.divisions, divisions, profile.team, managerDivId, meineAusgeliehenenSpieler || [], seasonEndInfo.season + 1);
+    let divisionenMitLaenderspielCaps = kaderAbgleich.divisions;
     let turnierVerletzte = [];
     if (letztesTurnierErgebnis?.spiele?.length && !turnierCapsSchonVergeben) {
       const kaderFuerCaps = ermittleAktuellenNationalkader(seasonEndInfo.divisions, bundestrainerAmt.kaderIds);
@@ -22888,7 +23016,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       sponsorenAbschluesseDieseSaison: 0,
       eingespieltheitStreakMaxDieseSaison: 0,
       spielerberaterVerpflichtungenDieseSaison: 0,
-      meineAusgeliehenenSpieler: [],
+      meineAusgeliehenenSpieler: kaderAbgleich.neueLeihen,
       managerReputation: neueManagerReputation,
       turnierspiel: null,
       jugendliga: jugendErgebnisVorAlterung.jugendliga,
@@ -24165,7 +24293,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const vertrag = jugendVertragFuer(cs, basisSpieler, { laufzeit: Math.min(3, maxVertragsLaufzeit(basisSpieler.alter)), startIdx: 1, foerderIdx: 0, option: true });
       const zielDiv = { ...neueDivisions[ziel.divId], squads: { ...neueDivisions[ziel.divId].squads } };
       zielDiv.squads[ziel.team] = [...zielDiv.squads[ziel.team], {
-        ...basisSpieler, ...vertrag, nr: vergibtEindeutigeNummer(zielDiv.squads[ziel.team], 1, 99), leihspieler: true, leihVerein: profile.team, leihVereinDivId: managerDivId,
+        ...basisSpieler, ...vertrag, nr: vergibtEindeutigeNummer(zielDiv.squads[ziel.team], 1, 99), leihNachSaisonende: cs.divisions[managerDivId].matchday >= cs.divisions[managerDivId].fixtures.length, leihspieler: true, leihVerein: profile.team, leihVereinDivId: managerDivId,
         leihBisSaison: cs.season, leihRueckkehrVertrag: { gehalt: vertrag.gehalt, vertragBisSaison: vertrag.vertragBisSaison }, beimVereinSeitSaison: cs.season
       }];
       neueDivisions[ziel.divId] = zielDiv;
@@ -24178,7 +24306,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         jugendbefoerderungenDieseSaison: (cs.jugendbefoerderungenDieseSaison || 0) + 1,
         budget: cs.budget + entschaedigung,
         saisonFinanzen: { ...sf, ertragTransfers: sf.ertragTransfers + entschaedigung },
-        meineAusgeliehenenSpieler: [...(cs.meineAusgeliehenenSpieler || []), { spielerId: basisSpieler.id, name: basisSpieler.name, pos: basisSpieler.pos, posName: basisSpieler.posName, verliehenAn: ziel.team, verliehenAnDivId: ziel.divId, verliehenSaison: cs.season, ratingBeiVerleih: basisSpieler.rating }],
+        meineAusgeliehenenSpieler: [...(cs.meineAusgeliehenenSpieler || []), { spielerId: basisSpieler.id, name: basisSpieler.name, pos: basisSpieler.pos, posName: basisSpieler.posName, verliehenAn: ziel.team, verliehenAnDivId: ziel.divId, verliehenSaison: cs.season, ratingBeiVerleih: basisSpieler.rating, nachSaisonende: cs.divisions[managerDivId].matchday >= cs.divisions[managerDivId].fixtures.length }],
         letzterJugendVertrag: { name: basisSpieler.name, angenommen: true, text: `${basisSpieler.name} sammelt ein Jahr Spielpraxis bei ${ziel.team} und kehrt am Saisonende mit Perspektivvertrag zurück.` }
       };
     });
@@ -25023,8 +25151,10 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
       const schwaechsteKandidaten = kandidatenSortiert.slice(0, Math.min(3, kandidatenSortiert.length));
       const gewaehlterVerein = schwaechsteKandidaten[Math.floor(Math.random() * schwaechsteKandidaten.length)];
       const zielDiv = { ...neueDivisions[gewaehlterVerein.divId], squads: { ...neueDivisions[gewaehlterVerein.divId].squads } };
+      const saisonVorbeiBeiLeihe = cs.divisions[managerDivId].matchday >= cs.divisions[managerDivId].fixtures.length;
       const spielerBeimLeihverein = {
         ...spieler,
+        leihNachSaisonende: saisonVorbeiBeiLeihe,
         leihspieler: true,
         leihVerein: profile.team,
         leihVereinDivId: managerDivId,
@@ -25045,7 +25175,7 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
         saisonFinanzen: { ...sf, ertragTransfers: sf.ertragTransfers + leihentschaedigung },
         meineAusgeliehenenSpieler: [...(cs.meineAusgeliehenenSpieler || []), {
           spielerId: spieler.id, name: spieler.name, pos: spieler.pos, posName: spieler.posName,
-          verliehenAn: gewaehlterVerein.team, verliehenAnDivId: gewaehlterVerein.divId, verliehenSaison: cs.season, ratingBeiVerleih: spieler.rating
+          verliehenAn: gewaehlterVerein.team, verliehenAnDivId: gewaehlterVerein.divId, verliehenSaison: cs.season, ratingBeiVerleih: spieler.rating, nachSaisonende: saisonVorbeiBeiLeihe
         }]
       };
     });
@@ -26095,6 +26225,9 @@ function GameScreen({ profile, careerState, setCareerState, onProfileUpdate, spe
               onJugendspielerHochziehen={(id, v) => verhandleJugendVertrag(id, "u19", v, onJugendspielerHochziehen)}
               letzterJugendVertrag={careerState.letzterJugendVertrag}
               onJugendVerleihen={onJugendVerleihen}
+              alleDivisionen={divisions}
+              trophaeen={trophaeen}
+              season={season}
               jugendbefoerderungenDieseSaison={jugendbefoerderungenDieseSaison}
               maxJugendbefoerderungen={berechneMaxJugendbefoerderungen(akademie?.level, stab?.jugendtrainer?.rating)}
               jugendliga17={jugendliga17}
